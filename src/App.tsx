@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { glossary } from "./glossary";
 import { Modal } from "./Modal";
 import "./styles/app.css";
 
@@ -11,6 +12,9 @@ export default function App() {
       <button ref={openerRef} onClick={() => setOpen(true)}>
         Open modal
       </button>
+      <button>{glossary.RunDevelopment}</button>
+      <button>{glossary.Settings}</button>
+      <button>{glossary.Save}</button>
 
       <Modal
         open={open}

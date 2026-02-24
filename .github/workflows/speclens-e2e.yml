@@ -29,6 +29,9 @@ jobs:
       - name: Run Speclens
         run: npm run speclens
 
+      - name: Run UI label scan
+        run: npm run lint:labels
+
       - name: Run E2E tests
         run: npm run test:e2e -- --reporter=html
 

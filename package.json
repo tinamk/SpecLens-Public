@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "lint:labels": "node tools/ui-label-scan.mjs",
     "preview": "vite preview",
     "speclens": "node tools/speclens.mjs specs/feature-001-modal-consistency.md",
     "test:e2e": "playwright test",

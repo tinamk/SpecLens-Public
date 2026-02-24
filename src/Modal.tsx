@@ -73,6 +73,7 @@ export function Modal({ open, title, onClose, returnFocusRef, children }: Props)
   return (
     <div
       className="modal-overlay"
+      data-testid="modal-overlay"
       aria-hidden="false"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -80,6 +81,7 @@ export function Modal({ open, title, onClose, returnFocusRef, children }: Props)
     >
       <div
         className="modal-dialog"
+        data-testid="modal-dialog"
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
@@ -88,12 +90,12 @@ export function Modal({ open, title, onClose, returnFocusRef, children }: Props)
       >
         <div className="modal-header">
           <h2 id={titleId} className="modal-title">{title}</h2>
-          <button data-modal onClick={onClose} aria-label="Close modal">
+          <button data-modal data-testid="modal-close" onClick={onClose} aria-label="Close modal">
             X
           </button>
         </div>
 
-        <div className="modal-content">
+        <div className="modal-content" data-testid="modal-content">
           <div data-modal>
             {children}
           </div>

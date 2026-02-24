@@ -5,7 +5,7 @@ test("closes with ESC and returns focus to opener", async ({ page }) => {
   const opener = page.getByRole("button", { name: "Open modal" });
   await opener.click();
 
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByTestId("modal-dialog");
   await expect(dialog).toBeVisible();
 
   await page.keyboard.press("Escape");
@@ -19,11 +19,10 @@ test("closes with overlay click and returns focus to opener", async ({ page }) =
   const opener = page.getByRole("button", { name: "Open modal" });
   await opener.click();
 
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByTestId("modal-dialog");
   await expect(dialog).toBeVisible();
 
-  // Click overlay (assumes overlay covers the viewport)
-  await page.mouse.click(10, 10);
+  await page.getByTestId("modal-overlay").click({ position: { x: 5, y: 5 } });
 
   await expect(dialog).toBeHidden();
   await expect(opener).toBeFocused();
@@ -33,13 +32,12 @@ test("focus is trapped inside modal", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Open modal" }).click();
 
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByTestId("modal-dialog");
   await expect(dialog).toBeVisible();
 
-  // After many Tabs, focus should still stay inside the modal
   for (let i = 0; i < 12; i++) {
     await page.keyboard.press("Tab");
-    const active = await page.evaluate(() => document.activeElement?.outerHTML ?? "");
-    expect(active).toContain("data-modal");
+    const focusedInsideDialog = await dialog.evaluate((el) => el.contains(document.activeElement));
+    expect(focusedInsideDialog).toBe(true);
   }
 });
