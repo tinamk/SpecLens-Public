@@ -1,0 +1,21 @@
+{
+  "specPath": "specs/feature-001-modal-consistency.md",
+  "tasksOutput": "tools/tasks.json",
+  "scan": {
+    "command": "node tools/ui-label-scan.mjs src/App.tsx"
+  },
+  "test": {
+    "command": "npm run test:e2e",
+    "artifacts": [
+      "playwright-report",
+      "test-results"
+    ]
+  },
+  "report": {
+    "reportDir": "reports",
+    "stateFile": "reports/speclens-state.json",
+    "markdown": "reports/speclens-report.md",
+    "html": "reports/speclens-report.html",
+    "artifactsDir": "reports/artifacts"
+  }
+}

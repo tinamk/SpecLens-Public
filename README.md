@@ -114,8 +114,102 @@ Defined in `package.json`:
 - `npm run dev` - starts Vite
 - `npm run build` - builds the project
 - `npm run speclens` - generates `tools/tasks.json` from spec
+- `npm run speclens:init` - initializes speclens files/config/template
+- `npm run speclens:lint` - validates spec sections + acceptance checks
+- `npm run speclens:extract` - extracts acceptance checks into `tools/tasks.json`
+- `npm run speclens:scan` - runs configured label scan command
+- `npm run speclens:test` - runs configured tests + collects artifacts
+- `npm run speclens:report` - generates static dashboard files
+- `npm run speclens:report:open` - generates dashboard and opens `reports/latest.html`
+- `npm run labels:inventory` - generates UI text inventory reports
+- `npm run labels:lint` - runs scoped UI label enforcement rules
+- `npm run lint:labels` - runs label scanner with default scope
 - `npm run test:e2e` - runs Playwright E2E
 - `npm run test:e2e:ui` - runs Playwright in UI mode
+
+## UI Label Tooling
+
+### Inventory (report-only)
+
+The inventory script helps you see existing UI wording/casing so you do not need to guess.
+
+- Script: `tools/ui-text-inventory.mjs`
+- Scan target: source files (`.ts`, `.tsx`, `.svelte`)
+- Outputs:
+  - `reports/ui-text-inventory.json`
+  - `reports/ui-text-inventory.md`
+- Report includes:
+  - text found
+  - file path and line number
+  - occurrence count (duplicates)
+
+Run:
+
+```bash
+npm run labels:inventory
+```
+
+### Rules scanner / lint (enforcement)
+
+The rules scanner enforces a small, high-value subset of glossary rules and fails on violations.
+
+- Script: `tools/ui-label-scan.mjs`
+- Enforced rules:
+  - forbid `Dev`, `dev`, `development`
+  - forbid standalone `Run` (must be `Run <target>`)
+  - enforce glossary term casing (for terms defined in `src/glossary.ts`)
+- Scope:
+  - start small to avoid many failures on day 1
+  - currently scoped via script to `src/App.tsx`
+  - you can pass another folder/file scope: `node tools/ui-label-scan.mjs <path>`
+
+Run:
+
+```bash
+npm run labels:lint
+```
+
+The scanner also writes JSON output for dashboard/report usage:
+
+- `reports/labels-violations.json`
+
+## SpecLens Dashboard (static HTML)
+
+Generate a file-based dashboard (works with `file://`) that summarizes run status, specs/tasks, violations, artifacts, and history.
+
+Generate:
+
+```bash
+npm run speclens:report
+```
+
+Generate and open:
+
+```bash
+npm run speclens:report:open
+```
+
+Output structure:
+
+- `reports/runs/<runId>/dashboard.html`
+- `reports/runs/<runId>/dashboard.json`
+- `reports/latest.html`
+- `reports/latest.json`
+- `reports/index.html`
+
+Dashboard data sources:
+
+- `speclens.config.json`
+- `reports/speclens-state.json`
+- `tools/tasks.json`
+- `reports/labels-violations.json`
+- Playwright/test artifacts if present (`playwright-report`, `test-results`, `reports/artifacts/*`)
+
+## File Map
+
+For a maintained repository map, see:
+
+- `docs/FILE_MAP.md`
 
 ## Verified status
 

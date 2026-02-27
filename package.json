@@ -3,13 +3,25 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "speclens": "./tools/speclens-cli.mjs"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "labels:inventory": "node tools/ui-text-inventory.mjs",
+    "labels:lint": "node tools/ui-label-scan.mjs src/App.tsx",
     "lint:labels": "node tools/ui-label-scan.mjs",
     "preview": "vite preview",
-    "speclens": "node tools/speclens.mjs specs/feature-001-modal-consistency.md",
+    "speclens": "node tools/speclens-cli.mjs",
+    "speclens:init": "node tools/speclens-cli.mjs init",
+    "speclens:lint": "node tools/speclens-cli.mjs lint",
+    "speclens:extract": "node tools/speclens-cli.mjs extract",
+    "speclens:scan": "node tools/speclens-cli.mjs scan",
+    "speclens:test": "node tools/speclens-cli.mjs test",
+    "speclens:report": "node tools/speclens-cli.mjs report --html",
+    "speclens:report:open": "node tools/speclens-cli.mjs report --html --open",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
