@@ -17,5 +17,14 @@
     "markdown": "reports/speclens-report.md",
     "html": "reports/speclens-report.html",
     "artifactsDir": "reports/artifacts"
+  },
+  "discover": {
+    "outputJson": "reports/component-inventory.json",
+    "outputMd": "reports/component-inventory.md"
+  },
+  "analyze": {
+    "discoverPath": "C:/Users/TinaMortensenKjær/client-frontend",
+    "visualUrl": "http://localhost:5173",
+    "visualUsername": "admin"
   }
 }

@@ -1,225 +1,235 @@
-﻿# SpecLens Starter (MVP)
+# SpecLens
 
-Minimal spec-driven development setup with pipeline:
-
-`spec -> tasks.json -> e2e tests -> minimal code that passes tests`
+AI-powered spec-driven development toolkit. Scans codebases, discovers UI components, checks naming and visual consistency, runs E2E tests, and generates reports — all driven from human-readable specs.
 
 ## Stack
 
-- Frontend: React + TypeScript + Vite
+- Frontend demo: React + TypeScript + Vite
 - E2E: Playwright (`@playwright/test`)
-- No extra libraries were added beyond Playwright for the test flow.
+- AI: Anthropic Claude (`@anthropic-ai/sdk`) — used for component categorization, naming analysis, and visual inspection
+- CLI: Node.js ESM scripts in `tools/`
 
-## Architecture (Short)
+---
 
-```text
-specs/feature-001-modal-consistency.md
-                |
-                v
-      tools/speclens.mjs
-                |
-                v
-         tools/tasks.json
-                |
-                v
-      tests/e2e/modal.spec.ts
-                |
-                v
-   src/App.tsx + src/Modal.tsx
-                |
-                v
-          Vite app (:5173)
-
-backend/
-  └─ src/   (reserved for future backend services)
-```
-
-The workflow is intentionally minimal: the spec drives extracted tasks, tasks are validated through E2E behavior, and frontend code is kept small until tests pass.
-
-## What is built so far
-
-### 1) Spec
-
-- `specs/feature-001-modal-consistency.md`
-- Contains goal, scope, constraints, acceptance checks, and scenarios for modal consistency.
-
-### 2) Simple spec parser (SpecLens tool)
-
-- `tools/speclens.mjs`
-- Reads acceptance checks from the spec and generates:
-  - `tools/tasks.json`
-
-Run:
+## Prerequisites
 
 ```bash
-npm run speclens
+npm install
+npx playwright install chromium   # needed for visual and E2E commands
 ```
 
-### 3) E2E setup
-
-- `playwright.config.ts` with `baseURL` set to `http://localhost:5173`
-- `tests/e2e/modal.spec.ts` covers:
-  - Close with `Escape` + focus return
-  - Close with overlay click + focus return
-  - Focus trap when tabbing
-
-Run:
+Set your Anthropic API key (required for `discover`, `consistency`, and `visual` commands):
 
 ```bash
-npm run test:e2e
+export ANTHROPIC_API_KEY=sk-ant-...
+# or if your project uses CLAUDE_API_KEY:
+export CLAUDE_API_KEY=sk-ant-...
 ```
 
-UI mode:
+---
 
-```bash
-npm run test:e2e:ui
+## Pipeline Overview
+
+```
+specs/
+  └── feature-XXX.md           ← human-written spec (source of truth)
+        │
+        ├── speclens lint       ← validate spec structure
+        ├── speclens extract    ← parse acceptance checks → tasks.json
+        ├── speclens scan       ← enforce UI label rules
+        ├── speclens test       ← run E2E tests, collect artifacts
+        └── speclens report     ← generate HTML dashboard
+
+External codebase (e.g. client-frontend/):
+        ├── speclens discover     ← Claude scans Svelte components, categorises by type
+        ├── speclens consistency  ← Claude finds naming & CSS inconsistencies
+        └── speclens visual       ← Playwright screenshots + Claude vision finds visual issues
 ```
 
-### 4) Minimal implementation that passes tests
+---
 
-- `src/Modal.tsx`
-  - Reusable modal
-  - `role="dialog"` and `aria-modal="true"`
-  - `aria-labelledby` linked to modal title
-  - Closes with `X`, overlay click, and `Escape`
-  - Focus trap inside modal
-  - Focus returns to opener button on close
-- `src/App.tsx`
-  - Example page with `Open modal` button
-  - Opens modal and passes `returnFocusRef`
+## Commands
 
-### 5) Styling separated from component code
+### Core pipeline (spec-driven)
 
-Inline styles were moved to dedicated CSS files:
+| Command | Description |
+|---|---|
+| `npm run speclens:init` | Create `specs/`, `tools/`, `reports/` folders and config |
+| `npm run speclens:lint` | Validate spec format (required sections + acceptance checks) |
+| `npm run speclens:extract` | Parse acceptance checks from spec → `tools/tasks.json` |
+| `npm run speclens:scan` | Run UI label consistency rules against source files |
+| `npm run speclens:test` | Run configured E2E tests and collect Playwright artifacts |
+| `npm run speclens:report` | Generate static HTML dashboard from all step results |
+| `npm run speclens:report:open` | Generate dashboard and open it in browser |
 
-- `src/styles/app.css`
-- `src/styles/modal.css`
+### AI-powered analysis (external codebase)
 
-Imported in components:
+| Command | Description |
+|---|---|
+| `npm run speclens:discover` | Scan a Svelte codebase with Claude — finds reusable components, categorises by type (Button, Modal, Dropdown, Pagination, etc.), detects import frequency and navigation patterns |
+| `npm run speclens:consistency` | Reads the component inventory and uses Claude to find prop naming, CSS class naming, and label text inconsistencies |
+| `npm run speclens:visual` | Launches Playwright, screenshots all pages + interactive states (dropdowns, filters, pagination), uses Claude vision to find visual inconsistencies grouped by app section |
 
-- `src/App.tsx`
-- `src/Modal.tsx`
+### Dev utilities
 
-### 6) Frontend/backend separation in repo
+| Command | Description |
+|---|---|
+| `npm run dev` | Start Vite dev server for demo app |
+| `npm run build` | TypeScript check + Vite build |
+| `npm run test:e2e` | Run Playwright E2E tests headless |
+| `npm run test:e2e:ui` | Run Playwright in interactive UI mode |
+| `npm run labels:inventory` | Generate UI text inventory report |
+| `npm run labels:lint` | Run label scanner rules |
 
-- Frontend code is in `src/`
-- Backend starting structure added in:
-  - `backend/README.md`
-  - `backend/src/.gitkeep`
+---
 
-## Scripts
+## Quick Reference — All Commands (with paths)
 
-Defined in `package.json`:
-
-- `npm run dev` - starts Vite
-- `npm run build` - builds the project
-- `npm run speclens` - generates `tools/tasks.json` from spec
-- `npm run speclens:init` - initializes speclens files/config/template
-- `npm run speclens:lint` - validates spec sections + acceptance checks
-- `npm run speclens:extract` - extracts acceptance checks into `tools/tasks.json`
-- `npm run speclens:scan` - runs configured label scan command
-- `npm run speclens:test` - runs configured tests + collects artifacts
-- `npm run speclens:report` - generates static dashboard files
-- `npm run speclens:report:open` - generates dashboard and opens `reports/latest.html`
-- `npm run labels:inventory` - generates UI text inventory reports
-- `npm run labels:lint` - runs scoped UI label enforcement rules
-- `npm run lint:labels` - runs label scanner with default scope
-- `npm run test:e2e` - runs Playwright E2E
-- `npm run test:e2e:ui` - runs Playwright in UI mode
-
-## UI Label Tooling
-
-### Inventory (report-only)
-
-The inventory script helps you see existing UI wording/casing so you do not need to guess.
-
-- Script: `tools/ui-text-inventory.mjs`
-- Scan target: source files (`.ts`, `.tsx`, `.svelte`)
-- Outputs:
-  - `reports/ui-text-inventory.json`
-  - `reports/ui-text-inventory.md`
-- Report includes:
-  - text found
-  - file path and line number
-  - occurrence count (duplicates)
-
-Run:
+Copy-paste ready commands for this project. Start the client-frontend dev server first for `visual` and `analyze`.
 
 ```bash
-npm run labels:inventory
+# ── ONE COMMAND — runs everything and opens results ───────────────────────────
+
+# First run (saves path/url/username to config, password is never saved):
+npm run speclens:analyze -- --path C:/Users/TinaMortensenKjær/client-frontend --url http://localhost:5173 --username admin --password <yourpass>
+
+# All subsequent runs (path/url/username already saved in speclens.config.json):
+npm run speclens:analyze -- --password <yourpass>
+# or with env var so you don't type the password at all:
+# set client_PASSWORD=<yourpass> && npm run speclens:analyze
+
+# With HTTP server (screenshots load as images in the dashboard):
+npm run speclens:analyze -- --password <yourpass> --serve
+
+# ── Individual AI steps (if you only want to re-run one part) ────────────────
+
+# 1. Scan Svelte components and categorise by type
+npm run speclens:discover -- --path C:/Users/TinaMortensenKjær/client-frontend
+
+# 2. Check naming consistency across discovered components
+npm run speclens:consistency
+
+# 3. Screenshot all pages and find visual inconsistencies
+npm run speclens:visual -- --url http://localhost:5173 --username admin --password <yourpass>
+
+# 4. Open the AI results dashboard in the browser
+npm run speclens:results
+
+# 4b. Serve the dashboard via HTTP (needed if screenshots don't load)
+npm run speclens:results:serve
+
+# ── Core spec pipeline (demo app) ────────────────────────────────────────────
+
+npm run speclens:lint          # validate spec format
+npm run speclens:extract       # parse acceptance checks → tools/tasks.json
+npm run speclens:scan          # enforce UI label rules
+npm run speclens:test          # run E2E tests
+npm run speclens:report:open   # generate + open HTML dashboard
+
+# ── Dev utilities ─────────────────────────────────────────────────────────────
+
+npm run dev                    # start Vite dev server for demo app
+npm run test:e2e               # run Playwright tests headless
+npm run test:e2e:ui            # run Playwright in interactive UI mode
+npm run labels:inventory       # generate UI text inventory report
 ```
 
-### Rules scanner / lint (enforcement)
+> **API key required** for `discover`, `consistency`, and `visual`:
+> ```bash
+> export ANTHROPIC_API_KEY=sk-ant-...
+> ```
 
-The rules scanner enforces a small, high-value subset of glossary rules and fails on violations.
+---
 
-- Script: `tools/ui-label-scan.mjs`
-- Enforced rules:
-  - forbid `Dev`, `dev`, `development`
-  - forbid standalone `Run` (must be `Run <target>`)
-  - enforce glossary term casing (for terms defined in `src/glossary.ts`)
-- Scope:
-  - start small to avoid many failures on day 1
-  - currently scoped via script to `src/App.tsx`
-  - you can pass another folder/file scope: `node tools/ui-label-scan.mjs <path>`
+## Usage Examples
 
-Run:
+### Run the full AI pipeline on client-frontend
 
 ```bash
-npm run labels:lint
+# Step 1 — start the dev server (in a separate terminal)
+cd C:/Users/TinaMortensenKjær/client-frontend && npm run dev
+
+# Step 2 — back in SpecLens:
+npm run speclens:discover -- --path C:/Users/TinaMortensenKjær/client-frontend
+npm run speclens:consistency
+npm run speclens:visual -- --url http://localhost:5173 --username admin --password <yourpass>
+npm run speclens:results:serve
 ```
 
-The scanner also writes JSON output for dashboard/report usage:
-
-- `reports/labels-violations.json`
-
-## SpecLens Dashboard (static HTML)
-
-Generate a file-based dashboard (works with `file://`) that summarizes run status, specs/tasks, violations, artifacts, and history.
-
-Generate:
+### Run the full spec pipeline on the demo app
 
 ```bash
-npm run speclens:report
-```
-
-Generate and open:
-
-```bash
+npm run speclens:lint
+npm run speclens:extract
+npm run speclens:scan
+npm run speclens:test
 npm run speclens:report:open
 ```
 
-Output structure:
+### Visual inspection only
 
-- `reports/runs/<runId>/dashboard.html`
-- `reports/runs/<runId>/dashboard.json`
-- `reports/latest.html`
-- `reports/latest.json`
-- `reports/index.html`
+```bash
+npm run speclens:visual -- --url http://localhost:5173 --username admin --password <yourpass>
+```
 
-Dashboard data sources:
+Visits **client-defence** (5 pages), **client-monitoring** (2 pages), and **client-quality** (1 page). On each page it interacts with dropdowns, time filters, filter panels, sidebar menus, and pagination before taking screenshots. Claude vision then compares them and reports inconsistencies by severity.
 
-- `speclens.config.json`
-- `reports/speclens-state.json`
-- `tools/tasks.json`
-- `reports/labels-violations.json`
-- Playwright/test artifacts if present (`playwright-report`, `test-results`, `reports/artifacts/*`)
+---
+
+## Configuration
+
+`speclens.config.json` controls paths for the core pipeline:
+
+```json
+{
+  "specPath": "specs/feature-001-modal-consistency.md",
+  "tasksOutput": "tools/tasks.json",
+  "scan": { "command": "node tools/ui-label-scan.mjs src/App.tsx" },
+  "test": { "command": "npm run test:e2e", "artifacts": ["playwright-report", "test-results"] },
+  "report": {
+    "reportDir": "reports",
+    "stateFile": "reports/speclens-state.json",
+    "html": "reports/speclens-report.html"
+  },
+  "discover": {
+    "outputJson": "reports/component-inventory.json",
+    "outputMd": "reports/component-inventory.md"
+  }
+}
+```
+
+---
+
+## Reports
+
+All reports are written to `reports/`:
+
+| File | Generated by | Description |
+|---|---|---|
+| `reports/component-inventory.md` | `discover` | Components grouped by type with import counts, props, interactive/navigates flags |
+| `reports/component-inventory.json` | `discover` | Machine-readable component inventory |
+| `reports/consistency-report.md` | `consistency` | Naming inconsistencies by severity — prop names, CSS classes, label text |
+| `reports/consistency-report.json` | `consistency` | Machine-readable consistency findings |
+| `reports/visual/visual-report.md` | `visual` | Visual inconsistencies by section with severity badges |
+| `reports/visual/visual-report.json` | `visual` | Machine-readable visual findings |
+| `reports/visual/screenshots/` | `visual` | All screenshots taken during inspection |
+| `reports/labels-violations.json` | `scan` | UI label rule violations |
+| `reports/speclens-state.json` | all steps | Step statuses and timestamps for dashboard |
+| `reports/runs/<id>/dashboard.html` | `report` | Per-run static dashboard |
+| `reports/latest.html` | `report` | Latest dashboard (copy) |
+
+---
 
 ## File Map
 
-For a maintained repository map, see:
+See [docs/FILE_MAP.md](docs/FILE_MAP.md) for a description of every file in the repository.
 
-- `docs/FILE_MAP.md`
+---
 
-## Verified status
+## Acceptance checks status (Feature 001 — Modal)
 
-- `npm run speclens`: generates `tasks.json` with 5 tasks.
-- `npm run test:e2e`: all tests pass (3/3).
-
-## Acceptance checks status (Feature 001)
-
-1. Modal opens via `Open modal` button - Completed
-2. Modal closes via `X`, overlay click, and `ESC` - Completed
-3. Focus stays inside modal while tabbing - Completed
-4. Focus returns to `Open modal` on close - Completed
-5. E2E covers (2)-(4) - Completed
+1. Modal opens via `Open modal` button — Completed
+2. Modal closes via `X`, overlay click, and `ESC` — Completed
+3. Focus stays inside modal while tabbing — Completed
+4. Focus returns to `Open modal` on close — Completed
+5. E2E covers (2)–(4) — Completed

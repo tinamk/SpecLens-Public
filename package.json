@@ -22,6 +22,12 @@
     "speclens:test": "node tools/speclens-cli.mjs test",
     "speclens:report": "node tools/speclens-cli.mjs report --html",
     "speclens:report:open": "node tools/speclens-cli.mjs report --html --open",
+    "speclens:analyze": "node tools/speclens-cli.mjs analyze",
+    "speclens:discover": "node tools/speclens-cli.mjs discover",
+    "speclens:consistency": "node tools/speclens-cli.mjs consistency",
+    "speclens:visual": "node tools/speclens-cli.mjs visual",
+    "speclens:results": "node tools/speclens-cli.mjs results",
+    "speclens:results:serve": "node tools/speclens-cli.mjs results --serve",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
@@ -30,6 +36,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.38.0",
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.58.2",
     "@types/node": "^24.10.1",
