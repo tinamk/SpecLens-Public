@@ -56,14 +56,18 @@ every violation grouped by spec and rule.
 ### R3 — File selection phase strategy
 1. For `component-standards` spec: run two phases — `"filenames"` (all component files) then `"script"` (script blocks)
 2. For `design-system` spec: run one phase — `"style"` (style blocks from all components + all `.scss` files under `src/style/`)
-3. For `client-{section}` specs: run one phase — `"full"` (all files under `src/routes/{routeSlug}/`)
-4. Route slug mapping: `client-defence` → `defense`, `client-metadata` → `metadata`,
+3. For `client-accessibility` spec: run two phases —
+   a. `"style"` (style blocks from all components + all route files) — for outline/focus CSS rules
+   b. `"full"` (all components + all route files + `src/app.html`) — for all other WCAG rules
+   The `client-accessibility` spec is processed before the general `client-*` rule and returns early.
+4. For other `client-{section}` specs: run one phase — `"full"` (all files under `src/routes/{routeSlug}/`)
+5. Route slug mapping: `client-defence` → `defense`, `client-metadata` → `metadata`,
    `client-monitoring` → `monitoring`, `client-quality` → `quality`
-5. Specs not matching any of the above patterns must produce zero phases (skipped with a log message)
-6. Phase `"filenames"` sends only the relative file path list — no file content
-7. Phase `"style"` extracts the `<style>...</style>` block from each `.svelte` file; files without a style block are skipped
-8. Phase `"script"` extracts the `<script>...</script>` block; files without a script block are skipped
-9. Phase `"full"` sends the full file content (truncated to `MAX_BLOCK_CHARS` = 2500 chars per file)
+6. Specs not matching any of the above patterns must produce zero phases (skipped with a log message)
+7. Phase `"filenames"` sends only the relative file path list — no file content
+8. Phase `"style"` extracts the `<style>...</style>` block from each `.svelte` file; files without a style block are skipped
+9. Phase `"script"` extracts the `<script>...</script>` block; files without a script block are skipped
+10. Phase `"full"` sends the full file content (truncated to `MAX_BLOCK_CHARS` = 2500 chars per file)
 
 ### R4 — Batch processing
 1. Files within each phase must be split into batches of at most `BATCH_SIZE` (6) files
@@ -147,6 +151,13 @@ Given the client-frontend source is at the `targetPath` in the inventory
 When the developer runs `node tools/spec-checker.mjs --specs client-defence`
 Then only the `client-defence.md` spec is processed, source files from `src/routes/defense/` are batched,
 Claude finds violations, and the report is written with violation counts per rule
+
+### Scenario D — Cross-section accessibility spec
+Given `client-accessibility.md` is in the spec filter
+When the tool runs `getCheckPhases()` for it
+Then it does NOT look for `src/routes/accessibility/` (which does not exist)
+Instead it runs a `"style"` phase over all components and routes, then a `"full"` phase over all
+components, routes, and `src/app.html`, ensuring WCAG violations are found across the whole codebase
 
 ### Scenario B — Claude returns prose before JSON
 Given Claude's response contains the text `[Resource] not found` before the actual JSON array
