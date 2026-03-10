@@ -83,6 +83,9 @@ SpecLens applies spec-driven development to itself. Every tool has a spec. **Whe
 | `specs/speclens/speclens-spec-checker.md` | spec-checker.mjs: spec parsing, phase strategy (filenames/style/script/full), batch processing, Claude prompt construction, `extractJsonArray()`, output format |
 | `specs/speclens/speclens-results-viewer.md` | results-viewer.mjs: HTML dashboard generation, tab structure, issue cards, zoom overlay, code block rendering, serve mode on port 4888 |
 | `specs/speclens/speclens-spec-generator.md` | spec-generator.mjs: prerequisite loading, static CSS/ARIA analysis, digest construction, single Claude call, output format |
+| `specs/speclens/speclens-visual-filter.md` | visual-filter.mjs: input loading, finding extraction, single Claude classification call, filtered report output, dashboard integration |
+| `specs/speclens/speclens-chaos-advisor.md` | chaos-advisor.mjs: input digests, spec gap detection (Call 1), change proposal generation (Call 2), CP format, read-only guarantee |
+| `specs/speclens/speclens-interaction-tester.md` | interaction-tester.mjs: element discovery selectors, interaction dispatch, modal flow, state reset, Claude Vision batching, output format |
 
 ---
 
@@ -100,7 +103,7 @@ The SpecLens CLI and all analysis tools. Each tool's behaviour is specified in `
 
 | File | Description |
 |---|---|
-| `tools/speclens-cli.mjs` | **Main CLI entry point.** Routes all `speclens <command>` calls, loads `.env`, manages config and step state, archives runs. Commands: `init`, `lint`, `extract`, `scan`, `test`, `report`, `analyze`, `analyze:all`, `analyze:defence`, `analyze:monitoring`, `analyze:quality`, `analyze:metadata`, `discover`, `spec-check`, `consistency`, `spec-generate`, `visual`, `results` |
+| `tools/speclens-cli.mjs` | **Main CLI entry point.** Routes all `speclens <command>` calls, loads `.env`, manages config and step state, archives runs. Commands: `init`, `lint`, `extract`, `scan`, `test`, `report`, `analyze`, `analyze:all`, `analyze:defence`, `analyze:monitoring`, `analyze:quality`, `analyze:metadata`, `discover`, `spec-check`, `consistency`, `spec-generate`, `visual`, `visual-filter`, `chaos`, `interaction`, `results` |
 | `tools/spec-checker.mjs` | **AI spec compliance checker.** Reads `specs/*.md`, extracts rules, sends source code batches to Claude, collects violations, writes `reports/spec-check-report.*`. Uses `extractJsonArray()` for robust response parsing. |
 | `tools/visual-inspector.mjs` | **AI visual inspector.** Launches Playwright, navigates client-frontend sections, interacts with dropdowns/filters/pagination, sends screenshots to Claude Vision, takes zoom screenshots of each finding, maps findings to source code via 4-level search, writes `reports/visual/`. |
 | `tools/results-viewer.mjs` | **HTML dashboard generator.** Reads all report JSON files, generates a self-contained `reports/ai-results.html` with tabbed sections, issue cards, zoom overlay, code block viewer, and optional HTTP serve mode on port 4888. |
@@ -111,6 +114,9 @@ The SpecLens CLI and all analysis tools. Each tool's behaviour is specified in `
 | `tools/component-scanner.mjs` | **AI component discovery.** Walks a Svelte codebase, builds import graph, sends components to Claude for categorization, outputs `reports/component-inventory.*` |
 | `tools/consistency-checker.mjs` | **AI consistency analysis.** Reads component inventory, uses Claude to find prop naming, CSS class, and label text inconsistencies, outputs `reports/consistency-report.*` |
 | `tools/spec-generator.mjs` | **AI spec generator (Phase 2).** Reads component inventory + consistency report, performs static CSS/ARIA analysis, calls Claude once to generate a draft UX spec in SpecLens format. Writes `specs/client/generated-{section}-spec.md` and `reports/spec-generation-report.*` |
+| `tools/visual-filter.mjs` | **AI visual finding filter (Phase 3).** Reads `reports/visual/visual-report.json` + all spec files, calls Claude once to classify each finding as intentional (spec-documented) or genuine. Writes `reports/visual/visual-report-filtered.json` (loaded by dashboard in preference to raw report) and `reports/visual/visual-filter-report.md`. |
+| `tools/chaos-advisor.mjs` | **AI Chaos Advisor (Phase 4).** Reads all phase outputs (spec violations, visual findings, consistency issues) + spec files. Makes two Claude calls: (1) spec gap detection → SG-NNN entries with proposed rule text, (2) change proposal generation → CP-NNN entries with type/risk/evidence/fix. Writes `reports/chaos-advisor-report.*`. Read-only — never modifies any file. |
+| `tools/interaction-tester.mjs` | **AI Interaction Tester (Phase 5).** Playwright page-discovery of all visible interactive elements (buttons, links, inputs, dropdowns). Performs click/fill/select interactions, captures before+after screenshots, handles multi-step modal flows. Sends pairs to Claude Vision for visual-correctness judgment. Writes `reports/interaction-report.*` and `reports/interaction/screenshots/`. |
 | `tools/tasks.json` | Generated task list from `speclens extract` |
 | `tools/report-schema.md` | Dashboard JSON schema reference |
 
@@ -140,6 +146,8 @@ All generated output from SpecLens commands. The main entry point for reviewing 
 |---|---|
 | `reports/visual/visual-report.json` | All visual findings with section grouping, zoom paths, code locations, severity counts |
 | `reports/visual/visual-report.md` | Human-readable visual report with cross-section issues and per-section findings |
+| `reports/visual/visual-report-filtered.json` | Post-filtered report (intentional findings removed from `issues`, kept in `intentionalIssues`) — preferred by dashboard over raw report |
+| `reports/visual/visual-filter-report.md` | Classification summary: total / genuine / intentional counts, table of intentional findings with spec reasons |
 | `reports/visual/screenshots/client-defence/` | Full-page screenshots from the defence section |
 | `reports/visual/screenshots/client-monitoring/` | Full-page screenshots from the monitoring section |
 | `reports/visual/screenshots/client-quality/` | Full-page screenshots from the quality section |

@@ -105,6 +105,9 @@ Run spec-check + visual for one section at a time. Each section automatically in
 | `npm run speclens:discover -- --path <dir>` | Scan Svelte components with Claude, build inventory |
 | `npm run speclens:consistency` | Find naming inconsistencies across components |
 | `npm run speclens:spec-generate -- --section <s>` | Generate a draft UX spec from inventory + CSS/ARIA analysis |
+| `npm run speclens:visual-filter` | Post-process visual findings — classify each as intentional (spec-documented) or genuine via Claude |
+| `npm run speclens:chaos` | Phase 4 — synthesise all findings into Spec Gaps + structured Change Proposals (CP-001…) |
+| `npm run speclens:interaction -- --section client-defence` | Phase 5 — exploratory interaction testing: discover all interactive elements, click/fill/select each, judge before/after screenshots with Claude Vision |
 
 ### Core spec pipeline (demo app)
 
