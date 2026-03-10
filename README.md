@@ -109,6 +109,13 @@ Run spec-check + visual for one section at a time. Each section automatically in
 | `npm run speclens:chaos` | Phase 4 — synthesise all findings into Spec Gaps + structured Change Proposals (CP-001…) |
 | `npm run speclens:interaction -- --section client-defence` | Phase 5 — exploratory interaction testing: discover all interactive elements, click/fill/select each, judge before/after screenshots with Claude Vision |
 
+> **Note — running Phase 5 on a live system:**
+> By default the interaction tester fills in forms and clicks submit/save/confirm buttons.
+> This is safe on a local test environment, but if you ever point it at a live system with real data,
+> you should disable form submission first. To do that, open `tools/interaction-tester.mjs` and
+> remove (or comment out) the **"Click submit/save/confirm button if present inside the modal"**
+> block inside `handleModalFlow` — it is clearly marked with that comment. No other changes are needed.
+
 ### Core spec pipeline (demo app)
 
 | Command | Description |

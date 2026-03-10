@@ -15,7 +15,7 @@ submits forms or applies changes.
 - Form-based login using credentials from CLI flags or environment variables
 - Page-discovery: finding all visible interactive elements via Playwright DOM queries
 - Interaction types: click (buttons, links, role-button, checkboxes), fill (text/email inputs), select (dropdowns)
-- Multi-step modal flows: after a click opens a modal, fill visible inputs and take a "modal-filled" screenshot
+- Multi-step modal flows: after a click opens a modal, fill visible inputs, click submit/save/confirm if present, and take a "modal-submitted" screenshot
 - Before+after screenshot pairs for every interaction
 - Cross-section link detection and filtering (links leaving the tested section are skipped)
 - Claude Vision analysis of before+after pairs in batches of 3 (6 images per call)
@@ -23,7 +23,6 @@ submits forms or applies changes.
 - Dashboard integration: findings displayed as cards with before/after screenshots in the "🎮 Interaction Tests" tab
 
 ## Scope (OUT)
-- Submitting forms or clicking save/delete buttons (to avoid mutating live data)
 - Functional correctness testing (checking data accuracy or API responses)
 - Closed shadow DOM elements
 - Accessibility testing (covered by Phase 2 spec-checker with client-accessibility spec)
@@ -34,7 +33,7 @@ submits forms or applies changes.
 - **InteractionResult**: `{ index, element, label, action, tagName, beforeShot, afterShot, modalShots, navigated, error }` — result of one interaction
 - **Bounding-box deduplication**: Round (x,y) to 4px grid; keep first match per cell (most specific selector wins)
 - **Cross-section link**: An `a[href]` whose href resolves to a path outside the current section's root paths (e.g., `/defense/` for client-defence)
-- **Modal flow**: After a click, if a modal/dialog is detected, fill up to 3 inputs and take a "modal-filled" screenshot — but never click submit/save
+- **Modal flow**: After a click, if a modal/dialog is detected, fill up to 3 inputs, click submit/save/confirm if present, and take a "modal-submitted" screenshot
 
 ## Rules
 
@@ -96,9 +95,10 @@ submits forms or applies changes.
    - Take a "modal-open" screenshot
    - Fill up to 3 visible inputs inside the modal using `TEST_DATA_MAP`
    - Select first option in up to 2 `<select>` elements inside the modal
-   - Take a "modal-filled" screenshot
-4. The flow MUST NOT click any submit, save, confirm, or delete button inside the modal.
-5. All modal flow steps MUST be wrapped in try/catch. Partial completion is acceptable.
+   - Click submit/save/confirm/OK/Apply button if one is visible inside the modal
+   - `waitForStable(page)` after submit click
+   - Take a "modal-submitted" screenshot
+4. All modal flow steps MUST be wrapped in try/catch. Partial completion is acceptable.
 
 ### R7 — State reset
 1. `resetPageState(page, pageUrl)` MUST be called after every interaction (including after modal flow).
