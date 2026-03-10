@@ -108,6 +108,9 @@ Run spec-check + visual for one section at a time. Each section automatically in
 | `npm run speclens:visual-filter` | Post-process visual findings — classify each as intentional (spec-documented) or genuine via Claude |
 | `npm run speclens:chaos` | Phase 4 — synthesise all findings into Spec Gaps + structured Change Proposals (CP-001…) |
 | `npm run speclens:interaction -- --section client-defence` | Phase 5 — exploratory interaction testing: discover all interactive elements, click/fill/select each, judge before/after screenshots with Claude Vision |
+| `npm run speclens:pipeline:defence` | **Run all 5 phases in order** for client-defence: spec-check → visual → visual-filter → chaos → interaction → results |
+| `npm run speclens:pipeline:monitoring` | Same full pipeline for client-monitoring |
+| `npm run speclens:pipeline:quality` | Same full pipeline for client-quality |
 
 > **Note — running Phase 5 on a live system:**
 > By default the interaction tester fills in forms and clicks submit/save/confirm buttons.
