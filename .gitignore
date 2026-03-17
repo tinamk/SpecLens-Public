@@ -28,20 +28,6 @@ dist-ssr
 .env.local
 .env.*.local
 
-# SpecLens planning documents
-PlanDocument.md
-
-# SpecLens generated reports (large / machine-generated)
-reports/runs/
-reports/artifacts/
-reports/visual/screenshots/
-reports/latest.html
-reports/latest.json
-reports/index.html
-
-# Playwright artifacts
-playwright-report/
-test-results/
 
 # TypeScript build cache
 *.tsbuildinfo
