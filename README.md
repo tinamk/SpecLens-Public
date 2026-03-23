@@ -24,13 +24,20 @@ npm install
 npx playwright install chromium   # needed for visual and analyze commands
 ```
 
-Set your Anthropic API key (required for `spec-check`, `visual`, `discover`, and `consistency`):
+Set your environment variables (API key is required for `spec-check`, `visual`, `discover`, and `consistency`):
 
 ```bash
-# In .env at the project root:
+# In .env.local (recommended) or .env at the project root:
 ANTHROPIC_API_KEY=sk-ant-...
 # or
 CLAUDE_API_KEY=sk-ant-...
+
+# Optional: default codebase path for analyze/discover in a sibling folder
+SPECLENS_DISCOVER_PATH=../client-frontend
+
+# Optional: login defaults for visual/analyze
+client_USERNAME=admin
+client_PASSWORD=<yourpass>
 ```
 
 ---
@@ -69,7 +76,12 @@ npm run speclens:analyze:all -- --path C:/Users/TinaMortensenKjaer/client-fronte
 npm run speclens:results:serve
 ```
 
-On subsequent runs (path/url/username are saved in `speclens.config.json`):
+On subsequent runs, SpecLens uses this priority for path/url/username values:
+1. CLI flags (`--path`, `--url`, `--username`)
+2. Saved values in `speclens.config.json`
+3. Environment variables (for path: `SPECLENS_DISCOVER_PATH` or `SPECLENS_SOURCE_PATH`)
+
+Example repeat run with only password:
 
 ```bash
 npm run speclens:analyze:all -- --password <yourpass>
@@ -219,6 +231,14 @@ specs/
 
 `speclens.config.json` is created by `speclens init`. On first analyze, `--path`, `--url`, and
 `--username` are saved to it automatically so you only need `--password` on repeat runs.
+
+You can also set defaults in `.env.local` (recommended, gitignored):
+
+```bash
+SPECLENS_DISCOVER_PATH=../client-frontend
+client_USERNAME=admin
+client_PASSWORD=<yourpass>
+```
 
 ```json
 {
