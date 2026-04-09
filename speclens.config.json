@@ -1,5 +1,14 @@
 {
-  "specPath": "specs/feature-001-modal-consistency.md",
+  "activeProfile": "tagtwo",
+  "specPath": "specs/tagtwo/tagtwo-architecture.md",
+  "specPaths": [
+    "specs/tagtwo/tagtwo-architecture.md",
+    "specs/tagtwo/tagtwo-dependency-policy.md",
+    "specs/tagtwo/tagtwo-license-compliance.md",
+    "specs/tagtwo/tagtwo-web-bootstrap.md",
+    "specs/speclens/speclens-license-checker.md",
+    "specs/speclens/speclens-tagtwo-selfcheck.md"
+  ],
   "tasksOutput": "tools/tasks.json",
   "scan": {
     "command": "node tools/ui-label-scan.mjs src/App.tsx"
@@ -26,5 +35,49 @@
     "discoverPath": "C:/Users/TinaMortensenKjær/client-frontend",
     "visualUrl": "http://localhost:5173",
     "visualUsername": "admin"
+  },
+  "profiles": {
+    "tagtwo": {
+      "kind": "repo-json",
+      "archived": false,
+      "targetPath": "fixtures/tagtwo-mini",
+      "reportDir": "reports/projects/tagtwo",
+      "stateFile": "reports/projects/tagtwo/speclens-state.json",
+      "resultsHtml": "reports/TagTwo/ai-results.html",
+      "runArchiveDir": "reports/projects/tagtwo/runs",
+      "inventory": {
+        "outputJson": "reports/projects/tagtwo/repo-inventory.json",
+        "outputMd": "reports/projects/tagtwo/repo-inventory.md"
+      },
+      "specCheck": {
+        "outputJson": "reports/projects/tagtwo/spec-check-report.json",
+        "outputMd": "reports/projects/tagtwo/spec-check-report.md",
+        "specs": [
+          "specs/tagtwo/tagtwo-architecture.md",
+          "specs/tagtwo/tagtwo-dependency-policy.md"
+        ]
+      },
+      "license": {
+        "policyPath": "policies/license-policy.json",
+        "outputJson": "reports/projects/tagtwo/license-report.json",
+        "outputMd": "reports/projects/tagtwo/license-report.md",
+        "patchDir": "reports/projects/tagtwo/patches",
+        "includeNodeModules": false
+      },
+      "selfCheck": {
+        "baseUrl": "http://app.localtest.me/",
+        "maxPages": 12,
+        "outputJson": "reports/projects/tagtwo/web-selfcheck-report.json",
+        "outputMd": "reports/projects/tagtwo/web-selfcheck-report.md",
+        "screenshotsDir": "reports/projects/tagtwo/selfcheck/screenshots"
+      }
+    },
+    "client-legacy": {
+      "kind": "legacy-client",
+      "archived": true,
+      "reportDir": "reports/client",
+      "resultsHtml": "reports/client/ai-results.html",
+      "runArchiveDir": "reports/client/runs"
+    }
   }
 }

@@ -1,0 +1,6 @@
+{
+  "name": "@tagtwo/with-exception",
+  "version": "1.0.0",
+  "private": true,
+  "license": "LGPL-2.1-only WITH LLVM-exception"
+}

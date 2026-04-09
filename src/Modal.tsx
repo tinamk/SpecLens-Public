@@ -5,7 +5,7 @@ type Props = {
   open: boolean;
   title: string;
   onClose: () => void;
-  returnFocusRef?: React.RefObject<HTMLElement>;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
 };
 

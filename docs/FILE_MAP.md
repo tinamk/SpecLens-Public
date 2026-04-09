@@ -63,6 +63,15 @@ against the rules in these files. Specs are the source of truth — code must ma
 | `specs/client/client-quality.md` | Quality dashboard section |
 | `specs/client/client-metadata.md` | Shared structural rules that apply to all sections (navigation, layout, widget usage) |
 
+### Specs for TagTwo (`specs/tagtwo/`)
+
+| File | Description |
+|---|---|
+| `specs/tagtwo/tagtwo-architecture.md` | Repo-manifest baseline for deterministic TagTwo inventory/spec-check |
+| `specs/tagtwo/tagtwo-dependency-policy.md` | Root dependency and script policy for deterministic TagTwo checks |
+| `specs/tagtwo/tagtwo-license-compliance.md` | TagTwo license-policy scope and evidence framing |
+| `specs/tagtwo/tagtwo-web-bootstrap.md` | First browser-visible TagTwo baseline: entry route, observed routes, structure checks, approval-gated route inventory refresh |
+
 ### Demo app specs (`specs/`)
 
 | File | Description |
@@ -74,6 +83,9 @@ against the rules in these files. Specs are the source of truth — code must ma
 ### SpecLens self-specs
 
 SpecLens applies spec-driven development to itself. Every tool has a spec. **When any tool changes, its spec must be updated.**
+
+Notable current additions:
+- `specs/speclens/speclens-tagtwo-selfcheck.md` documents the new TagTwo local self-check bootstrap.
 
 | File | Description |
 |---|---|
@@ -104,6 +116,7 @@ The SpecLens CLI and all analysis tools. Each tool's behaviour is specified in `
 | File | Description |
 |---|---|
 | `tools/speclens-cli.mjs` | **Main CLI entry point.** Routes all `speclens <command>` calls, loads `.env`, manages config and step state, archives runs. Commands: `init`, `lint`, `extract`, `scan`, `test`, `report`, `analyze`, `analyze:all`, `analyze:defence`, `analyze:monitoring`, `analyze:quality`, `analyze:metadata`, `discover`, `spec-check`, `consistency`, `spec-generate`, `visual`, `visual-filter`, `chaos`, `interaction`, `results` |
+| `tools/tagtwo-selfcheck.mjs` | **Local TagTwo self-check.** Crawls a local TagTwo URL with Playwright, captures screenshots, records deterministic browser failures, and writes proposal-oriented report output without any API key. |
 | `tools/spec-checker.mjs` | **AI spec compliance checker.** Reads `specs/*.md`, extracts rules, sends source code batches to Claude, collects violations, writes `reports/spec-check-report.*`. Uses `extractJsonArray()` for robust response parsing. |
 | `tools/visual-inspector.mjs` | **AI visual inspector.** Launches Playwright, navigates client-frontend sections, interacts with dropdowns/filters/pagination, sends screenshots to Claude Vision, takes zoom screenshots of each finding, maps findings to source code via 4-level search, writes `reports/visual/`. |
 | `tools/results-viewer.mjs` | **HTML dashboard generator.** Reads all report JSON files, generates a self-contained `reports/ai-results.html` with tabbed sections, issue cards, zoom overlay, code block viewer, and optional HTTP serve mode on port 4888. |

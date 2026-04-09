@@ -12,6 +12,7 @@ sub-tools, manages run state, and archives output so every run is reproducible a
 - `.env` auto-loading (ANTHROPIC_API_KEY / CLAUDE_API_KEY)
 - The `analyze`, `analyze:all`, `analyze:defence`, `analyze:monitoring`,
   `analyze:quality`, `analyze:metadata` pipeline commands
+- The `selfcheck:tagtwo` command for local TagTwo webpage inspection
 - The `visual`, `spec-check`, `consistency`, `discover`, `results`, `init`, `lint`,
   `extract`, `scan`, `test`, `report` commands
 
@@ -34,7 +35,7 @@ sub-tools, manages run state, and archives output so every run is reproducible a
 1. The CLI must support these commands via `process.argv[2]`:
    `init`, `lint`, `extract`, `scan`, `test`, `report`, `analyze`, `analyze:all`,
    `analyze:defence`, `analyze:monitoring`, `analyze:quality`, `analyze:metadata`,
-   `discover`, `spec-check`, `consistency`, `visual`, `results`
+   `discover`, `spec-check`, `consistency`, `visual`, `results`, `selfcheck:tagtwo`
 2. An unrecognised command must print a usage message listing all valid commands and exit with code 1
 3. Every command that invokes a sub-tool must propagate the sub-tool's exit code — if the sub-tool
    fails, the CLI must exit non-zero
@@ -47,12 +48,15 @@ sub-tools, manages run state, and archives output so every run is reproducible a
 4. Missing config causes a clear error: `"Missing config file: speclens.config.json. Run speclens init first."`
 5. `init` must create the config file with sensible defaults if it does not already exist — it must
    never overwrite an existing config
+6. The default TagTwo profile config may include an optional `selfCheck` section with the local
+   base URL and report output paths for browser-visible TagTwo checks
 
 ### R3 — Environment loading
 1. The CLI must load `.env` from `process.cwd()` before any command executes
 2. Keys already present in `process.env` must not be overridden (system env takes priority)
 3. Both `ANTHROPIC_API_KEY` and `CLAUDE_API_KEY` are accepted; `ANTHROPIC_API_KEY` takes precedence
 4. If the required API key is absent when a Claude-calling command runs, exit with a clear error message
+5. `selfcheck:tagtwo` must not require any API key
 
 ### R4 — Run archiving
 1. Every `analyze:*` command must archive its outputs to `reports/runs/{runId}/`
@@ -78,12 +82,28 @@ sub-tools, manages run state, and archives output so every run is reproducible a
    the failure makes subsequent steps meaningless (e.g., missing inventory)
 8. The `--source-path` flag from the CLI arguments must be forwarded to both `spec-check` and `visual`
 
-### R7 — npm script naming
+### R7 - TagTwo self-check command
+1. `selfcheck:tagtwo` must run `tools/tagtwo-selfcheck.mjs` for the TagTwo profile and then refresh
+   the TagTwo results dashboard.
+2. The command must accept `--url`, `--start-path`, `--max-pages`, `--seed-paths`, `--auth-state`,
+   `--browser-channel`, `--connect-cdp`, `--capture-auth`, `--anonymous`, `--write-spec-draft`,
+   and `--serve`.
+3. The command must accept both `--flag value` and `--flag=value` forms for those named flags.
+4. When invoked through `npm run`, runner-forwarded `npm_config_*` values for those named flags
+   must be treated the same as explicit CLI flags so package-script overrides still work.
+5. The self-check run must archive its JSON report, Markdown report, screenshots directory, and
+   updated dashboard snapshot under the TagTwo run archive directory.
+6. When `--write-spec-draft` is not provided, the command must remain read-only with respect to
+   `specs/tagtwo/`.
+7. When `--write-spec-draft` is provided, the CLI must pass that flag through to the sub-tool
+   without inventing extra approval behavior.
+
+### R8 — npm script naming
 1. Every CLI command must have a corresponding `package.json` script named `speclens:{command}`
 2. Scripts that accept extra flags must forward them via `-- <flags>` syntax
 3. No duplicate script definitions — each script name maps to exactly one command
 
-### R8 — init command
+### R9 — init command
 1. `init` must create these directories if absent: `specs/`, `tools/`, `reports/`
 2. `init` must create `specs/feature-001-template.md` as a starter spec template if absent
 3. `init` must print a confirmation listing what was created
@@ -98,6 +118,12 @@ sub-tools, manages run state, and archives output so every run is reproducible a
 7. `analyze:metadata` does not run a visual step
 8. A non-zero exit code from a sub-tool causes the CLI to exit non-zero
 9. All `speclens:*` npm scripts exist in `package.json`
+10. `selfcheck:tagtwo` runs without any API key and writes TagTwo self-check artifacts
+11. `selfcheck:tagtwo -- --write-spec-draft` passes the approval flag through to the sub-tool
+12. `npm run speclens:tagtwo:selfcheck -- --url=http://127.0.0.1:4174/` honors the overridden URL
+    instead of falling back to the configured default
+13. `npm run speclens:tagtwo:selfcheck -- --connect-cdp=http://127.0.0.1:9222` passes the CDP
+    connection URL through to the self-check sub-tool
 
 ## Scenarios
 ### Scenario A — First-time setup
@@ -114,3 +140,9 @@ Then spec-check runs against `client-defence` and `client-metadata` specs, then 
 Given `.env` does not define `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`
 When the developer runs any analyze command
 Then the CLI prints a clear error message and exits with code 1 before making any API calls
+
+### Scenario D — Local TagTwo self-check
+Given a local TagTwo app is reachable at the configured URL
+When the developer runs `npm run speclens:tagtwo:selfcheck`
+Then the CLI runs the local self-check tool, archives the report artifacts, and refreshes the
+TagTwo dashboard without requiring any external AI provider

@@ -1,308 +1,206 @@
 # SpecLens
 
-AI-powered spec-driven development toolkit. Analyses codebases against human-written specs,
-screenshots running apps for visual consistency, and generates interactive HTML dashboards —
-all driven by specs you write, not AI guesswork.
+SpecLens is a spec-driven development toolkit. Iteration 2 is TagTwo-first: the primary workflow analyses a repo through explicit specs, deterministic repo checks, and npm license-policy compliance reports without needing a live UI or credentials. Archived client reports remain in the repo as iteration-1 evidence, and TagTwo now also has an optional local-only self-check bootstrap path for browser-visible smoke findings without any external API.
 
-> **Spec-Driven Development applied to itself.**
-> SpecLens uses its own methodology: every tool in `tools/` has a corresponding spec in
-> `specs/speclens/` that defines exactly what it must do. When the code changes, the spec changes.
+## Current focus
+
+- Primary profile: `tagtwo`
+- Archived legacy profile: `client-legacy`
+- Active data reports: `reports/projects/tagtwo/`
+- TagTwo dashboard: `reports/TagTwo/ai-results.html`
+- Archived iteration-1 evidence: `reports/client/`
 
 ## Stack
 
 - Frontend demo: React + TypeScript + Vite
-- E2E: Playwright (`@playwright/test`)
-- AI: Anthropic Claude (`@anthropic-ai/sdk`) — spec checking, visual analysis, component discovery
 - CLI: Node.js ESM scripts in `tools/`
+- Legacy AI tooling: Anthropic Claude (`@anthropic-ai/sdk`) for older visual/spec flows
+- Legacy browser tooling: Playwright for older client visual workflows
 
----
-
-## Prerequisites
+## Quick start
 
 ```bash
 npm install
-npx playwright install chromium   # needed for visual and analyze commands
+npm run validate:local
+npm run speclens:tagtwo:analyze
+npm run speclens:tagtwo:results
 ```
 
-Set your environment variables (API key is required for `spec-check`, `visual`, `discover`, and `consistency`):
-
-```bash
-# In .env.local (recommended) or .env at the project root:
-ANTHROPIC_API_KEY=sk-ant-...
-# or
-CLAUDE_API_KEY=sk-ant-...
-
-# Optional: default codebase path for analyze/discover in a sibling folder
-SPECLENS_DISCOVER_PATH=../client-frontend
-
-# Optional: login defaults for visual/analyze
-client_USERNAME=admin
-client_PASSWORD=<yourpass>
-```
-
----
-
-## How It Works
-
-SpecLens has two core analysis modes that work together:
-
-### 1. Spec-check — Code vs Spec
-Reads your `specs/*.md` files, extracts the rules, then sends batches of source code to Claude
-and asks: "Does this code violate any of these rules?" Returns a structured violation report.
-
-### 2. Visual — Screenshot + Vision
-Launches Playwright, navigates every page of the running app, interacts with dropdowns/filters/
-pagination, takes screenshots, and sends them to Claude Vision to find visual inconsistencies
-(wrong button sizes, inconsistent colors, misaligned spacing). Zooms in on each finding and
-maps it back to the source code.
-
-### 3. Results — Interactive Dashboard
-Merges all reports into a single HTML file with tabs for Visual, Spec Check, and Label findings.
-Issue cards show zoom screenshots, side-by-side comparisons, and code snippets.
-
----
-
-## Quick Start — Full Analysis
-
-```bash
-# Start the client-frontend dev server first (in a separate terminal):
-cd C:/Users/TinaMortensenKjaer/client-frontend && npm run dev
-
-# Run the full pipeline — spec-check all specs + visual all sections:
-npm run speclens:analyze:all -- --path C:/Users/TinaMortensenKjaer/client-frontend \
-  --url http://localhost:5173 --username admin --password <yourpass>
-
-# Open the interactive results dashboard:
-npm run speclens:results:serve
-```
-
-On subsequent runs, SpecLens uses this priority for path/url/username values:
-1. CLI flags (`--path`, `--url`, `--username`)
-2. Saved values in `speclens.config.json`
-3. Environment variables (for path: `SPECLENS_DISCOVER_PATH` or `SPECLENS_SOURCE_PATH`)
-
-Example repeat run with only password:
-
-```bash
-npm run speclens:analyze:all -- --password <yourpass>
-# or use env var so you never type the password:
-# client_PASSWORD=<yourpass> npm run speclens:analyze:all
-```
-
----
+This default path runs against `fixtures/tagtwo-mini/`, writes report data to `reports/projects/tagtwo/`, and writes the standalone TagTwo dashboard to `reports/TagTwo/ai-results.html`.
 
 ## Commands
 
-### Section-specific analysis (most common)
-
-Run spec-check + visual for one section at a time. Each section automatically includes the
-`client-metadata` spec (shared structure rules) in the spec-check step.
-
-| Command | Specs checked | Pages visited |
-|---|---|---|
-| `npm run speclens:analyze:defence -- --password <p>` | `client-defence` + `client-metadata` | 5 defence pages |
-| `npm run speclens:analyze:monitoring -- --password <p>` | `client-monitoring` + `client-metadata` | 2 monitoring pages |
-| `npm run speclens:analyze:quality -- --password <p>` | `client-quality` + `client-metadata` | 1 quality page |
-| `npm run speclens:analyze:metadata -- --path <dir>` | `client-metadata` only | no visual step |
-| `npm run speclens:analyze:all -- --password <p>` | all specs | all sections |
-
-### Individual steps
+### TagTwo
 
 | Command | Description |
 |---|---|
-| `npm run speclens:spec-check` | Run spec checker against all specs in `specs/` |
-| `npm run speclens:visual -- --url <u> --username <u> --password <p>` | Visual inspection — all sections |
-| `npm run speclens:results` | Generate `reports/ai-results.html` dashboard |
-| `npm run speclens:results:serve` | Generate dashboard + serve on `http://localhost:4888` |
-| `npm run speclens:discover -- --path <dir>` | Scan Svelte components with Claude, build inventory |
-| `npm run speclens:consistency` | Find naming inconsistencies across components |
-| `npm run speclens:spec-generate -- --section <s>` | Generate a draft UX spec from inventory + CSS/ARIA analysis |
-| `npm run speclens:visual-filter` | Post-process visual findings — classify each as intentional (spec-documented) or genuine via Claude |
-| `npm run speclens:chaos` | Phase 4 — synthesise all findings into Spec Gaps + structured Change Proposals (CP-001…) |
-| `npm run speclens:interaction -- --section client-defence` | Phase 5 — exploratory interaction testing: discover all interactive elements, click/fill/select each, judge before/after screenshots with Claude Vision |
-| `npm run speclens:pipeline:defence` | **Run all 5 phases in order** for client-defence: spec-check → visual → visual-filter → chaos → interaction → results |
-| `npm run speclens:pipeline:monitoring` | Same full pipeline for client-monitoring |
-| `npm run speclens:pipeline:quality` | Same full pipeline for client-quality |
+| `npm run speclens:tagtwo` | Open the TagTwo dashboard |
+| `npm run speclens:tagtwo:inventory` | Build the TagTwo repo inventory |
+| `npm run speclens:tagtwo:spec-check` | Run deterministic TagTwo repo-policy checks |
+| `npm run speclens:tagtwo:license` | Run the TagTwo license-policy checker |
+| `npm run speclens:tagtwo:selfcheck` | Crawl a local TagTwo URL, capture deterministic browser findings, and refresh the dashboard |
+| `npm run speclens:tagtwo:analyze` | Run inventory -> spec-check -> license -> results |
+| `npm run speclens:tagtwo:results` | Open the TagTwo HTML dashboard |
+| `npm run speclens:tagtwo:results:serve` | Serve the TagTwo dashboard over HTTP |
 
-> **Note — running Phase 5 on a live system:**
-> By default the interaction tester fills in forms and clicks submit/save/confirm buttons.
-> This is safe on a local test environment, but if you ever point it at a live system with real data,
-> you should disable form submission first. To do that, open `tools/interaction-tester.mjs` and
-> remove (or comment out) the **"Click submit/save/confirm button if present inside the modal"**
-> block inside `handleModalFlow` — it is clearly marked with that comment. No other changes are needed.
-
-### Core spec pipeline (demo app)
+### client
 
 | Command | Description |
 |---|---|
-| `npm run speclens:init` | Create `specs/`, `tools/`, `reports/` folders and config file |
-| `npm run speclens:lint` | Validate spec format (required sections + acceptance checks) |
-| `npm run speclens:extract` | Parse acceptance checks from spec → `tools/tasks.json` |
-| `npm run speclens:scan` | Run UI label consistency rules against source files |
-| `npm run speclens:test` | Run configured E2E tests and collect Playwright artifacts |
-| `npm run speclens:report` | Generate HTML dashboard from step results |
-| `npm run speclens:report:open` | Generate dashboard and open it in browser |
+| `npm run speclens:client` | Open the archived client dashboard |
+| `npm run speclens:client:results` | Open the client HTML dashboard |
+| `npm run speclens:client:results:serve` | Serve the client dashboard over HTTP |
+| `npm run speclens:client:discover` | Run the legacy component discovery flow |
+| `npm run speclens:client:spec-check` | Run the legacy client spec-check flow |
+| `npm run speclens:client:visual` | Run the legacy visual workflow |
+| `npm run speclens:client:visual-filter` | Post-process client visual findings |
+| `npm run speclens:client:chaos` | Run the client chaos-advisor phase |
+| `npm run speclens:client:interaction` | Run the client interaction test flow |
+| `npm run speclens:client:interaction:defence` | Run defence interaction tests |
+| `npm run speclens:client:interaction:monitoring` | Run monitoring interaction tests |
+| `npm run speclens:client:interaction:quality` | Run quality interaction tests |
+| `npm run speclens:client:analyze` | Run the defence analyze flow |
+| `npm run speclens:client:analyze:defence` | Run defence spec-check + visual -> results |
+| `npm run speclens:client:analyze:monitoring` | Run monitoring spec-check + visual -> results |
+| `npm run speclens:client:analyze:quality` | Run quality spec-check + visual -> results |
+| `npm run speclens:client:analyze:metadata` | Run metadata spec-check -> results |
+| `npm run speclens:client:pipeline` | Run the full defence pipeline |
+| `npm run speclens:client:pipeline:defence` | Run the full defence pipeline |
+| `npm run speclens:client:pipeline:monitoring` | Run the full monitoring pipeline |
+| `npm run speclens:client:pipeline:quality` | Run the full quality pipeline |
 
-### Dev utilities
+### Shared
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Start Vite dev server for demo app |
-| `npm run build` | TypeScript check + Vite build |
-| `npm run test:e2e` | Run Playwright E2E tests headless |
-| `npm run test:e2e:ui` | Run Playwright in interactive UI mode |
-| `npm run labels:inventory` | Generate UI text inventory report |
-| `npm run labels:lint` | Run label scanner rules |
+| `npm run validate:local` | Lint + spec lint + task extraction + build |
 
----
+## How iteration 2 works
 
-## Specs
+### 1. Repo inventory
 
-### Specs for client-frontend (`specs/client/*.md`)
+`tools/repo-inventory.mjs` scans repo files and npm manifests and writes:
 
-These define what client-frontend must do. The spec-checker validates source code against them.
+- `reports/projects/tagtwo/repo-inventory.json`
+- `reports/projects/tagtwo/repo-inventory.md`
 
-| Spec | Covers |
-|---|---|
-| `specs/client/design-system.md` | Color tokens, typography, spacing, CSS class naming |
-| `specs/client/component-standards.md` | Component file naming, props API, event callbacks, bindable state |
-| `specs/client/client-defence.md` | Fraud detection section: incident list, live mode, filtering, resolution |
-| `specs/client/client-monitoring.md` | Monitoring section: XDR viewer, events |
-| `specs/client/client-quality.md` | Quality dashboard section |
-| `specs/client/client-metadata.md` | Shared structural rules that apply to every section |
+### 2. Local spec-check
 
-### SpecLens self-specs (`specs/speclens/*.md`)
+`tools/spec-checker.mjs` now supports a deterministic local mode for `repo-json` profiles. TagTwo specs in `specs/tagtwo/` define binary, auditable checks evaluated from the repo inventory.
 
-SpecLens applies spec-driven development to itself. These specs define what each tool must do.
-**When any tool in `tools/` changes, its spec must be updated to match.**
+### 3. License-policy checker
 
-| Spec | Covers |
-|---|---|
-| `specs/speclens/speclens-cli.md` | All CLI commands, config file, run archiving, analyze pipeline |
-| `specs/speclens/speclens-spec-format.md` | Spec file structure: required sections, rule block format, naming |
-| `specs/speclens/speclens-visual-inspector.md` | Screenshot strategy, vision analysis, zoom, code location |
-| `specs/speclens/speclens-spec-checker.md` | Rule parsing, batch processing, Claude prompts, output format |
-| `specs/speclens/speclens-results-viewer.md` | HTML dashboard, zoom overlay, code snippets, serve mode |
+`tools/license-checker.mjs` reads npm-style manifests and evaluates:
 
----
+- missing license fields
+- invalid SPDX expressions
+- broken `SEE LICENSE IN <filename>` references
+- allow / review / block policy outcomes from `policies/license-policy.json`
+- human-approved patch drafts for the root manifest only
 
-## Pipeline Diagrams
+The wording is intentionally policy-oriented: findings describe potential policy violations or review-needed states, not legal certainty.
 
-### Analyze section pipeline
+Data-source hierarchy:
 
-```
-npm run speclens:analyze:defence -- --password <p>
-        |
-        +- spec-check --specs client-defence,client-metadata
-        |       +- reads specs/*.md rules
-        |       +- sends source code batches to Claude
-        |       +- writes reports/spec-check-report.json + .md
-        |
-        +- visual --section client-defence
-        |       +- Playwright navigates /defense/* pages
-        |       +- interacts with dropdowns, filters, pagination
-        |       +- Claude Vision finds visual inconsistencies
-        |       +- zooms in on each finding, maps to source code
-        |       +- writes reports/visual/visual-report.json + .md
-        |
-        +- archive to reports/runs/YYYY-MM-DD_HH-MM-SS_analyze:defence/
-```
+- use `package-lock.json` to enumerate the dependency tree when available
+- use package manifests to read declared license metadata
+- if installed package manifests are unavailable, the report marks coverage as reduced instead of implying full certainty
 
-### Full pipeline flow
+### 4. Results dashboard
 
-```
-specs/
-  +-- client-defence.md          <- you write the rules
-  +-- client-monitoring.md
-  +-- client-quality.md
-  +-- client-metadata.md
-  +-- speclens/                <- SpecLens specs for itself
-        +-- speclens-cli.md
-        +-- ...
+`tools/results-viewer.mjs` renders standalone profile dashboards. TagTwo is written to `reports/TagTwo/ai-results.html`, while the archived client dashboard remains preserved at `reports/client/ai-results.html`.
 
-        speclens spec-check    <- Claude checks code against your rules
-        speclens visual        <- Playwright + Claude Vision finds inconsistencies
-        speclens results       <- interactive HTML dashboard
-```
+### 5. Optional local TagTwo self-check
 
----
+`tools/tagtwo-selfcheck.mjs` can crawl a running local TagTwo app, capture screenshots, and report:
 
-## Configuration
+- navigation failures
+- uncaught page errors
+- console errors
+- failed same-origin requests
+- missing title, `main`, or `h1`
 
-`speclens.config.json` is created by `speclens init`. On first analyze, `--path`, `--url`, and
-`--username` are saved to it automatically so you only need `--password` on repeat runs.
+The crawl starts from the configured entry URL, follows same-origin links, and can also seed extra
+static routes from the running local router source when the dev server exposes it. You can still cap
+coverage with `--max-pages`, or add manual extras with `--seed-paths=/route-a,/route-b`.
 
-You can also set defaults in `.env.local` (recommended, gitignored):
+Protected routes can also be crawled without storing a Google username/password in an env file.
+The self-check now treats logged-in coverage as the normal path. If local TagTwo bot credentials are
+available in `.env` as `SPECLENS_TAGTWO_USERNAME` and `SPECLENS_TAGTWO_PASSWORD`, the self-check
+will use them first to mint a real authenticated session and save a reusable local Playwright auth
+state automatically. If those env vars are not set, it falls back to opening a browser so you can
+complete the normal Google login manually:
 
 ```bash
-SPECLENS_DISCOVER_PATH=../client-frontend
-client_USERNAME=admin
-client_PASSWORD=<yourpass>
+npm run speclens:tagtwo:selfcheck
 ```
 
-```json
-{
-  "specPath": "specs/feature-001-modal-consistency.md",
-  "tasksOutput": "tools/tasks.json",
-  "sourcePath": "C:/Users/TinaMortensenKjaer/client-frontend",
-  "targetUrl": "http://localhost:5173",
-  "username": "admin",
-  "scan": { "command": "node tools/ui-label-scan.mjs src/App.tsx" },
-  "test": { "command": "npm run test:e2e", "artifacts": ["playwright-report", "test-results"] },
-  "report": {
-    "reportDir": "reports",
-    "stateFile": "reports/speclens-state.json",
-    "html": "reports/speclens-report.html"
-  },
-  "discover": {
-    "outputJson": "reports/component-inventory.json",
-    "outputMd": "reports/component-inventory.md"
-  }
-}
+That saves the session to `.speclens/tagtwo-auth-state.json`. Later self-check runs reuse that saved
+session automatically. If it goes stale, run `npm run speclens:tagtwo:selfcheck -- --capture-auth`
+to refresh it. If you intentionally want the old public-route crawl, run
+`npm run speclens:tagtwo:selfcheck -- --anonymous`. By default the self-check launches the Chrome
+browser channel for this login step; use `--browser-channel=<name>` only if you intentionally want a
+different installed Chromium-based browser.
+
+The credential bootstrap also supports optional TagTwo-specific Auth0 overrides through env vars
+such as `SPECLENS_TAGTWO_AUTH0_DOMAIN`, `SPECLENS_TAGTWO_AUTH0_CLIENT_ID`,
+`SPECLENS_TAGTWO_AUTH0_AUDIENCE`, `SPECLENS_TAGTWO_AUTH0_REALM`, and
+`SPECLENS_TAGTWO_AUTH0_SCOPE`, but the current local TagTwo defaults are used automatically when
+those are omitted.
+
+If Google blocks login inside the automated browser, attach the self-check to an already-running
+logged-in Chrome instead:
+
+```bash
+chrome.exe --remote-debugging-port=9222
+npm run speclens:tagtwo:selfcheck -- --connect-cdp=http://127.0.0.1:9222
 ```
 
----
+That path reuses the existing Chrome session for `app.localtest.me` and avoids trying to automate
+the Google sign-in form inside Playwright.
 
-## Reports
+The output is written to:
 
-All generated output lives in `reports/`. The main entry point is:
+- `reports/projects/tagtwo/web-selfcheck-report.json`
+- `reports/projects/tagtwo/web-selfcheck-report.md`
+- `reports/projects/tagtwo/selfcheck/screenshots/`
 
+If you want to refresh the first TagTwo web baseline spec after review, run:
+
+```bash
+npm run speclens:tagtwo:selfcheck -- --write-spec-draft
 ```
-reports/ai-results.html    <- open this (or use speclens:results:serve for image support)
-```
 
-| File / Directory | Generated by | Description |
-|---|---|---|
-| `reports/ai-results.html` | `results` / `results:serve` | **Main interactive dashboard** — Visual, Spec Check, Labels tabs |
-| `reports/spec-check-report.json` | `spec-check` | All rule violations grouped by spec and rule |
-| `reports/spec-check-report.md` | `spec-check` | Human-readable spec violations with severity badges |
-| `reports/visual/visual-report.json` | `visual` | Visual findings grouped by section |
-| `reports/visual/visual-report.md` | `visual` | Human-readable visual report |
-| `reports/visual/screenshots/{section}/` | `visual` | Full-page screenshots per section |
-| `reports/visual/screenshots/{section}/zoom-*.png` | `visual` | Zoomed-in screenshots of each finding |
-| `reports/component-inventory.json` | `discover` | All Svelte components categorised by type |
-| `reports/component-inventory.md` | `discover` | Human-readable component inventory |
-| `reports/consistency-report.json` | `consistency` | Naming inconsistency findings |
-| `reports/consistency-report.md` | `consistency` | Human-readable consistency report |
-| `reports/spec-generation-report.json` | `spec-generate` | Summary of spec generation run (stats, output path) |
-| `reports/spec-generation-report.md` | `spec-generate` | Human-readable summary with next-step instructions |
-| `specs/client/generated-{section}-spec.md` | `spec-generate` | Auto-generated UX spec draft — review before use |
-| `reports/labels-violations.json` | `scan` | UI label rule violations |
-| `reports/speclens-state.json` | all steps | Step statuses and timestamps |
-| `reports/runs/<runId>/` | `analyze:*` | Archived outputs per run with `manifest.json` |
+## Fixture and reproducibility
 
----
+- Reproducible fixture repo: `fixtures/tagtwo-mini/`
+- Fresh-clone baseline: `npm ci && npm run validate:local`
+- Fixture-backed analysis: `npm run speclens:tagtwo:analyze`
 
-## File Map
+## Non-goals for iteration 2
 
-See [docs/FILE_MAP.md](docs/FILE_MAP.md) for a description of every file in the repository.
+- No legal determinations
+- No transitive auto-fixes or patch drafts for third-party dependencies
+- No API-backed TagTwo visual judgment or auto-patching yet
 
----
+## Legacy client workflow
 
-## Acceptance checks status (Feature 001 — Modal)
+The original client/Svelte/browser-driven workflow is preserved as historical evidence and optional legacy capability. It still depends on legacy visual tooling and, for some flows, Anthropic credentials or a live app.
 
-1. Modal opens via `Open modal` button — Completed
-2. Modal closes via `X`, overlay click, and `ESC` — Completed
-3. Focus stays inside modal while tabbing — Completed
-4. Focus returns to `Open modal` on close — Completed
-5. E2E covers (2)–(4) — Completed
+Useful archived assets:
+
+- `reports/client/ai-results.html`
+- `reports/client/index.html`
+- `docs/iteration-1-baseline.md`
+
+Useful commands:
+
+- `npm run speclens:client:results`
+- `npm run speclens:client:analyze:defence`
+
+## Thesis / iteration docs
+
+- Iteration 1 baseline: `docs/iteration-1-baseline.md`
+- Iteration 2 evaluation baseline: `docs/iteration-2-evaluation.md`
+- Iteration 2 architecture: `docs/iteration-2-architecture.md`
+- Iteration 1 vs 2 comparison: `docs/iteration-1-vs-2.md`

@@ -1,0 +1,6 @@
+{
+  "name": "@tagtwo/custom-license",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Company-Internal-License"
+}

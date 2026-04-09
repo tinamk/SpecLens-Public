@@ -6,6 +6,10 @@
 structured prompt asking it to find violations. It writes a JSON and Markdown report that lists
 every violation grouped by spec and rule.
 
+In iteration 2, the same tool also supports a deterministic `repo-json` mode for profile-based
+repo analysis. In that mode, the tool reads a repo inventory, evaluates machine checks embedded in
+TagTwo specs, and writes profile-scoped reports without requiring Anthropic credentials.
+
 ## Scope (IN)
 - Parsing spec Markdown files: extracting Rules, Acceptance checks, Definitions, Scope (IN)
 - Selecting which source files to send for each spec (the "phase strategy")
@@ -14,6 +18,7 @@ every violation grouped by spec and rule.
 - Grouping and sorting violations by severity
 - Writing `reports/spec-check-report.json` and `reports/spec-check-report.md`
 - The `--specs` CLI flag for running a subset of specs
+- Deterministic local evaluation for repo-oriented profiles such as `tagtwo`
 
 ## Scope (OUT)
 - Visual / screenshot analysis (see `speclens-visual-inspector.md`)
