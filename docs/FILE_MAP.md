@@ -1,230 +1,55 @@
 # File Map
 
-This document describes what each important file and folder in this repository does.
+This map reflects the Iteration 5 hosted SaaS + behavioral parity layout.
 
----
+## Apps
 
-## Root
-
-| File | Description |
+| Path | Purpose |
 |---|---|
-| `README.md` | Project overview, all commands, pipeline diagrams, report index |
-| `package.json` | NPM scripts and dependency declarations |
-| `package-lock.json` | Exact dependency lockfile |
-| `speclens.config.json` | SpecLens pipeline configuration (spec path, source path, target URL, report paths) |
-| `PlanDocument.md` | Academic background document — spec-driven development theory and SpecLens motivation |
-| `playwright.config.ts` | Playwright E2E runner configuration |
-| `vite.config.ts` | Vite build configuration |
-| `tsconfig.json` | Base TypeScript configuration |
-| `index.html` | Vite HTML shell for demo app |
-| `eslint.config.js` | ESLint configuration |
-| `.env` | API keys (not committed) — `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY`, `client_USERNAME`, `client_PASSWORD` |
+| `apps/web/` | Next.js marketing site, portal, pricing, legal pages, and report UI |
+| `apps/api/` | Fastify control plane, API routes, webhooks, and hosted service integrations |
+| `apps/runner/` | Runner process for queued Docker sandbox jobs |
 
----
+## Packages
 
-## CI
-
-| File | Description |
+| Path | Purpose |
 |---|---|
-| `.github/workflows/speclens-e2e.yml` | CI pipeline — label scan, E2E tests, artifact upload |
+| `packages/core/` | Shared strict-TypeScript analysis engine |
+| `packages/contracts/` | Zod schemas and typed contracts for presets, capabilities, jobs, secrets, and reports |
+| `packages/db/` | Prisma schema and typed database access |
+| `packages/ui/` | Shared React components for hosted pages |
 
----
+## Deployment
 
-## Application Source (`src/`)
-
-Demo React app used as the spec pipeline target for the feature-001 specs.
-
-| File | Description |
+| Path | Purpose |
 |---|---|
-| `src/main.tsx` | App entry point (mounts React app) |
-| `src/App.tsx` | Main UI with button examples and modal usage |
-| `src/Modal.tsx` | Accessible modal component (ESC close, focus trap, overlay click) |
-| `src/glossary.ts` | Source of truth for standardized UI label terms |
-| `src/index.css` | Global CSS |
-| `src/App.css` | App-level CSS |
-| `src/styles/app.css` | App layout styles |
-| `src/styles/modal.css` | Modal-specific styles |
+| `deploy/digitalocean/` | App Platform and runner deployment scaffolding |
+| `apps/runner/docker/` | Runner image scaffolding |
 
----
+## Legal and pricing
 
-## Specs (`specs/`)
-
-Human-written specifications that drive the pipeline. The spec-checker validates source code
-against the rules in these files. Specs are the source of truth — code must match specs.
-
-### Specs for client-frontend (`specs/client/`)
-
-| File | Description |
+| Path | Purpose |
 |---|---|
-| `specs/client/design-system.md` | client-frontend design system: color tokens (`--client-*`), typography, spacing (`rem-calc`), CSS class naming (kebab-case), Foundation grid |
-| `specs/client/component-standards.md` | Svelte component conventions: PascalCase naming, props API (`classNames`, `title`, `disabled`), event callbacks (`on*`), bindable state (`$bindable`), Button/Modal/Table/Input APIs |
-| `specs/client/client-defence.md` | Fraud detection section: incident overview, live mode, filtering, incident resolution, validated prefixes, blocked calls, traffic overview, QoE |
-| `specs/client/client-monitoring.md` | Monitoring section: XDR viewer, events list |
-| `specs/client/client-quality.md` | Quality dashboard section |
-| `specs/client/client-metadata.md` | Shared structural rules that apply to all sections (navigation, layout, widget usage) |
+| `LICENSE` | Source-available non-commercial code license |
+| `LICENSE-COMMERCIAL.md` | Commercial licensing overview and contact path |
+| `apps/web/app/license/` | Hosted legal explanation of the dual-license model |
+| `apps/web/app/commercial/` | Commercial-license contact path |
+| `apps/web/app/pricing/` | Hosted SaaS pricing |
 
-### Specs for TagTwo (`specs/tagtwo/`)
+## Docs and governance
 
-| File | Description |
+| Path | Purpose |
 |---|---|
-| `specs/tagtwo/tagtwo-architecture.md` | Repo-manifest baseline for deterministic TagTwo inventory/spec-check |
-| `specs/tagtwo/tagtwo-dependency-policy.md` | Root dependency and script policy for deterministic TagTwo checks |
-| `specs/tagtwo/tagtwo-license-compliance.md` | TagTwo license-policy scope and evidence framing |
-| `specs/tagtwo/tagtwo-web-bootstrap.md` | First browser-visible TagTwo baseline: entry route, observed routes, structure checks, approval-gated route inventory refresh |
+| `docs/iterations/ITERATION-004-hosted-saas.md` | Archived hosted SaaS pivot iteration |
+| `docs/iterations/ITERATION-005-behavioral-parity-migration.md` | Current iteration doc |
+| `docs/issues/behavioral-parity-migration.md` | Active parity migration tracker |
+| `docs/adr/ADR-0005-behavioral-parity-on-hosted-typescript-architecture.md` | Iteration 5 architecture ADR |
+| `docs/archive/` | Archived root planning docs |
 
-### Demo app specs (`specs/`)
+## Archive
 
-| File | Description |
+| Path | Purpose |
 |---|---|
-| `specs/feature-001-modal-consistency.md` | Modal behavior spec for demo app (acceptance checks, scenarios) |
-| `specs/feature-001-ui-label-consistency.md` | UI label consistency spec for demo app (glossary rules) |
-| `specs/feature-001-template.md` | Blank spec template for new features |
-
-### SpecLens self-specs
-
-SpecLens applies spec-driven development to itself. Every tool has a spec. **When any tool changes, its spec must be updated.**
-
-Notable current additions:
-- `specs/speclens/speclens-tagtwo-selfcheck.md` documents the new TagTwo local self-check bootstrap.
-
-| File | Description |
-|---|---|
-| `specs/speclens/speclens-cli.md` | CLI entry point: all commands, config file format, `.env` loading, run archiving, step state, analyze pipeline routing |
-| `specs/speclens/speclens-spec-format.md` | Spec file structure: required sections, `### R{n} — {Title}` rule format, acceptance check numbering, scenario format, file naming conventions |
-| `specs/speclens/speclens-visual-inspector.md` | visual-inspector.mjs: section map, auth, screenshot capture strategy, Claude vision batching, zoom screenshots (80px pad), 4-level code location search, output format |
-| `specs/speclens/speclens-spec-checker.md` | spec-checker.mjs: spec parsing, phase strategy (filenames/style/script/full), batch processing, Claude prompt construction, `extractJsonArray()`, output format |
-| `specs/speclens/speclens-results-viewer.md` | results-viewer.mjs: HTML dashboard generation, tab structure, issue cards, zoom overlay, code block rendering, serve mode on port 4888 |
-| `specs/speclens/speclens-spec-generator.md` | spec-generator.mjs: prerequisite loading, static CSS/ARIA analysis, digest construction, single Claude call, output format |
-| `specs/speclens/speclens-visual-filter.md` | visual-filter.mjs: input loading, finding extraction, single Claude classification call, filtered report output, dashboard integration |
-| `specs/speclens/speclens-chaos-advisor.md` | chaos-advisor.mjs: input digests, spec gap detection (Call 1), change proposal generation (Call 2), CP format, read-only guarantee |
-| `specs/speclens/speclens-interaction-tester.md` | interaction-tester.mjs: element discovery selectors, interaction dispatch, modal flow, state reset, Claude Vision batching, output format |
-
----
-
-## Tests (`tests/`)
-
-| File | Description |
-|---|---|
-| `tests/e2e/modal.spec.ts` | Playwright E2E tests — modal ESC close, overlay click, focus trap, focus return |
-
----
-
-## Tooling Scripts (`tools/`)
-
-The SpecLens CLI and all analysis tools. Each tool's behaviour is specified in `specs/speclens/`.
-
-| File | Description |
-|---|---|
-| `tools/speclens-cli.mjs` | **Main CLI entry point.** Routes all `speclens <command>` calls, loads `.env`, manages config and step state, archives runs. Commands: `init`, `lint`, `extract`, `scan`, `test`, `report`, `analyze`, `analyze:all`, `analyze:defence`, `analyze:monitoring`, `analyze:quality`, `analyze:metadata`, `discover`, `spec-check`, `consistency`, `spec-generate`, `visual`, `visual-filter`, `chaos`, `interaction`, `results` |
-| `tools/tagtwo-selfcheck.mjs` | **Local TagTwo self-check.** Crawls a local TagTwo URL with Playwright, captures screenshots, records deterministic browser failures, and writes proposal-oriented report output without any API key. |
-| `tools/spec-checker.mjs` | **AI spec compliance checker.** Reads `specs/*.md`, extracts rules, sends source code batches to Claude, collects violations, writes `reports/spec-check-report.*`. Uses `extractJsonArray()` for robust response parsing. |
-| `tools/visual-inspector.mjs` | **AI visual inspector.** Launches Playwright, navigates client-frontend sections, interacts with dropdowns/filters/pagination, sends screenshots to Claude Vision, takes zoom screenshots of each finding, maps findings to source code via 4-level search, writes `reports/visual/`. |
-| `tools/results-viewer.mjs` | **HTML dashboard generator.** Reads all report JSON files, generates a self-contained `reports/ai-results.html` with tabbed sections, issue cards, zoom overlay, code block viewer, and optional HTTP serve mode on port 4888. |
-| `tools/speclens-dashboard.mjs` | Generates static per-run dashboard HTML and run history index (used by `report` command) |
-| `tools/speclens.mjs` | Legacy spec parser — reads acceptance checks, produces task entries |
-| `tools/ui-label-scan.mjs` | Label rule scanner — enforces glossary casing, outputs `reports/labels-violations.json` |
-| `tools/ui-text-inventory.mjs` | Text inventory scanner — discovers all UI strings in source files, outputs `reports/ui-text-inventory.*` |
-| `tools/component-scanner.mjs` | **AI component discovery.** Walks a Svelte codebase, builds import graph, sends components to Claude for categorization, outputs `reports/component-inventory.*` |
-| `tools/consistency-checker.mjs` | **AI consistency analysis.** Reads component inventory, uses Claude to find prop naming, CSS class, and label text inconsistencies, outputs `reports/consistency-report.*` |
-| `tools/spec-generator.mjs` | **AI spec generator (Phase 2).** Reads component inventory + consistency report, performs static CSS/ARIA analysis, calls Claude once to generate a draft UX spec in SpecLens format. Writes `specs/client/generated-{section}-spec.md` and `reports/spec-generation-report.*` |
-| `tools/visual-filter.mjs` | **AI visual finding filter (Phase 3).** Reads `reports/visual/visual-report.json` + all spec files, calls Claude once to classify each finding as intentional (spec-documented) or genuine. Writes `reports/visual/visual-report-filtered.json` (loaded by dashboard in preference to raw report) and `reports/visual/visual-filter-report.md`. |
-| `tools/chaos-advisor.mjs` | **AI Chaos Advisor (Phase 4).** Reads all phase outputs (spec violations, visual findings, consistency issues) + spec files. Makes two Claude calls: (1) spec gap detection → SG-NNN entries with proposed rule text, (2) change proposal generation → CP-NNN entries with type/risk/evidence/fix. Writes `reports/chaos-advisor-report.*`. Read-only — never modifies any file. |
-| `tools/interaction-tester.mjs` | **AI Interaction Tester (Phase 5).** Playwright page-discovery of all visible interactive elements (buttons, links, inputs, dropdowns). Performs click/fill/select interactions, captures before+after screenshots, handles multi-step modal flows. Sends pairs to Claude Vision for visual-correctness judgment. Writes `reports/interaction-report.*` and `reports/interaction/screenshots/`. |
-| `tools/tasks.json` | Generated task list from `speclens extract` |
-| `tools/report-schema.md` | Dashboard JSON schema reference |
-
----
-
-## Reports (`reports/`)
-
-All generated output from SpecLens commands. The main entry point for reviewing results is
-`reports/ai-results.html` (use `speclens:results:serve` for full image support).
-
-### Main dashboard
-
-| File | Description |
-|---|---|
-| `reports/ai-results.html` | **Interactive dashboard** — Visual, Spec Check, Labels tabs with issue cards, zoom screenshots, code snippets |
-
-### Spec check — `npm run speclens:spec-check`
-
-| File | Description |
-|---|---|
-| `reports/spec-check-report.json` | All rule violations: spec, rule, severity, file, violating code, description, suggestion |
-| `reports/spec-check-report.md` | Human-readable report with severity badges, grouped by spec then rule |
-
-### Visual inspection — `npm run speclens:visual -- --url <u> --username <u> --password <p>`
-
-| File | Description |
-|---|---|
-| `reports/visual/visual-report.json` | All visual findings with section grouping, zoom paths, code locations, severity counts |
-| `reports/visual/visual-report.md` | Human-readable visual report with cross-section issues and per-section findings |
-| `reports/visual/visual-report-filtered.json` | Post-filtered report (intentional findings removed from `issues`, kept in `intentionalIssues`) — preferred by dashboard over raw report |
-| `reports/visual/visual-filter-report.md` | Classification summary: total / genuine / intentional counts, table of intentional findings with spec reasons |
-| `reports/visual/screenshots/client-defence/` | Full-page screenshots from the defence section |
-| `reports/visual/screenshots/client-monitoring/` | Full-page screenshots from the monitoring section |
-| `reports/visual/screenshots/client-quality/` | Full-page screenshots from the quality section |
-| `reports/visual/screenshots/{section}/zoom-*.png` | Zoomed-in (80px padded) crops of each finding location |
-
-### Component discovery — `npm run speclens:discover -- --path <dir>`
-
-| File | Description |
-|---|---|
-| `reports/component-inventory.json` | Full component inventory — all components categorized by type, with props, importCount, interactive, navigates flags |
-| `reports/component-inventory.md` | Human-readable inventory — grouped by category, sorted by import frequency |
-
-### Naming consistency — `npm run speclens:consistency`
-
-| File | Description |
-|---|---|
-| `reports/consistency-report.json` | All naming inconsistency findings with severity, type, examples, and suggestions |
-| `reports/consistency-report.md` | Human-readable report with severity badges, global issues first then per-category |
-
-### Spec generation — `npm run speclens:spec-generate`
-
-| File | Description |
-|---|---|
-| `reports/spec-generation-report.json` | Stats from the generation run: components analysed, patterns found, output path |
-| `reports/spec-generation-report.md` | Human-readable summary with next-step instructions |
-| `specs/client/generated-{section}-spec.md` | Auto-generated UX spec draft — review and edit before using with spec-check |
-
-### Core pipeline
-
-| File | Description |
-|---|---|
-| `reports/labels-violations.json` | Output from `speclens:scan` — UI label rule violations |
-| `reports/speclens-state.json` | Step-by-step pipeline status (ok/fail, timestamps, durations, metadata) |
-| `reports/speclens-report.md` | Markdown pipeline summary |
-| `reports/speclens-report.html` | HTML pipeline summary |
-| `reports/ui-text-inventory.json` | Machine-readable UI text inventory |
-| `reports/ui-text-inventory.md` | Human-readable UI text inventory table |
-
-### Run archive — created by `analyze:*` commands
-
-| File | Description |
-|---|---|
-| `reports/runs/<runId>/` | One folder per run, named `YYYY-MM-DD_HH-MM-SS_{command}` |
-| `reports/runs/<runId>/manifest.json` | Run metadata: command, runId, archivedAt, list of archived files |
-| `reports/runs/<runId>/spec-check-report.*` | Spec check outputs archived from that run |
-| `reports/runs/<runId>/visual/` | Visual outputs archived from that run |
-| `reports/runs/<runId>/dashboard.html` | Per-run static dashboard page (from `report` command) |
-| `reports/index.html` | Dashboard run history index |
-| `reports/artifacts/` | Copied Playwright artifacts (playwright-report, test-results) |
-
----
-
-## Docs
-
-| File | Description |
-|---|---|
-| `docs/FILE_MAP.md` | This file — complete repository map |
-
----
-
-## Other
-
-| File | Description |
-|---|---|
-| `public/vite.svg` | Static asset served by Vite dev server |
-| `backend/README.md` | Notes for backend workspace |
-| `backend/src/.gitkeep` | Keeps empty backend source folder tracked |
+| `archive/` | Archive guide and legacy material index |
+| `archive/legacy-local-first/` | Archived TagTwo/client tooling, reports, JS package surfaces, and earlier specs |
+| `archive/legacy-vite-demo/` | Archived Vite demo app, browser-test scaffolding, and placeholder backend |

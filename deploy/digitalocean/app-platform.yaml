@@ -1,0 +1,34 @@
+name: speclens
+region: ams
+services:
+  - name: web
+    environment_slug: node-js
+    source_dir: /
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: tina/SpecLens
+    build_command: npm install && npm run build
+    run_command: npx next start apps/web -p 3000 -H 0.0.0.0
+    http_port: 3000
+    envs:
+      - key: APP_URL
+        scope: RUN_AND_BUILD_TIME
+        value: https://speclens.tinamk.no
+      - key: NEXT_PUBLIC_API_URL
+        scope: RUN_AND_BUILD_TIME
+        value: https://api.speclens.tinamk.no
+  - name: api
+    environment_slug: node-js
+    source_dir: /
+    github:
+      branch: main
+      deploy_on_push: true
+      repo: tina/SpecLens
+    build_command: npm install && npm run build
+    run_command: npx tsx apps/api/src/server.ts
+    http_port: 4000
+    envs:
+      - key: API_URL
+        scope: RUN_AND_BUILD_TIME
+        value: https://api.speclens.tinamk.no

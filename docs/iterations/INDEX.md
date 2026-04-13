@@ -6,13 +6,16 @@ SpecLens uses milestone-based Design Science iterations.
 
 | Iteration | Status | Focus | Key docs |
 |---|---|---|---|
-| Iteration 2 | Current | TagTwo-first repo analysis and deterministic checks | `docs/iteration-2-architecture.md`, `docs/iteration-2-evaluation.md` |
+| Iteration 5 | Current | Behavioral parity migration on the hosted TypeScript product | `docs/iterations/ITERATION-005-behavioral-parity-migration.md`, `docs/adr/ADR-0005-behavioral-parity-on-hosted-typescript-architecture.md` |
 
 ## History
 
 | Iteration | Status | Focus | Key docs |
 |---|---|---|---|
-| Iteration 1 | Archived baseline | client-first visual and browser-driven pipeline | `docs/iteration-1-baseline.md` |
+| Iteration 4 | Archived transition | Hosted SaaS, runner plane, pricing/legal product surface, and dual licensing | `docs/iterations/ITERATION-004-hosted-saas.md` |
+| Iteration 3 | Archived transition | Generic productization, managed workspace runtime, and public JS/HTTP APIs | `docs/iterations/ITERATION-003-generic-productization.md` |
+| Iteration 2 | Archived transition | TagTwo-first repo analysis and deterministic checks | `docs/archive/iteration-2-architecture.md`, `docs/archive/iteration-2-evaluation.md` |
+| Iteration 1 | Archived baseline | client-first visual and browser-driven pipeline | `docs/archive/iteration-1-baseline.md` |
 
 ## Conventions
 

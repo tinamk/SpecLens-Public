@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String                @id @default(cuid())
+  identityProvider String
+  identitySubject  String
+  email            String                @unique
+  displayName      String
+  avatarUrl        String?
+  entitlement      String                @default("free")
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  workspaces       Workspace[]           @relation("WorkspaceOwner")
+  memberships      WorkspaceMembership[]
+  subscriptions    BillingSubscription[]
+  jobs             AnalysisJob[]
+  checkoutSessions CheckoutSession[]
+
+  @@unique([identityProvider, identitySubject])
+}
+
+model Workspace {
+  id               String             @id @default(cuid())
+  ownerUserId      String
+  name             String
+  slug             String             @unique
+  description      String?
+  entitlement      String             @default("free")
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  owner            User               @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  memberships      WorkspaceMembership[]
+  sources          Source[]
+  reports          AnalysisReport[]
+  jobs             AnalysisJob[]
+  installations    GithubInstallation[]
+  secrets          WorkspaceSecret[]
+  checkoutSessions CheckoutSession[]
+}
+
+model WorkspaceMembership {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model Source {
+  id                   String       @id @default(cuid())
+  workspaceId          String
+  type                 String
+  displayName          String
+  location             String
+  visibility           String
+  githubInstallationId String?
+  uploadObjectKey      String?
+  createdAt            DateTime     @default(now())
+  workspace            Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  jobs                 AnalysisJob[]
+}
+
+model AnalysisJob {
+  id                String           @id @default(cuid())
+  workspaceId       String
+  sourceId          String
+  reportId          String?
+  status            String
+  sourceType        String
+  sourceLocation    String
+  preset            String           @default("auto")
+  capabilitiesJson  Json
+  runtimeMode       String           @default("static")
+  secretRefsJson    Json
+  requestedByUserId String
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  createdAt         DateTime         @default(now())
+  workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source            Source           @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  requestedBy       User             @relation(fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  logs              AnalysisJobLog[]
+  report            AnalysisReport?
+}
+
+model AnalysisJobLog {
+  id        String      @id @default(cuid())
+  jobId      String
+  level      String
+  scope      String
+  message    String
+  createdAt  DateTime   @default(now())
+  job        AnalysisJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model AnalysisReport {
+  id               String              @id @default(cuid())
+  workspaceId      String
+  jobId            String              @unique
+  status           String
+  preset           String              @default("auto")
+  capabilitiesJson Json
+  runtimeMode      String              @default("static")
+  title            String
+  summaryJson      Json
+  findingsJson     Json
+  sectionsJson     Json
+  createdAt        DateTime            @default(now())
+  workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  job              AnalysisJob         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  artifacts        ArtifactReference[]
+}
+
+model ArtifactReference {
+  id        String          @id @default(cuid())
+  reportId  String
+  objectKey String
+  bucket    String
+  region    String
+  mimeType  String
+  sizeBytes Int
+  signedUrl String?
+  report    AnalysisReport  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model BillingSubscription {
+  id                     String   @id @default(cuid())
+  userId                 String
+  provider               String
+  providerCustomerId     String
+  providerSubscriptionId String   @unique
+  entitlement            String
+  status                 String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GithubInstallation {
+  id                   String    @id @default(cuid())
+  workspaceId          String
+  githubInstallationId String    @unique
+  githubAccountLogin   String
+  createdAt            DateTime  @default(now())
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceSecret {
+  id             String    @id @default(cuid())
+  workspaceId     String
+  name           String
+  kind           String
+  valuePreview   String
+  encryptedValue String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CheckoutSession {
+  id          String     @id
+  workspaceId String?
+  userId      String
+  entitlement String
+  checkoutUrl String
+  status      String
+  createdAt   DateTime   @default(now())
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

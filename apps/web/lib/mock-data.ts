@@ -1,0 +1,121 @@
+import type { AnalysisReport, AnalysisLogEvent, Workspace } from "@speclens/contracts";
+
+export const mockWorkspace: Workspace = {
+  id: "workspace_demo",
+  ownerUserId: "user_demo",
+  name: "Nordic Platform Team",
+  slug: "nordic-platform-team",
+  description: "Shared workspace for SaaS trial runs and report review.",
+  entitlement: "pro",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+export const mockLogs: AnalysisLogEvent[] = [
+  {
+    id: "log_1",
+    jobId: "job_demo",
+    level: "info",
+    scope: "queue",
+    message: "Job accepted by hosted runner plane.",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "log_2",
+    jobId: "job_demo",
+    level: "info",
+    scope: "source",
+    message: "Fetched GitHub source and sealed it into the sandbox bundle.",
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: "log_3",
+    jobId: "job_demo",
+    level: "info",
+    scope: "analysis",
+    message: "Generated report.json and pushed artifacts to S3-compatible object storage.",
+    createdAt: new Date().toISOString(),
+  },
+];
+
+export const mockReport: AnalysisReport = {
+  id: "report_demo",
+  workspaceId: mockWorkspace.id,
+  jobId: "job_demo",
+  status: "ready",
+  preset: "tagtwo",
+  capabilities: [
+    "repo-inventory",
+    "license-policy",
+    "browser-self-check",
+    "visual-inspection",
+    "interaction-test",
+    "chaos-advisor",
+    "results-dashboard",
+  ],
+  runtimeMode: "browser",
+  title: "SpecLens hosted analysis report",
+  summary: {
+    totalFindings: 3,
+    high: 1,
+    medium: 1,
+    low: 1,
+  },
+  findings: [
+    {
+      id: "finding_1",
+      capability: "license-policy",
+      severity: "high",
+      title: "Billing webhooks are not yet signed in this environment",
+      message: "The demo deployment is missing a configured Stripe webhook secret.",
+      suggestion: "Set STRIPE_WEBHOOK_SECRET in App Platform and re-run the production readiness checks.",
+      evidence: ["STRIPE_WEBHOOK_SECRET"],
+    },
+    {
+      id: "finding_2",
+      capability: "browser-self-check",
+      severity: "medium",
+      title: "Runner droplet pool is at minimum redundancy",
+      message: "Only one runner host is currently allocated for the demo workload.",
+      suggestion: "Add at least one additional runner droplet before opening access more broadly.",
+      evidence: ["runner:maxConcurrency=1"],
+    },
+    {
+      id: "finding_3",
+      capability: "results-dashboard",
+      severity: "low",
+      title: "Commercial license CTA is informational only",
+      message: "The commercial-license page routes users to contact rather than a CRM-backed request flow.",
+      suggestion: "Connect the CTA to a captured lead flow when sales operations are ready.",
+      evidence: ["/commercial"],
+    },
+  ],
+  sections: [
+    {
+      id: "section_1",
+      capability: "repo-inventory",
+      title: "Repository inventory",
+      status: "ready",
+      summary: "The hosted demo sees a TypeScript monorepo with web, API, runner, and shared packages.",
+      data: { manifests: 7 },
+    },
+    {
+      id: "section_2",
+      capability: "browser-self-check",
+      title: "Browser self-check",
+      status: "ready",
+      summary: "The demo run completed sandbox browser coverage with protected-route support and crawl evidence.",
+      data: { routeCandidates: ["/", "/pricing", "/portal"], authenticated: true },
+    },
+    {
+      id: "section_3",
+      capability: "chaos-advisor",
+      title: "Chaos advisor",
+      status: "ready",
+      summary: "The top issues are the missing billing secret, low runner redundancy, and sales-flow incompleteness.",
+      data: { topFindings: ["finding_1", "finding_2", "finding_3"] },
+    },
+  ],
+  artifacts: [],
+  createdAt: new Date().toISOString(),
+};

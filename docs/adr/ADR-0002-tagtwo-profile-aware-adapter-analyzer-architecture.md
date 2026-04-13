@@ -6,7 +6,7 @@ Accepted
 
 ## Milestone / Iteration
 
-`docs/iteration-2-architecture.md`
+`docs/archive/iteration-2-architecture.md`
 
 ## Context
 

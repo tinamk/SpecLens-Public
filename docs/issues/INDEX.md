@@ -6,12 +6,12 @@ Active issue docs live here while work is in progress.
 
 | Issue | Status | Summary |
 |---|---|---|
-| `tagtwo-selfcheck-credential-auth.md` | In progress | Add env-driven credential login so the TagTwo self-check can bootstrap and reuse a real authenticated Playwright session |
-| `tagtwo-results-viewer-ui-refresh.md` | In progress | Refresh the TagTwo dashboard with a cleaner, more structured tabbed UI and stronger visual hierarchy |
-| `tagtwo-first-pipeline.md` | In progress | Tracks the Iteration 2 TagTwo-first migration, profile-aware routing, and deterministic repo analyzers |
+| `behavioral-parity-migration.md` | Implemented | Tracks the Iteration 5 migration of archived analysis breadth into the hosted TypeScript product |
+| `hosted-saas-platform.md` | In progress | Tracks the Iteration 4 hosted SaaS scaffold, runner plane, pricing/legal pages, and dual-license integration |
+| `platform-long-task-queue.md` | Active | Long-form backlog of remaining production, integration, UI, and operations work after the hosted parity implementation |
+| `keycloak-provider-storage-dev-mode.md` | In progress | Tracks the Keycloak-first auth shift, ordered AI providers, S3 portability, and full Docker Compose dev mode |
 
 ## Conventions
 
 - Use one issue doc per objective or root cause.
-- Prefer short slug names such as `results-viewer-tagtwo-empty-state.md`.
 - Update this file when work starts, changes status, or moves to archive.

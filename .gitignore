@@ -11,6 +11,12 @@ node_modules
 dist
 dist-ssr
 *.local
+.speclens-workspace
+.next
+*.tsbuildinfo
+generated
+coverage
+test-results
 
 # Editor directories and files
 .vscode/*
@@ -30,7 +36,7 @@ dist-ssr
 .speclens/
 
 # Generated outputs
-reports/
+packages/db/generated
 
 
 

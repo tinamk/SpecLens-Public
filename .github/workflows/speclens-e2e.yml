@@ -26,16 +26,10 @@ jobs:
       - name: Validate local baseline
         run: npm run validate:local
 
-      - name: Run label lint
-        run: npm run labels:lint
-
-      - name: Run TagTwo analysis
-        run: npm run speclens:analyze:tagtwo
-
-      - name: Upload reports
+      - name: Upload workspace outputs
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: speclens-reports
-          path: reports
+          name: speclens-workspace
+          path: .speclens-workspace
           if-no-files-found: warn
