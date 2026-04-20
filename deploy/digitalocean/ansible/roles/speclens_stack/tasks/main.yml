@@ -26,18 +26,13 @@
   become: false
   register: speclens_local_release_archive
 
-- name: Build local release archive
-  ansible.builtin.shell: |
-    set -euo pipefail
-    git -C "{{ speclens_local_repo_root }}" ls-files --cached --others --exclude-standard -z \
-      | while IFS= read -r -d '' path; do
-          if [ -e "{{ speclens_local_repo_root }}/$path" ]; then
-            printf '%s\0' "$path"
-          fi
-        done \
-      | tar -C "{{ speclens_local_repo_root }}" --null --files-from - -czf "{{ speclens_local_release_archive.path }}"
-  args:
-    executable: /bin/bash
+- name: Build local release archive from a clean committed controller state
+  ansible.builtin.command:
+    argv:
+      - bash
+      - "{{ speclens_local_repo_root }}/scripts/ops/build-release-archive.sh"
+      - "{{ speclens_local_repo_root }}"
+      - "{{ speclens_local_release_archive.path }}"
   delegate_to: localhost
   become: false
 

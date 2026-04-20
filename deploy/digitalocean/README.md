@@ -23,7 +23,9 @@ AI_WORKER_URL=http://127.0.0.1:4520 \
 npm run ops:validate
 ```
 
-7. Run production E2E via Ansible:
+7. Deploy from a clean committed controller checkout only. The Ansible release packager now refuses tracked or untracked repo changes so unfinished local edits cannot leak into production archives.
+
+8. Run production E2E via Ansible:
 
 ```bash
 E2E_OWNER_USERNAME=... E2E_OWNER_PASSWORD=... \
@@ -32,7 +34,7 @@ E2E_OUTSIDER_USERNAME=... E2E_OUTSIDER_PASSWORD=... \
 ansible-playbook deploy/digitalocean/ansible/playbooks/e2e.yml
 ```
 
-8. Verify metrics internally (public `/metrics` is blocked by Caddy):
+9. Verify metrics internally (public `/metrics` is blocked by Caddy):
 
 ```bash
 curl http://127.0.0.1:4000/metrics
