@@ -49,6 +49,7 @@ export interface ApiConfig {
   rateLimitWindowMs: number;
   rateLimitAllowList: string[];
   metricsEnabled: boolean;
+  httpAccessLogEnabled: boolean;
 }
 
 function readStorageProvider(raw: string | undefined, fallback: ApiConfig["objectStorageProvider"] = "local"): ApiConfig["objectStorageProvider"] {
@@ -161,5 +162,6 @@ export function loadApiConfig(): ApiConfig {
       ? process.env.RATE_LIMIT_ALLOW_LIST.split(",").map(value => value.trim()).filter(Boolean)
       : [],
     metricsEnabled: process.env.METRICS_ENABLED !== "false",
+    httpAccessLogEnabled: process.env.HTTP_ACCESS_LOG_ENABLED === "true" || process.env.NODE_ENV !== "test",
   };
 }

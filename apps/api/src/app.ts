@@ -221,12 +221,14 @@ async function createApiApp() {
     done(null, payload.pipe(capture));
   });
   app.addHook("onResponse", (request, reply, done) => {
-    console.log(JSON.stringify({
-      requestId: request.requestId,
-      method: request.method,
-      url: request.raw.url,
-      statusCode: reply.statusCode,
-    }));
+    if (config.httpAccessLogEnabled) {
+      console.log(JSON.stringify({
+        requestId: request.requestId,
+        method: request.method,
+        url: request.raw.url,
+        statusCode: reply.statusCode,
+      }));
+    }
     const durationMs = Math.max(0, Date.now() - request.requestStart);
     const route = request.routeOptions?.url ?? request.raw.url ?? "unknown";
     recordHttpRequest(request.method, route, reply.statusCode, durationMs);
