@@ -93,6 +93,9 @@ Weakness-selection policy:
 - Prefer active hosted-product surfaces over purely test-internal tuning when both are available.
 - Regularly search high-risk surfaces for evidence-backed weaknesses: auth flows, workspace boundaries, job lifecycle, report generation/export, remediation, GitHub integration, billing/entitlements, secret handling, deployment, and operator recovery paths.
 - When a weakness is fixed, prefer adding or tightening the narrowest regression test that would have caught it earlier.
+- Treat test-only or validation-only work as support work, not the main objective.
+- If the last successful pass primarily changed tests, fixtures, validation scripts, logging noise, or benchmark-sensitive constants, bias the next pass toward non-test product code unless there is a current red validation blocker.
+- Prefer changes under `apps/`, `packages/`, or deployed runtime behavior over changes limited to `tests/` or validation tooling when both are viable.
 
 Commit-worthiness policy:
 - A normal pass should end in zero or one substantial commit.
@@ -103,6 +106,7 @@ Commit-worthiness policy:
 - Avoid standalone commits whose primary effect is only faster tests, quieter logs, smaller fixtures, shorter polling, or benchmark improvement.
 - Small tuning changes are acceptable only when they are clearly tied to a reproduced weakness and either bundled into a broader fix or shown to materially improve validation trustworthiness.
 - If the strongest honest summary is only "tests are a bit faster", the change is usually not commit-worthy on its own.
+- Do not produce back-to-back standalone commits that only optimize test cost unless `npm run validate:local` is red or the optimization is directly required to expose or stabilize a real product-code weakness.
 
 Efficiency policy:
 - Use targeted diagnosis first. Do not start a pass by running multiple expensive whole-repo commands unless there is evidence they are required.
@@ -129,12 +133,17 @@ End-to-end policy:
 - Prefer single-spec or surface-specific smoke coverage over broad suite runs unless the evidence indicates a cross-cutting regression.
 - Keep `npm run validate:local` as the mandatory pre-commit gate even when additional targeted end-to-end checks are used.
 - For UX-facing fixes, explicitly validate the affected happy path plus the most relevant failure or empty-state path when feasible.
+- Use the existing Playwright coverage as a primary UX validation tool for hosted web flows.
+- For visual or UX-quality passes, prefer real browser navigation, screenshots, and rendered-state inspection over code-only judgment.
+- When tool support allows it, analyze screenshots/images from the affected pages to judge layout clarity, hierarchy, chart readability, empty/loading/error-state quality, and responsive behavior.
+- Treat screenshot-level findings as valid evidence when they reveal confusing CTAs, poor information density, weak contrast hierarchy, broken spacing, or hard-to-understand data presentation.
 
 Pass budgeting policy:
 - Aim to complete one meaningful verified weakness reduction per pass.
 - If investigation is consuming most of the pass without a clear fix path, stop, write an evidence-rich blocked status, and preserve a clean worktree.
 - Favor changes that permanently reduce future autopilot cost: removing flaky checks, reducing false failures, tightening validation signal, adding focused regression tests, or improving runtime documentation that shortens future passes.
 - Prefer one strong, reviewable change over several micro-commits that split one idea into thin benchmark-shaped deltas.
+- A good pass normally improves product code, deployed behavior, or a user-visible/operational outcome. Test-framework improvements should support that goal rather than dominate the queue.
 
 Suggested loop each pass:
 1. Read current status file if present.
@@ -167,6 +176,8 @@ Overarching plan requirements:
 - Keep /home/tina/SpecLens/.hermes/pr-autopilot/OVERARCHING-PLAN.md current.
 - It must summarize: validated bottlenecks, completed fixes, active investigation, next queued weaknesses, and any production or deployment follow-ups worth revisiting later.
 - Keep it concise and cumulative so future passes can resume quickly without rereading large logs.
+- Keep product-code weaknesses and deployment/runtime weaknesses ahead of test-cost ideas in the queued-work sections unless validation is currently red.
+- For UX work, record page-specific visual/flow findings discovered through Playwright runs and screenshot/image review so later passes can continue from concrete evidence instead of re-auditing from scratch.
 
 History requirements:
 - Append one compact JSON object per pass to /home/tina/SpecLens/.hermes/pr-autopilot/history.ndjson.
