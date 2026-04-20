@@ -43,6 +43,13 @@ export function getWorkspaceReportHref(workspaceId: string, reportId?: string | 
   return `/portal/workspaces/${workspaceId}/reports/${reportId}` as Route;
 }
 
+export function isWorkspaceScopedReportContext(
+  workspaceId: string,
+  ...scopedEntities: Array<{ workspaceId: string } | null | undefined>
+): boolean {
+  return scopedEntities.every(entity => !entity || entity.workspaceId === workspaceId);
+}
+
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
   const items: PortalNavItem[] = [
     {

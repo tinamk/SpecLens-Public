@@ -227,3 +227,28 @@ test("workspace report href helper returns the direct report route when a report
   const module = await import("../apps/web/lib/portal");
   assert.equal(module.getWorkspaceReportHref("ws_demo", "report_demo"), "/portal/workspaces/ws_demo/reports/report_demo");
 });
+
+test("workspace-scoped report context helper accepts report and job payloads from the active workspace", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedReportContext(
+      "ws_demo",
+      { workspaceId: "ws_demo" },
+      { workspaceId: "ws_demo" },
+      { workspaceId: "ws_demo" },
+    ),
+    true,
+  );
+});
+
+test("workspace-scoped report context helper rejects mismatched report workspace payloads", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedReportContext(
+      "ws_demo",
+      { workspaceId: "ws_other" },
+      { workspaceId: "ws_demo" },
+    ),
+    false,
+  );
+});

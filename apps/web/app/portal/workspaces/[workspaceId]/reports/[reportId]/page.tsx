@@ -4,7 +4,7 @@ import { PortalShell } from "@speclens/ui";
 import { ReportExportAction, ReportRemediationForm } from "../../../../../../components/portal-actions";
 import { ApiResponseError, getCurrentUser, getHostedJob, getHostedReport, getWorkspaceConsole } from "../../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../../lib/auth";
-import { buildPortalPrimaryNav, buildWorkspaceNav } from "../../../../../../lib/portal";
+import { buildPortalPrimaryNav, buildWorkspaceNav, isWorkspaceScopedReportContext } from "../../../../../../lib/portal";
 
 function getTagTone(tone: string): string {
   if (tone === "high" || tone === "failed" || tone === "error") return "tag tag--danger";
@@ -39,6 +39,9 @@ export default async function WorkspaceReportPage({
     ]);
     const roleLookup = new Map(report.roles.map(role => [role.id, role.title]));
     const canMutate = currentUser.id === workspaceConsole.workspace.ownerUserId || isPortalAdminSession(session);
+    if (!isWorkspaceScopedReportContext(workspaceId, report, job.job, latestRemediationJob?.job)) {
+      throw new ApiResponseError(404, `Report ${reportId} does not belong to workspace ${workspaceId}.`);
+    }
     const sourceOptions = [
       {
         id: job.job.sourceId,
