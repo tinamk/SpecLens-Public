@@ -41,6 +41,25 @@ test.describe("public site", () => {
     await expect(page.getByTestId("public-commercial-pro-cta")).toHaveText("Review hosted plans");
   });
 
+  test("license page routes hosted usage versus codebase rights explicitly", async ({ page }) => {
+    await expectPublicPage(page, "/license", "public-license-page");
+
+    await expect(page.getByTestId("public-license-decision-banner")).toContainText(
+      "Choose Pricing if you only need the managed service.",
+    );
+    await expect(page.getByTestId("public-license-decision-banner")).toContainText(
+      "Choose Commercial if you need codebase rights or self-hosting.",
+    );
+    await expect(page.getByTestId("public-license-rights-note")).toContainText(
+      "Hosted Free and Pro plans govern SaaS usage only.",
+    );
+    await expect(page.getByTestId("public-license-scenarios")).toContainText(
+      "I need to self-host SpecLens in my own environment - contact Commercial.",
+    );
+    await expect(page.getByTestId("public-license-pricing-cta")).toHaveText("View hosted plans");
+    await expect(page.getByTestId("public-license-commercial-cta")).toHaveText("Talk commercial licensing");
+  });
+
   test("primary CTAs reach pricing and auth boundaries", async ({ page }) => {
     await gotoPublicPath(page, "/");
     await page.getByTestId("public-home-compare-plans").click();
