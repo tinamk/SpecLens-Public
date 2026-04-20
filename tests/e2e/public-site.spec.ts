@@ -13,6 +13,19 @@ test.describe("public site", () => {
     await expectPublicPage(page, "/terms", "public-terms-page");
   });
 
+  test("pricing page makes the hosted-versus-commercial decision explicit", async ({ page }) => {
+    await expectPublicPage(page, "/pricing", "public-pricing-page");
+
+    await expect(page.getByTestId("public-pricing-decision-banner")).toContainText(
+      "Choose Pro if you need hosted access to private repos.",
+    );
+    await expect(page.getByTestId("public-pricing-rights-note")).toContainText(
+      "Free and Pro cover hosted SaaS usage only. They do not include commercial codebase rights.",
+    );
+    await expect(page.getByTestId("public-pricing-pro-checkout")).toHaveText("Start Pro");
+    await expect(page.getByRole("heading", { name: "Commercial rights & self-hosting" })).toBeVisible();
+  });
+
   test("primary CTAs reach pricing and auth boundaries", async ({ page }) => {
     await gotoPublicPath(page, "/");
     await page.getByTestId("public-home-compare-plans").click();

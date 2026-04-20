@@ -12,15 +12,39 @@ export default function PricingPage() {
         <section className="section">
           <div className="legal-hero" data-testid="public-pricing-hero">
             <p className="eyebrow">Pricing</p>
-            <h1>Choose the hosted plan you need, then keep codebase rights explicit.</h1>
+            <h1>Pricing for hosted SpecLens.</h1>
             <p className="hero-lede">
-              Hosted Free and Pro govern usage of the managed SpecLens SaaS. Commercial licensing is a separate path for
-              organizations that need broader rights, internal deployment, or procurement-specific terms.
+              Use Free or Pro for the hosted SpecLens SaaS. Choose the commercial path when you need company usage rights,
+              self-hosting, or procurement-specific terms.
             </p>
           </div>
+          <div className="comparison-grid" data-testid="public-pricing-decision-banner">
+            <article className="panel">
+              <span className="tag tag--success">Hosted SaaS</span>
+              <h2>Choose Pro if you need hosted access to private repos.</h2>
+              <p>Free covers public GitHub analysis. Pro unlocks private GitHub repositories, archive uploads, and ongoing hosted use.</p>
+            </article>
+            <article className="panel">
+              <span className="tag tag--warning">Commercial rights</span>
+              <h2>Choose Commercial if you need company usage rights or self-hosting.</h2>
+              <p>Commercial conversations cover codebase rights, internal deployment, procurement review, and tailored terms.</p>
+            </article>
+          </div>
+          <p className="subtle-note" data-testid="public-pricing-rights-note">
+            Free and Pro cover hosted SaaS usage only. They do not include commercial codebase rights.
+          </p>
         </section>
 
         <section className="section">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">Hosted SaaS plans</p>
+              <h2>Choose the self-serve plan for your hosted workflow.</h2>
+            </div>
+            <p className="section-copy">
+              Free and Pro are the hosted product tiers. Commercial rights and self-hosting stay on a separate contact path.
+            </p>
+          </div>
           <div className="pricing-grid">
             <PricingCard
               name="Free"
@@ -35,39 +59,50 @@ export default function PricingPage() {
               cta={<Link className="button-ghost" data-testid="public-pricing-free-cta" href="/api/auth/login">Use Free</Link>}
             />
             <div className="pricing-card--featured">
+              <div className="mb-3 flex items-center justify-center">
+                <span className="tag tag--success">Recommended for private repos</span>
+              </div>
               <PricingCard
                 name="Pro"
-                price="$19.99 monthly / marketed as 200 NOK"
-                description="Hosted access for private repos and Git repo archive uploads."
+                price="$19.99/month"
+                description="Hosted access for private repositories and Git repo archive uploads."
                 bullets={[
                   "Private GitHub repos",
                   "ZIP/TAR Git repo uploads",
                   "Keycloak sign-in and shared workspaces",
-                  "Stripe monthly billing in USD",
+                  "Approx. 200 NOK, billed monthly in USD",
                 ]}
-                cta={<CheckoutButton label="Continue to checkout" testId="public-pricing-pro-checkout" />}
+                cta={<CheckoutButton label="Start Pro" testId="public-pricing-pro-checkout" />}
               />
             </div>
-            <PricingCard
-              name="Commercial license"
-              price="Contact us"
-              description="Commercial usage of the codebase or self-hosted deployments."
-              bullets={[
-                "Commercial rights beyond the non-commercial source-available license",
-                "Company procurement flow",
-                "Self-hosted and internal deployment discussions",
-                "Direct contact path for tailored terms",
-              ]}
-              cta={<Link className="button-secondary" data-testid="public-pricing-commercial-cta" href="/commercial">Contact us</Link>}
-            />
           </div>
+          <article className="legal-hero legal-panel" data-testid="public-pricing-commercial-panel">
+            <span className="tag tag--warning">Commercial path</span>
+            <div>
+              <h3>Commercial rights & self-hosting</h3>
+              <p className="subtle-note">Need company usage rights, self-hosting, or procurement review?</p>
+              <p>
+                Commercial agreements cover codebase rights beyond the non-commercial source-available license, internal
+                deployment discussions, and tailored commercial terms.
+              </p>
+            </div>
+            <ul className="pricing-card__list">
+              <li>Commercial rights for company usage of the codebase</li>
+              <li>Self-hosted and internal deployment discussions</li>
+              <li>Procurement-friendly commercial agreement path</li>
+              <li>Direct contact for tailored terms</li>
+            </ul>
+            <div>
+              <Link className="button-secondary" data-testid="public-pricing-commercial-cta" href="/commercial">Contact us</Link>
+            </div>
+          </article>
         </section>
 
         <section className="section">
           <div className="section-heading">
             <div>
               <p className="section-kicker">Comparison</p>
-              <h2>What changes between Free, Pro, and Commercial</h2>
+              <h2>Hosted plans vs. commercial licensing</h2>
             </div>
             <p className="section-copy">
               Use this as the quick decision table: SaaS access is one choice, codebase rights are another.
