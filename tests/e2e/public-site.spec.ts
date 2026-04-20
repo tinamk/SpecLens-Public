@@ -26,6 +26,21 @@ test.describe("public site", () => {
     await expect(page.getByRole("heading", { name: "Commercial rights & self-hosting" })).toBeVisible();
   });
 
+  test("commercial page clarifies when to choose Pro versus the contract path", async ({ page }) => {
+    await expectPublicPage(page, "/commercial", "public-commercial-page");
+
+    await expect(page.getByTestId("public-commercial-decision-banner")).toContainText(
+      "Choose Pro for the managed hosted product.",
+    );
+    await expect(page.getByTestId("public-commercial-decision-banner")).toContainText(
+      "Choose Commercial for codebase rights, self-hosting, or procurement review.",
+    );
+    await expect(page.getByTestId("public-commercial-next-step-note")).toContainText(
+      "we will route you to the right contract path",
+    );
+    await expect(page.getByTestId("public-commercial-pro-cta")).toHaveText("Review hosted plans");
+  });
+
   test("primary CTAs reach pricing and auth boundaries", async ({ page }) => {
     await gotoPublicPath(page, "/");
     await page.getByTestId("public-home-compare-plans").click();
