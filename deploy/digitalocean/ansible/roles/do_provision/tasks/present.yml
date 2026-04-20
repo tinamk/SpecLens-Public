@@ -103,13 +103,36 @@
     outbound_rules: "{{ speclens_firewall_outbound_rules }}"
   register: speclens_firewall
 
-- name: Assign droplet to project
-  digitalocean.cloud.project_resource:
+- name: Inspect current project resources
+  digitalocean.cloud.project_resources_info:
     token: "{{ do_api_token }}"
-    state: present
     project_id: "{{ speclens_project.project.id }}"
-    resources:
-      - "do:droplet:{{ speclens_droplet.droplet.id }}"
+  register: speclens_project_resources
+
+- name: Assign droplet to project
+  ansible.builtin.uri:
+    url: "https://api.digitalocean.com/v2/projects/{{ speclens_project.project.id }}/resources"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ do_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      resources:
+        - "do:droplet:{{ speclens_droplet.droplet.id }}"
+    status_code:
+      - 200
+      - 201
+    return_content: true
+  when: >-
+    ('do:droplet:' ~ (speclens_droplet.droplet.id | string))
+    not in
+    (
+      speclens_project_resources.data
+      | default([])
+      | map(attribute='urn')
+      | list
+    )
 
 - name: Create DNS records when enabled
   digitalocean.cloud.domain_record:
