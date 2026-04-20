@@ -10,6 +10,7 @@ Environment=SPECLENS_AGENT_INTERVAL_SECONDS=60
 Environment=SPECLENS_AGENT_BACKOFF_SECONDS=120
 ExecStart=__REPO_MAIN__/scripts/autopilot/pr-autopilot-loop.sh
 Restart=on-failure
+RestartPreventExitStatus=20
 RestartSec=15
 
 [Install]

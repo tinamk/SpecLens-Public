@@ -27,6 +27,11 @@ Continuously reduce verified weaknesses in the codebase while preserving product
 Treat weaknesses broadly: failing tests, type errors, lint errors, spec gaps, unsafe code paths, brittle implementation patterns, missing validation, broken docs/spec alignment, or obviously incomplete hosted-SaaS migration work.
 Maximize useful throughput per pass: prefer evidence-backed, high-leverage fixes and avoid spending most of a pass on repeated full-repo validation.
 
+Quality objective:
+- Optimize for real product quality, not commit volume.
+- Treat dev correctness, prod correctness, security, UX clarity, failure handling, data integrity, auth/permission safety, deployment reliability, and hosted-SaaS parity as the primary outcomes.
+- Treat validation-speed work as secondary unless it removes false signal, fixes broken validation behavior, or unlocks repeated blocked weakness-reduction work.
+
 Success criteria for any completed pass:
 1. A concrete weakness was identified from evidence.
 2. The smallest high-leverage fix was implemented.
@@ -69,15 +74,35 @@ Execution policy:
 - Before any commit, run `npm run validate:local` from /home/tina/SpecLens-autopilot.
 - Commit only if validate:local passes in the current worktree state.
 - Commit message format: `autopilot: <concise verified change>`.
+- Before committing, be able to state clearly: the weakness before, the fix now, and the evidence that the weakness is reduced.
 
 Prioritization policy:
 - Prefer fixes in this order when evidence supports them:
   1. Current red validation failures blocking `npm run validate:local`
-  2. Repeatedly expensive or noisy validation problems that waste future autopilot time
-  3. Narrow hosted-SaaS parity gaps with clear behavioral evidence
-  4. Reliability or deployment-safety issues with targeted local validation
-  5. Test coverage or docs/spec alignment gaps tightly coupled to active code
+  2. Security, auth, permission, data-loss, integrity, or correctness weaknesses
+  3. User-facing UX, failure-state, or workflow regressions in the hosted product
+  4. Reliability, queue/runtime lifecycle, or deployment-safety issues with targeted local validation
+  5. Narrow hosted-SaaS parity gaps with clear behavioral evidence
+  6. Missing regression tests or weak validation signal tightly coupled to an active weakness
+  7. Repeatedly expensive or noisy validation problems that waste future autopilot time
 - Avoid broad speculative refactors, architecture churn, or low-signal cleanup passes.
+- Validation-cost work should outrank product work only when it is a proven blocker across multiple passes or removes redundant/broken validation behavior.
+
+Weakness-selection policy:
+- Prefer weaknesses with clear user impact, prod blast radius, exploitability, recurrence risk, or parity significance.
+- Prefer active hosted-product surfaces over purely test-internal tuning when both are available.
+- Regularly search high-risk surfaces for evidence-backed weaknesses: auth flows, workspace boundaries, job lifecycle, report generation/export, remediation, GitHub integration, billing/entitlements, secret handling, deployment, and operator recovery paths.
+- When a weakness is fixed, prefer adding or tightening the narrowest regression test that would have caught it earlier.
+
+Commit-worthiness policy:
+- A normal pass should end in zero or one substantial commit.
+- A standalone commit is worthwhile only if it does at least one of these:
+  - removes or materially reduces a correctness, security, UX, reliability, deployment, or parity weakness
+  - adds a regression test paired with the minimal fix for a reproduced weakness
+  - removes broken, redundant, or misleading validation behavior that was hiding or distorting real weaknesses
+- Avoid standalone commits whose primary effect is only faster tests, quieter logs, smaller fixtures, shorter polling, or benchmark improvement.
+- Small tuning changes are acceptable only when they are clearly tied to a reproduced weakness and either bundled into a broader fix or shown to materially improve validation trustworthiness.
+- If the strongest honest summary is only "tests are a bit faster", the change is usually not commit-worthy on its own.
 
 Efficiency policy:
 - Use targeted diagnosis first. Do not start a pass by running multiple expensive whole-repo commands unless there is evidence they are required.
@@ -103,11 +128,13 @@ End-to-end policy:
 - When a change touches user-facing flows, job orchestration, auth, billing, report rendering, GitHub integration, or deployment behavior, run the smallest relevant end-to-end or integration check for that surface in addition to targeted local checks.
 - Prefer single-spec or surface-specific smoke coverage over broad suite runs unless the evidence indicates a cross-cutting regression.
 - Keep `npm run validate:local` as the mandatory pre-commit gate even when additional targeted end-to-end checks are used.
+- For UX-facing fixes, explicitly validate the affected happy path plus the most relevant failure or empty-state path when feasible.
 
 Pass budgeting policy:
-- Aim to complete one meaningful verified improvement per pass.
+- Aim to complete one meaningful verified weakness reduction per pass.
 - If investigation is consuming most of the pass without a clear fix path, stop, write an evidence-rich blocked status, and preserve a clean worktree.
 - Favor changes that permanently reduce future autopilot cost: removing flaky checks, reducing false failures, tightening validation signal, adding focused regression tests, or improving runtime documentation that shortens future passes.
+- Prefer one strong, reviewable change over several micro-commits that split one idea into thin benchmark-shaped deltas.
 
 Suggested loop each pass:
 1. Read current status file if present.
@@ -144,12 +171,14 @@ Overarching plan requirements:
 History requirements:
 - Append one compact JSON object per pass to /home/tina/SpecLens/.hermes/pr-autopilot/history.ndjson.
 - Include at least: timestamp, state, summary, head, key command evidence, and whether validate:local ran in the foreground or background.
+- Do not append duplicate blocked entries for the same blocker set unless the evidence, blocker set, or next-step guidance materially changed.
 
 Status quality requirements:
 - Evidence must name the concrete commands run and the key result that justified the decision.
 - When blocked, explain why the chosen path was stopped and what the next cheapest confirming step should be.
 - When successful, record the specific weakness removed and the validations that prove it.
 - Reuse prior status context to avoid rediscovering the same dead ends in the next pass.
+- For successful passes, state the weakness class explicitly when possible: correctness, security, UX, reliability, deployment, parity, or validation-signal.
 
 Completion semantics:
 - Use `complete` only if you have high confidence there are no remaining actionable locally-verifiable weaknesses worth addressing right now AND validate:local is green.
