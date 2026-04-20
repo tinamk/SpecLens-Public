@@ -5,8 +5,8 @@ Dedicated worktree root: /home/tina/SpecLens-autopilot
 Branch to use: autopilot/speclens
 
 Hard safety boundaries:
-- Operate ONLY inside /home/tina/SpecLens-autopilot.
-- Never edit files in /home/tina/SpecLens directly.
+- Operate ONLY inside /home/tina/SpecLens-autopilot for source-code changes.
+- Never edit files in /home/tina/SpecLens directly, except updating runtime state under /home/tina/SpecLens/.hermes/pr-autopilot/ as required by this prompt.
 - Never checkout, merge into, rebase onto, or otherwise modify the main worktree.
 - Never push.
 - Never open a remote PR.
