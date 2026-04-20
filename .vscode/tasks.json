@@ -1,0 +1,119 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Autopilot: run foreground loop",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-loop.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Autopilot: preflight clean check",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-preflight.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Autopilot: install/update user service",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-install-service.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Autopilot: start service",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-start-service.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Autopilot: stop service",
+      "type": "shell",
+      "command": "systemctl --user stop speclens-pr-autopilot.service && systemctl --user status --no-pager speclens-pr-autopilot.service || true",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Autopilot: restart service",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-restart-service.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Autopilot: status",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-status.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Autopilot: logs",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-logs.sh",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

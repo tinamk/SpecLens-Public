@@ -1,0 +1,16 @@
+[Unit]
+Description=SpecLens PR-only autonomous Hermes agent
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO_MAIN__
+ExecCondition=__REPO_MAIN__/scripts/autopilot/pr-autopilot-preflight.sh
+Environment=SPECLENS_AGENT_INTERVAL_SECONDS=300
+Environment=SPECLENS_AGENT_BACKOFF_SECONDS=120
+ExecStart=__REPO_MAIN__/scripts/autopilot/pr-autopilot-loop.sh
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

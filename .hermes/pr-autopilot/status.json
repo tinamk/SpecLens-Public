@@ -1,0 +1,11 @@
+{
+  "state": "blocked",
+  "updated_at": "2026-04-20T16:43:12.627745+00:00",
+  "summary": "Refusing to start because the main repository is dirty. Commit, stash, or clean changes before running autopilot.",
+  "branch": "autopilot/speclens",
+  "worktree": "/home/tina/SpecLens-autopilot",
+  "head": "2c1381e",
+  "evidence": [],
+  "next_steps": [],
+  "blockers": []
+}

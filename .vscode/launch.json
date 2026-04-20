@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Autopilot: foreground loop",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-loop.sh",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Autopilot: preflight clean check",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-preflight.sh",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Autopilot: install/update user service",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-install-service.sh",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Autopilot: status",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-status.sh",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Autopilot: logs",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-logs.sh",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Autopilot: start service",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-start-service.sh",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Autopilot: restart service",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "${workspaceFolder}/scripts/autopilot/pr-autopilot-restart-service.sh",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Autopilot: stop service",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "systemctl --user stop speclens-pr-autopilot.service && systemctl --user status --no-pager speclens-pr-autopilot.service || true",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

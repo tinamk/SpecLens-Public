@@ -1,0 +1,6 @@
+{
+  "terminal.integrated.cwd": "${workspaceFolder}",
+  "files.exclude": {
+    "**/.hermes/pr-autopilot/logs": false
+  }
+}
