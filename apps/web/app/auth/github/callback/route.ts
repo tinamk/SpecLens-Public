@@ -8,12 +8,16 @@ function getApiBaseUrl(): string {
 }
 
 function getPublicOrigin(request: Request): string {
+  const requestUrl = new URL(request.url);
+  const fallbackLocalAppUrl = ["localhost", "127.0.0.1", "0.0.0.0", "web"].includes(requestUrl.hostname)
+    ? "http://localhost:8080"
+    : null;
   return resolvePublicRequestOrigin({
     requestUrl: request.url,
     forwardedProto: request.headers.get("x-forwarded-proto"),
     forwardedHost: request.headers.get("x-forwarded-host"),
     forwardedPort: request.headers.get("x-forwarded-port"),
-    configuredBaseUrl: process.env.APP_URL?.trim() ?? null,
+    configuredBaseUrl: process.env.APP_URL?.trim() ?? fallbackLocalAppUrl,
   });
 }
 
