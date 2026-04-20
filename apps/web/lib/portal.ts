@@ -1,3 +1,4 @@
+import type { Route } from "next";
 import type { PortalNavItem } from "@speclens/ui";
 import {
   getGithubRepositories,
@@ -33,6 +34,13 @@ export function formatJobLabel(
 export function formatJobExecutionMode(_job: { executionPath?: string; agentId?: string | null }): string {
   void _job;
   return "Unified agent runtime";
+}
+
+export function getWorkspaceReportHref(workspaceId: string, reportId?: string | null): Route | null {
+  if (!reportId) {
+    return null;
+  }
+  return `/portal/workspaces/${workspaceId}/reports/${reportId}` as Route;
 }
 
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {

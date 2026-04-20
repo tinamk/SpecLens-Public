@@ -216,3 +216,14 @@ test("web request-origin honors forwarded host headers behind trusted local prox
 
   assert.equal(origin, "https://app.speclens.example");
 });
+
+test("workspace report href helper suppresses broken report links when the report payload is missing", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(module.getWorkspaceReportHref("ws_demo", null), null);
+  assert.equal(module.getWorkspaceReportHref("ws_demo", undefined), null);
+});
+
+test("workspace report href helper returns the direct report route when a report id is present", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(module.getWorkspaceReportHref("ws_demo", "report_demo"), "/portal/workspaces/ws_demo/reports/report_demo");
+});

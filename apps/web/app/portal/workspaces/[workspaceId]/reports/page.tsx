@@ -4,7 +4,7 @@ import { PortalShell } from "@speclens/ui";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import { ApiResponseError, getPortalAnalysisTasks, getWorkspaceConsole, getWorkspaceJobsPage } from "../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
-import { buildPortalPrimaryNav, buildWorkspaceNav, formatJobLabel } from "../../../../../lib/portal";
+import { buildPortalPrimaryNav, buildWorkspaceNav, formatJobLabel, getWorkspaceReportHref } from "../../../../../lib/portal";
 
 export default async function WorkspaceReportsPage({
   params,
@@ -66,31 +66,41 @@ export default async function WorkspaceReportsPage({
             <button className="button-ghost" data-testid="workspace-reports-search-submit" type="submit">Apply report filter</button>
           </form>
           {jobsWithReports.length === 0 ? <p className="subtle-note">No reports available yet.</p> : null}
-          {jobsWithReports.map(job => (
-            <div className="list-row" data-testid={`workspace-reports-row-${job.report?.id ?? job.job.id}`} key={job.job.id}>
-              <div>
-                <strong>{job.report?.title ?? "Generated report"}</strong>
-                <p>{formatJobLabel(job.job, tasks)} · {job.job.status}</p>
-                <p>{job.job.sourceLocation}</p>
+          {jobsWithReports.map(job => {
+            const reportHref = getWorkspaceReportHref(workspaceId, job.report?.id);
+            return (
+              <div className="list-row" data-testid={`workspace-reports-row-${job.report?.id ?? job.job.id}`} key={job.job.id}>
+                <div>
+                  <strong>{job.report?.title ?? "Generated report"}</strong>
+                  <p>{formatJobLabel(job.job, tasks)} · {job.job.status}</p>
+                  <p>{job.job.sourceLocation}</p>
+                  {reportHref ? null : (
+                    <p className="subtle-note" data-testid={`workspace-reports-missing-report-${job.job.id}`}>
+                      Report details are temporarily unavailable. Open the job to review logs and artifacts.
+                    </p>
+                  )}
+                </div>
+                <div className="list-row__actions">
+                  {reportHref ? (
+                    <Link
+                      className="button-secondary"
+                      data-testid={`workspace-reports-open-${job.report?.id}`}
+                      href={reportHref}
+                    >
+                      Open report
+                    </Link>
+                  ) : null}
+                  <Link
+                    className="button-ghost"
+                    data-testid={`workspace-reports-open-job-${job.job.id}`}
+                    href={`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route}
+                  >
+                    Open job
+                  </Link>
+                </div>
               </div>
-              <div className="list-row__actions">
-                <Link
-                  className="button-secondary"
-                  data-testid={`workspace-reports-open-${job.report?.id}`}
-                  href={`/portal/workspaces/${workspaceId}/reports/${job.report?.id}` as Route}
-                >
-                  Open report
-                </Link>
-                <Link
-                  className="button-ghost"
-                  data-testid={`workspace-reports-open-job-${job.job.id}`}
-                  href={`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route}
-                >
-                  Open job
-                </Link>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           <PaginationLinks
             pathname={`/portal/workspaces/${workspaceId}/reports`}
             searchParams={query}
