@@ -291,6 +291,19 @@ function resolveRequestOrigin(request: {
   });
 }
 
+function buildConfiguredAppUrl(pathname: string, searchParams?: Record<string, string>): string {
+  const url = new URL(getConfig().appUrl);
+  url.pathname = path.posix.join(url.pathname.replace(/\/+$/, "") || "/", pathname.replace(/^\/+/, ""));
+  url.search = "";
+  url.hash = "";
+  if (searchParams) {
+    for (const [key, value] of Object.entries(searchParams)) {
+      url.searchParams.set(key, value);
+    }
+  }
+  return url.toString();
+}
+
 function safeFilename(value: string): string {
   return path.basename(value).replace(/[^a-zA-Z0-9._-]+/g, "-") || "upload.bin";
 }
@@ -1409,8 +1422,8 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
   app.post("/api/billing/checkout", async request => {
     const user = await currentUser(request);
     const input = billingCheckoutInputSchema.parse(request.body ?? {});
-    const successUrl = process.env.STRIPE_SUCCESS_URL ?? "http://localhost:3000/portal?billing=success";
-    const cancelUrl = process.env.STRIPE_CANCEL_URL ?? "http://localhost:3000/pricing?billing=cancelled";
+    const successUrl = process.env.STRIPE_SUCCESS_URL ?? buildConfiguredAppUrl("/portal", { billing: "success" });
+    const cancelUrl = process.env.STRIPE_CANCEL_URL ?? buildConfiguredAppUrl("/pricing", { billing: "cancelled" });
     const priceConfig = process.env.STRIPE_PRICE_PRO_MONTHLY_USD ?? null;
     const liveStripe = hasLiveStripeConfig() && priceConfig;
     const remoteSession = liveStripe
@@ -1452,8 +1465,8 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const input = billingPortalSessionInputSchema.parse(request.body ?? {});
     const context = await getBillingPortalContextForUser(user.id, input.workspaceId ?? null);
     const returnUrl = input.workspaceId
-      ? `${getConfig().appUrl}/portal/workspaces/${input.workspaceId}/settings`
-      : `${getConfig().appUrl}/portal/settings`;
+      ? buildConfiguredAppUrl(`/portal/workspaces/${input.workspaceId}/settings`)
+      : buildConfiguredAppUrl("/portal/settings");
     const session = await createStripeBillingPortalSession({
       customerId: context.customerId,
       returnUrl,

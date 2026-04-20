@@ -1590,6 +1590,40 @@ test("hosted API billing and github install intent routes update local state", a
   assert.equal(deletedInstallation, null);
 });
 
+test("hosted API billing checkout fallback URLs stay on the configured app origin and preserve query strings", async t => {
+  const instance = await createApiAppInstance(createTestDatabaseName("billing_urls"), {
+    APP_URL: "https://portal.speclens.test",
+    API_URL: "https://api.speclens.test",
+    SPECLENS_ALLOW_UNSAFE_LOCAL_DEV_AUTH: "true",
+  });
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const checkoutResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: "/api/billing/checkout",
+    payload: {
+      plan: "pro",
+    },
+  });
+  assert.equal(checkoutResponse.statusCode, 200);
+  const checkoutPayload = checkoutResponse.json() as { checkoutSessionId: string; checkoutUrl: string; cancelUrl: string };
+  const checkoutUrl = new URL(checkoutPayload.checkoutUrl);
+  assert.equal(checkoutUrl.origin, "https://portal.speclens.test");
+  assert.equal(checkoutUrl.pathname, "/portal");
+  assert.equal(checkoutUrl.searchParams.get("billing"), "success");
+  assert.equal(checkoutUrl.searchParams.get("session_id"), checkoutPayload.checkoutSessionId);
+  assert.equal(checkoutUrl.searchParams.get("plan"), "pro");
+  assert.equal(checkoutPayload.checkoutUrl.includes("billing=success?session_id="), false);
+
+  const cancelUrl = new URL(checkoutPayload.cancelUrl);
+  assert.equal(cancelUrl.origin, "https://portal.speclens.test");
+  assert.equal(cancelUrl.pathname, "/pricing");
+  assert.equal(cancelUrl.searchParams.get("billing"), "cancelled");
+});
+
 test("hosted API aggregates repositories across linked GitHub installations and honors the selected installation", async t => {
   const { privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048,

@@ -4705,7 +4705,17 @@ export async function createCheckoutSessionForUser(
   }
   const prisma = getPrismaClient();
   const sessionId = input.sessionId ?? createId("checkout");
-  const checkoutUrl = input.checkoutUrl ?? `${input.successUrl}?session_id=${sessionId}&plan=pro`;
+  const checkoutUrl = input.checkoutUrl ?? (() => {
+    try {
+      const url = new URL(input.successUrl);
+      url.searchParams.set("session_id", sessionId);
+      url.searchParams.set("plan", "pro");
+      return url.toString();
+    } catch {
+      const separator = input.successUrl.includes("?") ? "&" : "?";
+      return `${input.successUrl}${separator}session_id=${encodeURIComponent(sessionId)}&plan=pro`;
+    }
+  })();
   const session = await prisma.checkoutSession.create({
     data: {
       id: sessionId,
