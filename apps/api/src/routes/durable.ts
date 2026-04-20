@@ -136,6 +136,7 @@ import {
   parseStripeWebhookPayload,
 } from "../services/stripe";
 import { recordJobEvent, recordWebhookEvent } from "../services/metrics";
+import durableArtifactHelpers from "./durable-artifacts";
 
 function getConfig() {
   return loadApiConfig();
@@ -1358,9 +1359,8 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         },
       });
       const artifacts = await listArtifactsForJobForUser(report.jobId, user.id);
-      const artifactIndex = artifacts.findIndex(entry => entry.id === persistedArtifact.id);
       const downloadUrl = persistedArtifact.signedUrl
-        ?? `/api/proxy/api/jobs/${report.jobId}/artifacts/${artifactIndex >= 0 ? artifactIndex : 0}`;
+        ?? durableArtifactHelpers.buildJobArtifactProxyDownloadUrl(report.jobId, persistedArtifact.id, artifacts);
       return reportExportResponseSchema.parse({
         artifact: {
           id: persistedArtifact.id,
