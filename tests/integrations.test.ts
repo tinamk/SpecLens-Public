@@ -20,6 +20,43 @@ test("Stripe monthly plan config accepts both amount and Stripe price ids", asyn
   });
 });
 
+test("workspace secret encryption requires APP_STATE_ENCRYPTION_KEY instead of auth-secret fallbacks", async () => {
+  const originalEnv = { ...process.env };
+
+  try {
+    delete process.env.APP_STATE_ENCRYPTION_KEY;
+    process.env.CSRF_SECRET = "csrf-fallback-secret";
+    process.env.PORTAL_SESSION_SECRET = "portal-session-fallback-secret";
+
+    const { encryptSecretValue } = await import("../packages/db/src/repositories");
+
+    assert.throws(
+      () => encryptSecretValue("super-secret-value"),
+      /APP_STATE_ENCRYPTION_KEY is required for workspace secret encryption/i,
+    );
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test("workspace secret encryption round-trips with APP_STATE_ENCRYPTION_KEY", async () => {
+  const originalEnv = { ...process.env };
+
+  try {
+    process.env.APP_STATE_ENCRYPTION_KEY = "dedicated-app-state-secret";
+    process.env.CSRF_SECRET = "csrf-secret-that-must-not-be-used";
+    process.env.PORTAL_SESSION_SECRET = "portal-secret-that-must-not-be-used";
+
+    const { decryptSecretValue, encryptSecretValue } = await import("../packages/db/src/repositories");
+    const encrypted = encryptSecretValue("super-secret-value");
+
+    assert.notEqual(encrypted, "super-secret-value");
+    assert.equal(decryptSecretValue(encrypted), "super-secret-value");
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
 test("GitHub service creates an app JWT from a PKCS8 private key and resolves repo URLs", async () => {
   const originalEnv = { ...process.env };
   const { privateKey } = generateKeyPairSync("rsa", {

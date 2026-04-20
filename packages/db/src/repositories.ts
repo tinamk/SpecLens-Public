@@ -524,7 +524,7 @@ function getStatePath(): string {
 }
 
 function getEncryptionKey(): Buffer {
-  const source = process.env.APP_STATE_ENCRYPTION_KEY ?? process.env.CSRF_SECRET ?? process.env.PORTAL_SESSION_SECRET;
+  const source = process.env.APP_STATE_ENCRYPTION_KEY;
   if (!source || source.trim().length === 0) {
     throw new Error("APP_STATE_ENCRYPTION_KEY is required for workspace secret encryption.");
   }
