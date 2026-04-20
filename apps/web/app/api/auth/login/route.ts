@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { buildCsrfToken, buildLocalDevSession, csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, sessionCookieName, stateCookieName } from "../../../../lib/auth";
+import { buildCsrfToken, buildLocalDevSession, csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, resolveSafeReturnTo, sessionCookieName, stateCookieName } from "../../../../lib/auth";
 import { resolvePublicRequestOrigin } from "../../../../lib/request-origin";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/portal/workspaces";
+  const requestedReturnTo = url.searchParams.get("returnTo");
   const config = getKeycloakConfig();
   let forwardedHost = request.headers.get("x-forwarded-host");
   const forwardedProto = request.headers.get("x-forwarded-proto");
@@ -21,6 +21,7 @@ export async function GET(request: Request) {
     configuredBaseUrl: process.env.APP_URL ?? null,
   }) + `${url.pathname}${url.search}`;
   const appBaseUrl = resolveAuthBaseUrl(requestUrl, config.baseUrl);
+  const returnTo = resolveSafeReturnTo(requestedReturnTo, appBaseUrl);
 
   if (!config.enabled || !config.issuer || !config.clientId) {
     const response = NextResponse.redirect(new URL(returnTo, appBaseUrl));

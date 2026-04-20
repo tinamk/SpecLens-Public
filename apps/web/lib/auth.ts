@@ -144,6 +144,24 @@ export function resolveAuthBaseUrl(requestUrl: string, configuredBaseUrl: string
   return configuredOrigin;
 }
 
+export function resolveSafeReturnTo(returnTo: string | null | undefined, appBaseUrl: string, fallback: string = "/portal/workspaces"): string {
+  const candidate = returnTo?.trim();
+  if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {
+    return fallback;
+  }
+
+  try {
+    const target = new URL(candidate, appBaseUrl);
+    const appOrigin = new URL(appBaseUrl).origin;
+    if (target.origin !== appOrigin) {
+      return fallback;
+    }
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function exchangeCodeForToken(code: string, redirectUri: string): Promise<{ idToken: string | null }> {
   const config = getKeycloakConfig();
   if (!config.internalIssuer || !config.clientId) {

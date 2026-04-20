@@ -24,6 +24,39 @@ test("web auth login route sets a local portal session cookie and preserves retu
   process.env = originalEnv;
 });
 
+test("web auth login route rejects external returnTo targets", async () => {
+  const originalEnv = { ...process.env };
+  clearKeycloakEnv();
+  ensureTestAuthSecrets();
+  const route = await import("../apps/web/app/api/auth/login/route");
+  const response = await route.GET(new Request("http://localhost:3000/api/auth/login?returnTo=https://attacker.example/phish"));
+
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get("location"), "http://localhost:3000/portal/workspaces");
+
+  process.env = originalEnv;
+});
+
+test("web auth login route normalizes Keycloak callback returnTo targets", async () => {
+  const originalEnv = { ...process.env };
+  clearKeycloakEnv();
+  ensureTestAuthSecrets();
+  process.env.KEYCLOAK_ISSUER_URL = "http://localhost:8081/realms/speclens";
+  process.env.KEYCLOAK_CLIENT_ID = "speclens-web";
+
+  const route = await import("../apps/web/app/api/auth/login/route");
+  const response = await route.GET(new Request("http://localhost:3000/api/auth/login?returnTo=https://attacker.example/phish"));
+
+  assert.equal(response.status, 307);
+  const location = new URL(response.headers.get("location") ?? "");
+  const redirectUri = new URL(location.searchParams.get("redirect_uri") ?? "http://localhost:3000/api/auth/callback");
+  assert.equal(redirectUri.origin, "http://localhost:3000");
+  assert.equal(redirectUri.pathname, "/api/auth/callback");
+  assert.equal(redirectUri.searchParams.get("returnTo"), "/portal/workspaces");
+
+  process.env = originalEnv;
+});
+
 test("web auth login route redirects to Keycloak when configured", async () => {
   const originalEnv = { ...process.env };
   clearKeycloakEnv();
@@ -39,6 +72,19 @@ test("web auth login route redirects to Keycloak when configured", async () => {
   assert.equal(location.startsWith("http://localhost:8081/realms/speclens/protocol/openid-connect/auth"), true);
   assert.equal(location.includes("client_id=speclens-web"), true);
   assert.equal((response.headers.get("set-cookie") ?? "").includes("speclens_oidc_state="), true);
+
+  process.env = originalEnv;
+});
+
+test("web auth callback route rejects external returnTo targets in local dev mode", async () => {
+  const originalEnv = { ...process.env };
+  clearKeycloakEnv();
+  ensureTestAuthSecrets();
+  const route = await import("../apps/web/app/api/auth/callback/route");
+  const response = await route.GET(new Request("http://localhost:3000/api/auth/callback?returnTo=https://attacker.example/phish"));
+
+  assert.equal(response.status, 307);
+  assert.equal(response.headers.get("location"), "http://localhost:3000/portal/workspaces");
 
   process.env = originalEnv;
 });
