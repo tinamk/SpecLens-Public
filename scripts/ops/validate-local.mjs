@@ -1,4 +1,26 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+
+export async function resolveValidationScripts(packageJsonPath = new URL("../../package.json", import.meta.url)) {
+  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  const scripts = packageJson.scripts ?? {};
+  const validationScripts = ["lint", "typecheck", "test", "build"];
+
+  return validationScripts.filter(scriptName => {
+    const scriptValue = scripts[scriptName];
+    if (typeof scriptValue !== "string" || scriptValue.trim().length === 0) {
+      return false;
+    }
+
+    if (scriptName !== "typecheck") {
+      return true;
+    }
+
+    const buildScript = scripts.build;
+    return typeof buildScript !== "string" || buildScript.trim() !== scriptValue.trim();
+  });
+}
 
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
@@ -22,14 +44,18 @@ function runCommand(command, args) {
   });
 }
 
-async function main() {
-  await runCommand("npm", ["run", "lint"]);
-  await runCommand("npm", ["run", "typecheck"]);
-  await runCommand("npm", ["run", "test"]);
-  await runCommand("npm", ["run", "build"]);
+export async function main() {
+  const validationScripts = await resolveValidationScripts();
+  for (const scriptName of validationScripts) {
+    await runCommand("npm", ["run", scriptName]);
+  }
 }
 
-void main().catch(error => {
-  console.error("[validate:local] failed", error);
-  process.exitCode = 1;
-});
+const isEntryPoint = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (isEntryPoint) {
+  void main().catch(error => {
+    console.error("[validate:local] failed", error);
+    process.exitCode = 1;
+  });
+}

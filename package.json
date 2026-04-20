@@ -13,7 +13,7 @@
     "typecheck": "node scripts/node/run-with-clean-node-options.mjs -- tsc --noEmit",
     "test": "node scripts/node/run-with-clean-node-options.mjs -- node --import tsx --test tests/*.test.ts",
     "test:public-github-acceptance": "tsx tests/public-github-acceptance.ts",
-    "build": "node scripts/node/run-with-clean-node-options.mjs -- npm run typecheck",
+    "build": "node scripts/node/run-with-clean-node-options.mjs -- tsc --noEmit",
     "validate:local": "node scripts/node/run-with-clean-node-options.mjs -- node scripts/ops/validate-local.mjs",
     "dev:web": "next dev apps/web --hostname 0.0.0.0 --port 3000",
     "dev:api": "tsx watch apps/api/src/server.ts",
