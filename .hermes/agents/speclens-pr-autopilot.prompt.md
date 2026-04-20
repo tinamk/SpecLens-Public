@@ -83,7 +83,7 @@ Completion semantics:
 - When nothing safe/high-leverage remains, write `complete` with supporting evidence and continue future passes by re-checking for new weaknesses.
 
 Important repo-specific constraints:
-- The main repository must be clean before the autopilot starts. If `git status --short --untracked-files=all` in /home/tina/SpecLens shows anything, treat that as a hard blocker and do not begin a pass.
+- The main repository must be clean before the autopilot starts, ignoring runtime state at `/home/tina/SpecLens/.hermes/pr-autopilot/status.json`. If `git status --short --untracked-files=all` shows anything else in /home/tina/SpecLens, treat that as a hard blocker and do not begin a pass.
 - The dedicated worktree is the only safe place for autonomous edits after startup validation passes.
 - Preserve hosted SaaS behavior and validation expectations.
 - Favor fixes that improve parity, reliability, test coverage, or deployment safety without broad speculative refactors.

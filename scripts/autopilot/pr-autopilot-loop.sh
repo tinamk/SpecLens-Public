@@ -9,6 +9,7 @@ HERMES="${HERMES_BIN:-$HOME/.local/bin/hermes}"
 PROMPT_FILE="$REPO_MAIN/.hermes/agents/speclens-pr-autopilot.prompt.md"
 STATE_DIR="$REPO_MAIN/.hermes/pr-autopilot"
 STATUS_FILE="$STATE_DIR/status.json"
+STATUS_FILE_REL=".hermes/pr-autopilot/status.json"
 LOG_DIR="$STATE_DIR/logs"
 LOOP_LOG="$LOG_DIR/loop.log"
 INTERVAL_SECONDS="${SPECLENS_AGENT_INTERVAL_SECONDS:-300}"
@@ -70,11 +71,15 @@ notify() {
   fi
 }
 
+filtered_dirty_output() {
+  git -C "$REPO_MAIN" status --short --untracked-files=all | grep -F -v " $STATUS_FILE_REL" || true
+}
+
 ensure_main_repo_clean() {
   local dirty_output
-  dirty_output="$(git -C "$REPO_MAIN" status --short --untracked-files=all)"
+  dirty_output="$(filtered_dirty_output)"
   if [ -n "$dirty_output" ]; then
-    log "Refusing to start: repository is dirty. Commit, stash, or clean these paths first:"
+    log "Refusing to start: repository is dirty after ignoring runtime state $STATUS_FILE_REL. Commit, stash, or clean these paths first:"
     while IFS= read -r line; do
       [ -n "$line" ] && log "  $line"
     done <<< "$dirty_output"
