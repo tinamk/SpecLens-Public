@@ -495,7 +495,7 @@ function getApiTestJobTimeoutMs(): number {
 
 function getApiTestJobPollIntervalMs(): number {
   const value = Number.parseInt(process.env.SPECLENS_API_TEST_JOB_POLL_INTERVAL_MS ?? "", 10);
-  return Number.isFinite(value) && value > 0 ? value : 1_000;
+  return Number.isFinite(value) && value > 0 ? value : 100;
 }
 
 async function waitForJob(app: any, jobId: string, timeoutMs = getApiTestJobTimeoutMs()): Promise<any> {
