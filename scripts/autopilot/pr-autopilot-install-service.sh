@@ -15,5 +15,10 @@ source, target, repo = map(Path, sys.argv[1:4])
 content = source.read_text(encoding='utf-8').replace('__REPO_MAIN__', str(repo))
 Path(target).write_text(content, encoding='utf-8')
 PY
+
+if command -v systemd-analyze >/dev/null 2>&1; then
+  systemd-analyze --user verify "$SERVICE_TARGET"
+fi
+
 systemctl --user daemon-reload
 printf 'Installed %s from %s\n' "$SERVICE_TARGET" "$SERVICE_SOURCE"

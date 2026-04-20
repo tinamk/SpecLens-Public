@@ -2,16 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_MAIN="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-STATUS_FILE_REL=".hermes/pr-autopilot/status.json"
-
-filtered_dirty_output() {
-  git -C "$REPO_MAIN" status --short --untracked-files=all | grep -F -v " $STATUS_FILE_REL" || true
-}
+source "$SCRIPT_DIR/pr-autopilot-common.sh"
 
 printf 'Checking repo cleanliness for autopilot startup...\n'
 printf 'Repo: %s\n\n' "$REPO_MAIN"
-printf 'Ignoring runtime state path: %s\n\n' "$STATUS_FILE_REL"
+printf 'Ignoring runtime state directory: %s/\n\n' "$RUNTIME_DIR_REL"
 
 DIRTY_OUTPUT="$(filtered_dirty_output)"
 

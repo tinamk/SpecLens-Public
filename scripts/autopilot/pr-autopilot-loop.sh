@@ -2,21 +2,23 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_MAIN="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/pr-autopilot-common.sh"
 WORKTREE_DIR="${SPECLENS_AUTOPILOT_WORKTREE:-${REPO_MAIN}-autopilot}"
 BRANCH="${SPECLENS_AUTOPILOT_BRANCH:-autopilot/speclens}"
 HERMES="${HERMES_BIN:-$HOME/.local/bin/hermes}"
 PROMPT_FILE="$REPO_MAIN/.hermes/agents/speclens-pr-autopilot.prompt.md"
 STATE_DIR="$REPO_MAIN/.hermes/pr-autopilot"
 STATUS_FILE="$STATE_DIR/status.json"
-STATUS_FILE_REL=".hermes/pr-autopilot/status.json"
+PLAN_FILE="$STATE_DIR/OVERARCHING-PLAN.md"
+HISTORY_FILE="$STATE_DIR/history.ndjson"
 LOG_DIR="$STATE_DIR/logs"
 LOOP_LOG="$LOG_DIR/loop.log"
-INTERVAL_SECONDS="${SPECLENS_AGENT_INTERVAL_SECONDS:-300}"
+INTERVAL_SECONDS="${SPECLENS_AGENT_INTERVAL_SECONDS:-60}"
 BACKOFF_SECONDS="${SPECLENS_AGENT_BACKOFF_SECONDS:-120}"
 DIRTY_REPO_EXIT_CODE=20
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$REPO_MAIN/.hermes/agents"
+touch "$PLAN_FILE" "$HISTORY_FILE"
 
 log() {
   local msg="$1"
@@ -71,15 +73,11 @@ notify() {
   fi
 }
 
-filtered_dirty_output() {
-  git -C "$REPO_MAIN" status --short --untracked-files=all | grep -F -v " $STATUS_FILE_REL" || true
-}
-
 ensure_main_repo_clean() {
   local dirty_output
   dirty_output="$(filtered_dirty_output)"
   if [ -n "$dirty_output" ]; then
-    log "Refusing to start: repository is dirty after ignoring runtime state $STATUS_FILE_REL. Commit, stash, or clean these paths first:"
+    log "Refusing to start: repository is dirty after ignoring runtime state under $RUNTIME_DIR_REL/. Commit, stash, or clean these paths first:"
     while IFS= read -r line; do
       [ -n "$line" ] && log "  $line"
     done <<< "$dirty_output"

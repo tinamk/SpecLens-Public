@@ -14,6 +14,14 @@ Hard safety boundaries:
 - Never switch to another branch unless explicitly instructed in this prompt.
 - Never commit broken code.
 
+Runtime state directory:
+- Keep autopilot planning, history, logs, and status only under /home/tina/SpecLens/.hermes/pr-autopilot/.
+- Maintain these runtime files when they help future passes:
+  - /home/tina/SpecLens/.hermes/pr-autopilot/status.json
+  - /home/tina/SpecLens/.hermes/pr-autopilot/OVERARCHING-PLAN.md
+  - /home/tina/SpecLens/.hermes/pr-autopilot/history.ndjson
+- Treat everything under /home/tina/SpecLens/.hermes/pr-autopilot/ as runtime state, not source code.
+
 Mission:
 Continuously reduce verified weaknesses in the codebase while preserving product behavior.
 Treat weaknesses broadly: failing tests, type errors, lint errors, spec gaps, unsafe code paths, brittle implementation patterns, missing validation, broken docs/spec alignment, or obviously incomplete hosted-SaaS migration work.
@@ -25,12 +33,13 @@ Success criteria for any completed pass:
 3. Relevant targeted validation was run after the change.
 4. Full repo validation (`npm run validate:local`) passed before any commit.
 5. A local commit was created on autopilot/speclens only after validation passed.
-6. Status was written to /home/tina/SpecLens/.hermes/pr-autopilot/status.json.
+6. Runtime state was updated under /home/tina/SpecLens/.hermes/pr-autopilot/.
 
 If you cannot reach a green `npm run validate:local` state in the current pass:
 - do not commit
 - restore the worktree back to HEAD so the branch stays in a working state
 - write a blocked or working status with clear evidence and blockers
+- append a concise history entry for the blocked pass
 - stop for that pass
 
 Required reading before changes:
@@ -43,11 +52,12 @@ Required reading before changes:
 - docs/iterations/ITERATION-005-behavioral-parity-migration.md
 - relevant docs under docs/
 - before changing apps/web or apps/api, read the relevant hosted specs under specs/speclens/
+- before changing deployment or production-readiness surfaces, read the relevant docs under deploy/digitalocean/ and docs/ops/
 
 Required reading efficiency rule:
 - Read the core required docs at the start of a fresh worktree pass or when status/history does not already show they were read recently for the current branch state.
 - Do not repeatedly reread the same large docs within a single pass unless they directly affect the current change.
-- For follow-up passes, use the existing status file and recent evidence as memory, then read only the docs/specs needed for the area you are touching.
+- For follow-up passes, use the existing status file, history, and overarching plan as memory, then read only the docs/specs needed for the area you are touching.
 
 Execution policy:
 - Follow AGENTS.md strictly.
@@ -77,8 +87,15 @@ Efficiency policy:
   - the first run was interrupted by infrastructure/environment noise rather than a code result, or
   - you changed the validation harness itself and need one confirming rerun.
 - If you need to inspect output from an expensive command, capture it once and analyze the captured output. Do not rerun the full command just to grep for one string.
+- Do not use output-truncation pipes like `| sed -n '1,40p'`, `| head`, or similar as a performance tactic for expensive commands; they still run the whole command.
 - Prefer the smallest command that can falsify a hypothesis: targeted test file, targeted typecheck scope if available, focused lint path, or direct reproduction command.
 - If a candidate fix would require long-running validation with weak evidence, skip it and choose a better-supported weakness.
+
+Background validation policy:
+- When a long-running validation command is needed and the toolset supports it, prefer starting it in the background with completion notification once the focused change set is ready.
+- While background validation is running, you may do only non-mutating work: update runtime state files, read docs/specs, inspect logs, and triage the next likely weakness.
+- Do NOT edit source files, change git state, or start another competing long-running validation while the commit-gating validation for the current change set is running.
+- Before committing, confirm the background validation finished successfully against the unchanged worktree state.
 
 End-to-end policy:
 - Preserve end-to-end hosted SaaS behavior, but validate cleverly.
@@ -90,17 +107,20 @@ End-to-end policy:
 Pass budgeting policy:
 - Aim to complete one meaningful verified improvement per pass.
 - If investigation is consuming most of the pass without a clear fix path, stop, write an evidence-rich blocked status, and preserve a clean worktree.
-- Favor changes that permanently reduce future autopilot cost: removing flaky checks, reducing false failures, tightening validation signal, or adding focused regression tests.
+- Favor changes that permanently reduce future autopilot cost: removing flaky checks, reducing false failures, tightening validation signal, adding focused regression tests, or improving runtime documentation that shortens future passes.
 
 Suggested loop each pass:
 1. Read current status file if present.
-2. Inspect repo state, recent failures, and existing evidence to identify the next best verified weakness to tackle.
-3. Form one concrete hypothesis and choose the cheapest command that can confirm or reject it.
-4. Make one focused change set.
-5. Run targeted validation for the changed surface.
-6. If targeted validation is promising, run `npm run validate:local` once as the final gate.
-7. If green, commit locally on autopilot/speclens.
-8. Write status.json with accurate evidence, including why this weakness was chosen and which expensive commands were avoided.
+2. Read /home/tina/SpecLens/.hermes/pr-autopilot/OVERARCHING-PLAN.md if present so the next pass builds on prior work instead of rediscovering it.
+3. Inspect repo state, recent failures, and existing evidence to identify the next best verified weakness to tackle.
+4. Record the current hypothesis, active task, completed work, and backlog adjustments in the overarching plan document.
+5. Form one concrete hypothesis and choose the cheapest command that can confirm or reject it.
+6. Make one focused change set.
+7. Run targeted validation for the changed surface.
+8. If targeted validation is promising, run `npm run validate:local` once as the final gate. Prefer background execution plus completion notification when supported.
+9. While the final gate runs, do only read-only/runtime-state work such as updating the plan, collecting evidence, and identifying the next pass candidate.
+10. If green, commit locally on autopilot/speclens.
+11. Append a concise result entry to history.ndjson and write status.json with accurate evidence, including why this weakness was chosen and which expensive commands were avoided.
 
 Status file requirements:
 Write valid JSON to /home/tina/SpecLens/.hermes/pr-autopilot/status.json with this shape:
@@ -116,6 +136,15 @@ Write valid JSON to /home/tina/SpecLens/.hermes/pr-autopilot/status.json with th
   "blockers": []
 }
 
+Overarching plan requirements:
+- Keep /home/tina/SpecLens/.hermes/pr-autopilot/OVERARCHING-PLAN.md current.
+- It must summarize: validated bottlenecks, completed fixes, active investigation, next queued weaknesses, and any production or deployment follow-ups worth revisiting later.
+- Keep it concise and cumulative so future passes can resume quickly without rereading large logs.
+
+History requirements:
+- Append one compact JSON object per pass to /home/tina/SpecLens/.hermes/pr-autopilot/history.ndjson.
+- Include at least: timestamp, state, summary, head, key command evidence, and whether validate:local ran in the foreground or background.
+
 Status quality requirements:
 - Evidence must name the concrete commands run and the key result that justified the decision.
 - When blocked, explain why the chosen path was stopped and what the next cheapest confirming step should be.
@@ -128,7 +157,7 @@ Completion semantics:
 - When nothing safe/high-leverage remains, write `complete` with supporting evidence and continue future passes by re-checking for new weaknesses.
 
 Important repo-specific constraints:
-- The main repository must be clean before the autopilot starts, ignoring runtime state at `/home/tina/SpecLens/.hermes/pr-autopilot/status.json`. If `git status --short --untracked-files=all` shows anything else in /home/tina/SpecLens, treat that as a hard blocker and do not begin a pass.
+- The main repository must be clean before the autopilot starts, ignoring runtime state under `/home/tina/SpecLens/.hermes/pr-autopilot/`. If `git status --short --untracked-files=all` shows anything else in /home/tina/SpecLens, treat that as a hard blocker and do not begin a pass.
 - The dedicated worktree is the only safe place for autonomous edits after startup validation passes.
 - Preserve hosted SaaS behavior and validation expectations.
 - Favor fixes that improve parity, reliability, test coverage, or deployment safety without broad speculative refactors.
