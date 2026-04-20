@@ -10,9 +10,11 @@ import { createHomeTempDirSync } from "@speclens/core";
 import {
   appendAnalysisJobLogs,
   createAgentJobForUser,
+  createAiAgent,
   createWorkspaceForUser,
   disconnectDatabase,
   getPrismaClient,
+  listAiAgents,
   replaceSourceLearnables,
 } from "@speclens/db";
 import { createSourceForUserForTests } from "../packages/db/src/testing";
@@ -2310,16 +2312,27 @@ test("hosted API supports queued job cancellation and retry", async t => {
   const sourcePayload = await uploadGitArchiveSource(
     app,
     workspacePayload.workspace.id,
-    browserFixtureArchivePath,
-    "browser-parity-app.tar.gz",
+    fixtureArchivePath,
+    "tagtwo-mini.tar.gz",
   );
+
+  const agents = await listAiAgents();
+  const runtimeAgent = agents.find(agent => agent.id === "agent-universal-standard");
+  assert.ok(runtimeAgent, "Expected the universal audit standard agent to be seeded.");
+  const runtimeScoutRole = runtimeAgent.roles.find(role => role.id === "runtime-scout");
+  assert.ok(runtimeScoutRole, "Expected the universal audit standard agent to include the runtime-scout role.");
+  const queueProbeAgent = await createAiAgent({
+    name: "Queue control runtime-scout probe",
+    description: "Minimal agent for queue cancellation and retry coverage.",
+    roleIds: [runtimeScoutRole?.id ?? "runtime-scout"],
+  });
 
   const firstJobResponse: any = await authenticatedInject(app, {
     method: "POST",
     url: `/api/workspaces/${workspacePayload.workspace.id}/analyze`,
     payload: {
       sourceId: sourcePayload.source.id,
-      agentId: "agent-universal-standard",
+      agentId: queueProbeAgent.id,
     },
   });
   const firstJobPayload = firstJobResponse.json() as { job: { job: { id: string; executionPath: string } } };
@@ -2331,7 +2344,7 @@ test("hosted API supports queued job cancellation and retry", async t => {
     url: `/api/workspaces/${workspacePayload.workspace.id}/analyze`,
     payload: {
       sourceId: sourcePayload.source.id,
-      agentId: "agent-universal-standard",
+      agentId: queueProbeAgent.id,
     },
   });
   const secondJobPayload = secondJobResponse.json() as { job: { job: { id: string; status: string; executionPath: string } } };
