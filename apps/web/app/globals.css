@@ -227,10 +227,11 @@
     @apply max-w-3xl text-lg leading-8 text-slate-600 sm:text-xl;
   }
 
-  .hero-proof {
-    @apply mt-8 grid gap-4 sm:grid-cols-2;
+  .hero-decision-banner {
+    @apply mt-8 grid gap-4 xl:grid-cols-2;
   }
 
+  .hero-decision-card,
   .hero-proof__item,
   .hero-stage__panel,
   .hero-metric,
@@ -242,6 +243,32 @@
   .timeline-card,
   .terminal-shell {
     @apply rounded-[28px] border border-white/80 bg-white/80 shadow-panel backdrop-blur;
+  }
+
+  .hero-decision-card {
+    @apply grid gap-4 p-6;
+  }
+
+  .hero-decision-card h2 {
+    @apply text-xl font-display text-slate-950;
+  }
+
+  .hero-decision-card p {
+    @apply text-sm leading-7 text-slate-600;
+  }
+
+  .hero-decision-card__actions {
+    @apply flex flex-wrap items-center gap-3;
+  }
+
+  .hero-decision-card--hosted {
+    background:
+      linear-gradient(180deg, rgba(236, 253, 245, 0.94) 0%, rgba(255, 255, 255, 0.92) 100%);
+  }
+
+  .hero-decision-card--commercial {
+    background:
+      linear-gradient(180deg, rgba(255, 251, 235, 0.94) 0%, rgba(255, 255, 255, 0.92) 100%);
   }
 
   .hero-proof__item,
@@ -281,15 +308,19 @@
   }
 
   .hero-metrics {
-    @apply grid gap-4 sm:grid-cols-3 lg:grid-cols-1;
+    @apply grid gap-4 sm:grid-cols-2;
   }
 
   .hero-metric {
     @apply p-5;
   }
 
+  .hero-metric__eyebrow {
+    @apply block text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-slate-500;
+  }
+
   .hero-metric__value {
-    @apply block text-3xl font-display leading-none text-slate-950;
+    @apply mt-3 block text-3xl font-display leading-none text-slate-950;
   }
 
   .hero-metric__label {

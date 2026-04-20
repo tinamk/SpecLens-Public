@@ -16,21 +16,31 @@ export default function HomePage() {
                 <h1 className="text-balance">Understand a repo&apos;s risks, behavior, and next moves before you inherit the work.</h1>
                 <p className="hero-lede">
                   SpecLens turns source trees, runtime signals, and hosted job output into reviewable narratives with live
-                  logs, structured findings, and portal-ready artifacts. Free and Pro govern the managed SaaS. Commercial
-                  licensing covers company usage of the codebase and self-hosted rights.
+                  logs, structured findings, and portal-ready artifacts for teams inheriting unfamiliar repositories.
                 </p>
-                <div className="nav-links">
-                  <Link className="button" data-testid="public-home-compare-plans" href="/pricing">Compare plans</Link>
-                  <Link className="button-secondary" data-testid="public-home-open-portal" href="/api/auth/login">Open the portal</Link>
-                </div>
-                <div className="hero-proof">
-                  <article className="hero-proof__item">
+                <div className="hero-decision-banner" data-testid="public-home-decision-banner">
+                  <article className="hero-decision-card hero-decision-card--hosted">
                     <span className="tag tag--success">Hosted SaaS</span>
-                    <p>Analyze public and private repositories without maintaining a fragile local setup.</p>
+                    <h2>Choose hosted SaaS for the managed product.</h2>
+                    <p>
+                      Free covers public GitHub repos. Pro adds private repositories, archive uploads, and shared workspace
+                      access inside SpecLens Cloud.
+                    </p>
+                    <div className="hero-decision-card__actions">
+                      <Link className="button" data-testid="public-home-start-hosted" href="/api/auth/login">Try hosted SaaS</Link>
+                      <Link className="button-ghost" data-testid="public-home-view-pricing" href="/pricing">See hosted pricing</Link>
+                    </div>
                   </article>
-                  <article className="hero-proof__item">
-                    <span className="tag tag--warning">Dual license</span>
-                    <p>Keep SaaS usage and codebase rights explicit instead of burying them in ambiguous terms.</p>
+                  <article className="hero-decision-card hero-decision-card--commercial">
+                    <span className="tag tag--warning">Commercial licensing</span>
+                    <h2>Choose commercial licensing for company rights.</h2>
+                    <p>
+                      Contact us if you need company usage rights for the codebase, self-hosting, procurement review, or a
+                      licensing path beyond the managed SaaS plans.
+                    </p>
+                    <div className="hero-decision-card__actions">
+                      <Link className="button-secondary" data-testid="public-home-contact-commercial" href="/commercial">Talk commercial licensing</Link>
+                    </div>
                   </article>
                 </div>
               </div>
@@ -55,16 +65,14 @@ export default function HomePage() {
                 </div>
                 <div className="hero-metrics">
                   <article className="hero-metric">
-                    <span className="hero-metric__value">Free</span>
-                    <span className="hero-metric__label">Public GitHub review</span>
+                    <span className="hero-metric__eyebrow">Hosted plans</span>
+                    <span className="hero-metric__value">Free + Pro</span>
+                    <span className="hero-metric__label">Managed SaaS access for public, private, and uploaded Git repos</span>
                   </article>
-                  <article className="hero-metric">
-                    <span className="hero-metric__value">Pro</span>
-                    <span className="hero-metric__label">Private repos and uploads</span>
-                  </article>
-                  <article className="hero-metric">
-                    <span className="hero-metric__value">Commercial</span>
-                    <span className="hero-metric__label">Licensing and self-hosting rights</span>
+                  <article className="hero-metric hero-metric--commercial">
+                    <span className="hero-metric__eyebrow">Commercial path</span>
+                    <span className="hero-metric__value">Company rights</span>
+                    <span className="hero-metric__label">Codebase rights, self-hosting, and procurement-friendly licensing</span>
                   </article>
                 </div>
               </div>

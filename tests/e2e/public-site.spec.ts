@@ -13,6 +13,23 @@ test.describe("public site", () => {
     await expectPublicPage(page, "/terms", "public-terms-page");
   });
 
+  test("home page routes hosted SaaS versus commercial licensing explicitly", async ({ page }) => {
+    await expectPublicPage(page, "/", "public-home-page");
+
+    await expect(page.getByTestId("public-home-decision-banner")).toContainText(
+      "Choose hosted SaaS for the managed product.",
+    );
+    await expect(page.getByTestId("public-home-decision-banner")).toContainText(
+      "Choose commercial licensing for company rights.",
+    );
+    await expect(page.getByTestId("public-home-start-hosted")).toHaveText("Try hosted SaaS");
+    await expect(page.getByTestId("public-home-view-pricing")).toHaveText("See hosted pricing");
+    await expect(page.getByTestId("public-home-contact-commercial")).toHaveText("Talk commercial licensing");
+    await expect(page.getByTestId("public-cta-start-pro")).toHaveText("See hosted plans");
+    await expect(page.getByTestId("public-nav-license")).toHaveText("License model");
+    await expect(page.getByTestId("public-nav-commercial")).toHaveText("Commercial licensing");
+  });
+
   test("pricing page makes the hosted-versus-commercial decision explicit", async ({ page }) => {
     await expectPublicPage(page, "/pricing", "public-pricing-page");
 
@@ -60,15 +77,19 @@ test.describe("public site", () => {
     await expect(page.getByTestId("public-license-commercial-cta")).toHaveText("Talk commercial licensing");
   });
 
-  test("primary CTAs reach pricing and auth boundaries", async ({ page }) => {
+  test("primary CTAs reach pricing, auth, and commercial boundaries", async ({ page }) => {
     await gotoPublicPath(page, "/");
-    await page.getByTestId("public-home-compare-plans").click();
+    await page.getByTestId("public-home-view-pricing").click();
     await expect(page).toHaveURL(/\/pricing$/);
 
     await gotoPublicPath(page, "/");
     await Promise.all([
       page.waitForURL(/\/api\/auth\/login|protocol\/openid-connect\/auth|\/portal\/workspaces/, { timeout: 60_000 }),
-      page.getByTestId("public-home-open-portal").click(),
+      page.getByTestId("public-home-start-hosted").click(),
     ]);
+
+    await gotoPublicPath(page, "/");
+    await page.getByTestId("public-home-contact-commercial").click();
+    await expect(page).toHaveURL(/\/commercial$/);
   });
 });
