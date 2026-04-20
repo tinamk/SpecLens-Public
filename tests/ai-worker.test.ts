@@ -6,6 +6,7 @@ import { createHomeTempDirSync } from "@speclens/core";
 import { parseAnalysisExecutionStepEvent } from "@speclens/contracts";
 import {
   createAgentJobForUser,
+  createAiAgent,
   createWorkspaceForUser,
   createWorkspaceSecretForUser,
   getJobEnvelopeForUser,
@@ -318,8 +319,16 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     const storedLearnables = await listActiveSourceLearnables(source.id);
     assert.ok(storedLearnables.length > 0, "Expected learnables to be synthesized after the first runtime run.");
 
+    const runtimeScoutRole = runtimeAgent.roles.find(role => role.id === "runtime-scout");
+    assert.ok(runtimeScoutRole, "Expected the universal audit standard agent to include the runtime-scout role.");
+    const learnablesProbeAgent = await createAiAgent({
+      name: "Learnables runtime-scout probe",
+      description: "Minimal follow-up agent for learnables prompt injection coverage.",
+      roleIds: [runtimeScoutRole?.id ?? "runtime-scout"],
+    });
+
     fs.writeFileSync(promptCapturePath, "", "utf8");
-    const secondJob = await createAgentJobForUser(workspace.id, user.id, agentId, {
+    const secondJob = await createAgentJobForUser(workspace.id, user.id, learnablesProbeAgent.id, {
       sourceId: source.id,
       secretRefs: [secret.id],
     });

@@ -3306,6 +3306,8 @@ function startLongRunningCommand(options: {
   const child = spawn("bash", ["-lc", options.command], {
     cwd: options.cwd,
     stdio: ["ignore", "pipe", "pipe"],
+    // Non-Windows runs stop the runtime via process.kill(-pid, signal), which requires a dedicated process group.
+    detached: process.platform !== "win32",
     env: {
       ...process.env,
       ...options.env,
