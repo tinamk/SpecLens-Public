@@ -1,0 +1,4 @@
+---
+- name: Dispatch DigitalOcean provisioning workflow
+  ansible.builtin.include_tasks:
+    file: "{{ 'present.yml' if speclens_project_state == 'present' else 'absent.yml' }}"

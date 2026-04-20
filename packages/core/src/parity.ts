@@ -5,30 +5,38 @@ import type {
   AnalysisLogEvent,
   AnalysisReportSection,
   AnalysisRuntimeMode,
-  CapabilityId,
-  PresetId,
+  RoleId,
 } from "@speclens/contracts";
 import {
   analysisFindingSchema,
   analysisLogEventSchema,
   analysisReportSectionSchema,
 } from "@speclens/contracts";
-import { generateWithOrderedProviders } from "./ai";
+import {
+  generateWithOrderedProviders,
+  resolveAiDefaults,
+  type AiBudgetTracker,
+  type AiRuntimeDefaults,
+  type GenerateWithProvidersOptions,
+} from "./ai";
 import type { RepoInventory } from "./inventory";
+import type { PresetId } from "./presets";
 import { createId, ensureDir, loadJsonIfExists, nowIso, writeTextFile } from "./utils";
 import type { WorkspaceHandle } from "./workspace";
 
-interface CapabilityContext {
+interface RoleAnalysisContext {
   jobId: string;
   repoPath: string;
   inventory: RepoInventory;
-  preset: Exclude<PresetId, "auto">;
-  capabilities: CapabilityId[];
+  preset?: Exclude<PresetId, "auto"> | null;
+  roles: RoleId[];
   runtimeMode: AnalysisRuntimeMode;
   workspace: WorkspaceHandle;
+  aiDefaults?: AiRuntimeDefaults;
+  aiBudget?: AiBudgetTracker;
 }
 
-export interface CapabilityAnalysisResult {
+export interface RoleAnalysisResult {
   findings: AnalysisFinding[];
   sections: AnalysisReportSection[];
   logs: AnalysisLogEvent[];
@@ -52,7 +60,7 @@ function createLog(jobId: string, scope: string, message: string, level: "info" 
 }
 
 function createFinding(
-  capability: CapabilityId,
+  roleId: RoleId,
   severity: "high" | "medium" | "low",
   title: string,
   message: string,
@@ -60,8 +68,8 @@ function createFinding(
   evidence: string[] = [],
 ): AnalysisFinding {
   return analysisFindingSchema.parse({
-    id: createId("finding", `${capability}:${title}:${message}`),
-    capability,
+    id: createId("finding", `${roleId}:${title}:${message}`),
+    roleId,
     severity,
     title,
     message,
@@ -71,15 +79,15 @@ function createFinding(
 }
 
 function createSection(
-  capability: CapabilityId,
+  roleId: RoleId,
   title: string,
   status: "ready" | "planned" | "skipped",
   summary: string,
   data: Record<string, unknown>,
 ): AnalysisReportSection {
   return analysisReportSectionSchema.parse({
-    id: createId("section", `${capability}:${title}`),
-    capability,
+    id: createId("section", `${roleId}:${title}`),
+    roleId,
     title,
     status,
     summary,
@@ -163,7 +171,7 @@ function normalizeLicense(value: string | null, aliases: Record<string, string>)
   return aliases[value] ?? value;
 }
 
-export async function analyzeCapabilities(context: CapabilityContext): Promise<CapabilityAnalysisResult> {
+export async function analyzeRoles(context: RoleAnalysisContext): Promise<RoleAnalysisResult> {
   const files = scanSourceFiles(context.repoPath);
   const uiFiles = files.filter(file => /\.(tsx|jsx|svelte)$/.test(file.relativePath));
   const componentFiles = uiFiles.filter(file => /(^|\/)[A-Z][A-Za-z0-9_-]*\.(tsx|jsx|svelte)$/.test(file.relativePath));
@@ -175,8 +183,19 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
   const findings: AnalysisFinding[] = [];
   const sections: AnalysisReportSection[] = [];
   const logs: AnalysisLogEvent[] = [];
+  const aiDefaults = context.aiDefaults ?? resolveAiDefaults();
+  const reserveAiCall = (scope: string): boolean => {
+    if (!context.aiBudget) {
+      return true;
+    }
+    const allowed = context.aiBudget.reserve();
+    if (!allowed) {
+      logs.push(createLog(context.jobId, scope, "AI budget exhausted; skipping AI synthesis.", "warn"));
+    }
+    return allowed;
+  };
 
-  if (context.capabilities.includes("repo-inventory")) {
+  if (context.roles.includes("repo-inventory")) {
     sections.push(createSection(
       "repo-inventory",
       "Repository inventory",
@@ -194,10 +213,10 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         summary: context.inventory.summary,
       },
     ));
-    logs.push(createLog(context.jobId, "inventory", "Repository inventory capability completed."));
+    logs.push(createLog(context.jobId, "inventory", "Repository inventory role completed."));
   }
 
-  if (context.capabilities.includes("spec-check")) {
+  if (context.roles.includes("spec-check")) {
     const specFiles = files.filter(file => /(^|\/)specs\/.*\.md$/.test(file.relativePath) || /^specs\/.*\.md$/.test(file.relativePath));
     if (specFiles.length === 0) {
       findings.push(createFinding(
@@ -230,10 +249,10 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         malformedSpecs: malformedSpecs.map(file => file.relativePath),
       },
     ));
-    logs.push(createLog(context.jobId, "spec-check", "Spec check capability completed."));
+    logs.push(createLog(context.jobId, "spec-check", "Spec check role completed."));
   }
 
-  if (context.capabilities.includes("component-inventory")) {
+  if (context.roles.includes("component-inventory")) {
     const components = componentFiles.map(file => ({
       path: file.relativePath,
       importMentions: files.reduce((count, candidate) => count + (candidate.text.includes(path.basename(file.relativePath)) ? 1 : 0), 0),
@@ -258,10 +277,10 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         components: components.slice(0, 20),
       },
     ));
-    logs.push(createLog(context.jobId, "component-inventory", "Component inventory capability completed."));
+    logs.push(createLog(context.jobId, "component-inventory", "Component inventory role completed."));
   }
 
-  if (context.capabilities.includes("ui-text-inventory")) {
+  if (context.roles.includes("ui-text-inventory")) {
     sections.push(createSection(
       "ui-text-inventory",
       "UI text inventory",
@@ -272,10 +291,10 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         uiFiles: uiFiles.map(file => file.relativePath),
       },
     ));
-    logs.push(createLog(context.jobId, "ui-text", "UI text inventory capability completed."));
+    logs.push(createLog(context.jobId, "ui-text", "UI text inventory role completed."));
   }
 
-  if (context.capabilities.includes("ui-label-scan")) {
+  if (context.roles.includes("ui-label-scan")) {
     const duplicateLabels = [...labelVariants.entries()]
       .filter(([, variants]) => variants.size > 1)
       .map(([normalized, variants]) => ({ normalized, variants: [...variants].sort() }));
@@ -299,10 +318,10 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         duplicateLabels,
       },
     ));
-    logs.push(createLog(context.jobId, "ui-labels", "UI label scan capability completed."));
+    logs.push(createLog(context.jobId, "ui-labels", "UI label scan role completed."));
   }
 
-  if (context.capabilities.includes("consistency-check")) {
+  if (context.roles.includes("consistency-check")) {
     const inconsistentLabels = [...labelVariants.values()].filter(variants => variants.size > 1).length;
     const duplicateManifestNames = context.inventory.manifests.filter((manifest, index, manifests) =>
       manifest.name && manifests.findIndex(candidate => candidate.name === manifest.name) !== index);
@@ -326,10 +345,10 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         duplicateManifestNames: duplicateManifestNames.map(manifest => manifest.relativePath),
       },
     ));
-    logs.push(createLog(context.jobId, "consistency", "Consistency capability completed."));
+    logs.push(createLog(context.jobId, "consistency", "Consistency role completed."));
   }
 
-  if (context.capabilities.includes("license-policy")) {
+  if (context.roles.includes("license-policy")) {
     const licenseRecords = context.inventory.manifests.map(manifest => {
       const normalized = normalizeLicense(manifest.license, licensePolicy.aliases);
       const classification = licensePolicy.classifications.block.includes(normalized)
@@ -377,22 +396,36 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         records: licenseRecords,
       },
     ));
-    logs.push(createLog(context.jobId, "license", "License policy capability completed."));
+    logs.push(createLog(context.jobId, "license", "License policy role completed."));
   }
 
-  if (context.capabilities.includes("spec-generation")) {
+  if (context.roles.includes("spec-generation")) {
     const draftPath = path.join(context.workspace.generatedDir, `${context.jobId}.spec-draft.md`);
-    const aiSpecNotes = await generateWithOrderedProviders({
-      task: "spec-generation",
-      prompt: [
-        `Repository: ${context.inventory.repoName}`,
-        `Preset: ${context.preset}`,
-        `Capabilities: ${context.capabilities.join(", ")}`,
-        "Top findings:",
-        ...findings.slice(0, 5).map(finding => `- ${finding.title}: ${finding.message}`),
-        "Write 3 short bullets for a parity-spec draft, focusing on what behavior should be preserved.",
-      ].join("\n"),
-    });
+    const aiSpecNotes = reserveAiCall("spec-generation")
+      ? await generateWithOrderedProviders((() => {
+          const options: GenerateWithProvidersOptions = {
+            task: "spec-generation",
+            prompt: [
+              `Repository: ${context.inventory.repoName}`,
+              ...(context.preset ? [`Preset: ${context.preset}`] : []),
+              `Roles: ${context.roles.join(", ")}`,
+              "Top findings:",
+              ...findings.slice(0, 5).map(finding => `- ${finding.title}: ${finding.message}`),
+              "Write 3 short bullets for a parity-spec draft, focusing on what behavior should be preserved.",
+            ].join("\n"),
+          };
+          if (aiDefaults.maxTokens !== undefined) {
+            options.maxTokens = aiDefaults.maxTokens;
+          }
+          if (aiDefaults.timeoutMs !== undefined) {
+            options.timeoutMs = aiDefaults.timeoutMs;
+          }
+          if (aiDefaults.budgetUsd !== undefined) {
+            options.budgetUsd = aiDefaults.budgetUsd;
+          }
+          return options;
+        })())
+      : { content: null, providerId: null, attempted: [], errors: [] };
     const draftLines = [
       `# ${context.inventory.repoName} parity spec draft`,
       "",
@@ -402,7 +435,7 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
       "Document the highest-value observable behaviors this repository should preserve.",
       "",
       "## Coverage candidates",
-      ...context.capabilities.map(capability => `- ${capability}`),
+      ...context.roles.map(roleId => `- ${roleId}`),
       "",
       "## Immediate gaps",
       ...findings.slice(0, 8).map(finding => `- ${finding.title}: ${finding.suggestion}`),
@@ -422,29 +455,46 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
       "A hosted parity spec draft was generated from the current analysis coverage and findings.",
       {
         draftPath: path.relative(context.workspace.rootDir, draftPath).replace(/\\/g, "/"),
-        generatedFromCapabilities: context.capabilities,
+        generatedFromRoles: context.roles,
         aiProvider: aiSpecNotes.providerId,
       },
     ));
     if (aiSpecNotes.attempted.length > 0) {
       logs.push(createLog(context.jobId, "spec-generation", `AI providers attempted for spec generation: ${aiSpecNotes.attempted.join(", ")}.`));
     }
-    logs.push(createLog(context.jobId, "spec-generation", "Spec generation capability completed."));
+    if (!aiSpecNotes.content && aiSpecNotes.errors.length > 0) {
+      logs.push(createLog(context.jobId, "spec-generation", `AI spec generation failed: ${aiSpecNotes.errors.join(" | ")}`, "warn"));
+    }
+    logs.push(createLog(context.jobId, "spec-generation", "Spec generation role completed."));
   }
 
-  if (context.capabilities.includes("chaos-advisor")) {
+  if (context.roles.includes("chaos-advisor")) {
     const topFindings = [...findings].sort((left, right) => {
       const rank = { high: 0, medium: 1, low: 2 };
       return rank[left.severity] - rank[right.severity];
     }).slice(0, 5);
-    const aiChaosSummary = await generateWithOrderedProviders({
-      task: "chaos-advisor",
-      prompt: [
-        `Repository: ${context.inventory.repoName}`,
-        "Summarize the most important next moves from these findings in 2 short sentences.",
-        ...topFindings.map(finding => `- [${finding.severity}] ${finding.title}: ${finding.suggestion}`),
-      ].join("\n"),
-    });
+    const aiChaosSummary = reserveAiCall("chaos-advisor")
+      ? await generateWithOrderedProviders((() => {
+          const options: GenerateWithProvidersOptions = {
+            task: "chaos-advisor",
+            prompt: [
+              `Repository: ${context.inventory.repoName}`,
+              "Summarize the most important next moves from these findings in 2 short sentences.",
+              ...topFindings.map(finding => `- [${finding.severity}] ${finding.title}: ${finding.suggestion}`),
+            ].join("\n"),
+          };
+          if (aiDefaults.maxTokens !== undefined) {
+            options.maxTokens = aiDefaults.maxTokens;
+          }
+          if (aiDefaults.timeoutMs !== undefined) {
+            options.timeoutMs = aiDefaults.timeoutMs;
+          }
+          if (aiDefaults.budgetUsd !== undefined) {
+            options.budgetUsd = aiDefaults.budgetUsd;
+          }
+          return options;
+        })())
+      : { content: null, providerId: null, attempted: [], errors: [] };
     sections.push(createSection(
       "chaos-advisor",
       "Chaos advisor",
@@ -454,7 +504,7 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
         topFindings: topFindings.map(finding => ({
           title: finding.title,
           severity: finding.severity,
-          capability: finding.capability,
+          roleId: finding.roleId,
           suggestion: finding.suggestion,
         })),
         aiSummary: aiChaosSummary.content,
@@ -464,10 +514,13 @@ export async function analyzeCapabilities(context: CapabilityContext): Promise<C
     if (aiChaosSummary.attempted.length > 0) {
       logs.push(createLog(context.jobId, "chaos-advisor", `AI providers attempted for chaos advisor: ${aiChaosSummary.attempted.join(", ")}.`));
     }
-    logs.push(createLog(context.jobId, "chaos-advisor", "Chaos advisor capability completed."));
+    if (!aiChaosSummary.content && aiChaosSummary.errors.length > 0) {
+      logs.push(createLog(context.jobId, "chaos-advisor", `AI chaos advisor failed: ${aiChaosSummary.errors.join(" | ")}`, "warn"));
+    }
+    logs.push(createLog(context.jobId, "chaos-advisor", "Chaos advisor role completed."));
   }
 
-  if (context.capabilities.includes("results-dashboard")) {
+  if (context.roles.includes("results-dashboard")) {
     sections.push(createSection(
       "results-dashboard",
       "Results dashboard projection",

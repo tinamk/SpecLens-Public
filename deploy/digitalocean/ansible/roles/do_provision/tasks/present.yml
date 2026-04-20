@@ -1,0 +1,150 @@
+---
+- name: Assert DigitalOcean token is available
+  ansible.builtin.assert:
+    that:
+      - do_api_token | length > 0
+    fail_msg: "Set DIGITALOCEAN_ACCESS_TOKEN, DO_API_TOKEN, or DO_SECRET before running provision."
+
+- name: Assert SSH allow-list is configured
+  ansible.builtin.assert:
+    that:
+      - speclens_ssh_allowed_cidrs | length > 0
+    fail_msg: "Set speclens_ssh_allowed_cidrs to one or more trusted CIDRs before provisioning."
+
+- name: Check SSH public key path
+  ansible.builtin.stat:
+    path: "{{ speclens_ssh_public_key_path }}"
+  register: speclens_ssh_key_path
+
+- name: Assert SSH public key exists
+  ansible.builtin.assert:
+    that:
+      - speclens_ssh_key_path.stat.exists
+    fail_msg: "SSH public key not found at {{ speclens_ssh_public_key_path }}."
+
+- name: Validate optional DNS records
+  ansible.builtin.assert:
+    that:
+      - not speclens_manage_dns or speclens_dns_records | length > 0
+    fail_msg: "If speclens_manage_dns is true, define speclens_dns_records."
+
+- name: Read SSH public key
+  ansible.builtin.set_fact:
+    speclens_ssh_public_key_material: "{{ lookup('file', speclens_ssh_public_key_path) | trim }}"
+    speclens_cloud_init_payload: "{{ lookup('file', speclens_cloud_init_file) }}"
+
+- name: Confirm DigitalOcean account access
+  digitalocean.cloud.account_info:
+    token: "{{ do_api_token }}"
+  register: speclens_account
+
+- name: Create or reuse DigitalOcean project
+  digitalocean.cloud.project:
+    token: "{{ do_api_token }}"
+    state: present
+    name: "{{ speclens_project_name }}"
+    description: "{{ speclens_project_description }}"
+    purpose: "{{ speclens_project_purpose }}"
+    environment: "{{ speclens_project_environment }}"
+  register: speclens_project
+
+- name: Create or reuse deployment tag
+  digitalocean.cloud.tag:
+    token: "{{ do_api_token }}"
+    state: present
+    name: "{{ speclens_do_tag }}"
+
+- name: Register controller SSH key
+  digitalocean.cloud.ssh_key:
+    token: "{{ do_api_token }}"
+    state: present
+    name: "{{ speclens_ssh_key_name }}"
+    public_key: "{{ speclens_ssh_public_key_material }}"
+  register: speclens_ssh_key
+
+- name: Create or reuse single-node droplet
+  digitalocean.cloud.droplet:
+    token: "{{ do_api_token }}"
+    state: present
+    unique_name: true
+    name: "{{ speclens_do_droplet_name }}"
+    region: "{{ speclens_do_region }}"
+    size: "{{ speclens_do_size }}"
+    image: "{{ speclens_do_image }}"
+    backups: "{{ speclens_do_enable_backups }}"
+    ipv6: "{{ speclens_do_enable_ipv6 }}"
+    monitoring: "{{ speclens_do_enable_monitoring }}"
+    ssh_keys:
+      - "{{ speclens_ssh_key.ssh_key.fingerprint }}"
+    tags:
+      - "{{ speclens_do_tag }}"
+    user_data: "{{ speclens_cloud_init_payload }}"
+    timeout: "{{ speclens_do_timeout }}"
+  register: speclens_droplet
+
+- name: Capture droplet public IPv4
+  ansible.builtin.set_fact:
+    speclens_droplet_ipv4: >-
+      {{
+        speclens_droplet.droplet.networks.v4
+        | selectattr('type', 'equalto', 'public')
+        | map(attribute='ip_address')
+        | first
+      }}
+
+- name: Create or reuse firewall
+  digitalocean.cloud.firewall:
+    token: "{{ do_api_token }}"
+    state: present
+    name: "{{ speclens_do_firewall_name }}"
+    droplet_ids:
+      - "{{ speclens_droplet.droplet.id }}"
+    inbound_rules: "{{ speclens_firewall_inbound_rules }}"
+    outbound_rules: "{{ speclens_firewall_outbound_rules }}"
+  register: speclens_firewall
+
+- name: Assign droplet to project
+  digitalocean.cloud.project_resource:
+    token: "{{ do_api_token }}"
+    state: present
+    project_id: "{{ speclens_project.project.id }}"
+    resources:
+      - "do:droplet:{{ speclens_droplet.droplet.id }}"
+
+- name: Create DNS records when enabled
+  digitalocean.cloud.domain_record:
+    token: "{{ do_api_token }}"
+    state: present
+    domain_name: "{{ item.domain_name }}"
+    type: "{{ item.type }}"
+    name: "{{ item.name }}"
+    data: "{{ item.data | default(speclens_droplet_ipv4) }}"
+    ttl: "{{ item.ttl | default(300) }}"
+  loop: "{{ speclens_dns_records }}"
+  when: speclens_manage_dns
+
+- name: Ensure generated inventory directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../inventories/generated"
+    state: directory
+    mode: "0755"
+
+- name: Write generated inventory
+  ansible.builtin.template:
+    src: generated-hosts.yml.j2
+    dest: "{{ playbook_dir }}/../inventories/generated/hosts.yml"
+    mode: "0644"
+
+- name: Register host for later plays in this run
+  ansible.builtin.add_host:
+    name: "{{ speclens_do_droplet_name }}"
+    groups: speclens_droplets
+    ansible_host: "{{ speclens_droplet_ipv4 }}"
+    ansible_user: "{{ speclens_remote_user }}"
+
+- name: Show provision summary
+  ansible.builtin.debug:
+    msg:
+      - "Provisioned droplet {{ speclens_do_droplet_name }} at {{ speclens_droplet_ipv4 }}"
+      - "Project: {{ speclens_project.project.name }}"
+      - "Firewall: {{ speclens_firewall.firewall.name }}"

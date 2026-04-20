@@ -12,14 +12,14 @@ The hosted TypeScript product replaced the old local-first architecture, but a l
 
 - Recreate the archived analysis capabilities on the active TypeScript architecture.
 - Preserve behavior and user value rather than old internal tool boundaries.
-- Make presets, capabilities, runtime mode, and normalized report sections first-class hosted concepts.
+- Make the hosted product fully agent-native while preserving archived analysis capability coverage.
 - Keep the hosted product as the primary execution surface.
 
 ## Artifact Changes
 
-- parity-oriented contracts for presets, capabilities, runtime mode, secrets, findings, and report sections
+- parity-oriented contracts for runtime mode, secrets, findings, report sections, code review, and remediation
 - migrated capability registry and parity analyzers in `packages/core`
-- hosted API support for presets, capabilities, and workspace secrets
+- hosted API support for analysis tasks, workspace secrets, code review, and remediation
 - live browser/runtime execution in `packages/core` using sandbox repo copies, runtime boot detection, protected-route auth, crawl screenshots, and interaction passes
 - report export and hosted report rendering updated for normalized parity sections
 - iteration, ADR, and issue docs for the migration
@@ -36,7 +36,7 @@ The hosted TypeScript product replaced the old local-first architecture, but a l
 
 ## Demonstration Plan
 
-- Submit hosted analysis jobs with explicit presets and capability sets.
+- Submit hosted analysis jobs with explicit analysis tasks and agent selection.
 - Inspect normalized parity sections in the report output.
 - Verify workspace secret support for browser-oriented parity runs.
 - Export a report/patch bundle from a parity run.
@@ -44,9 +44,9 @@ The hosted TypeScript product replaced the old local-first architecture, but a l
 ## Evaluation Plan
 
 - Metrics:
-  - presets and capabilities are exposed through the hosted API
+  - hosted analysis-task discovery drives queueing
   - parity reports include normalized sections for archived capability families
-  - browser-oriented presets switch runs into `browser` runtime mode
+  - browser-oriented tasks switch runs into `browser` runtime mode
   - workspace secrets can be registered and referenced by runs
 - Validation commands:
   - `npm run validate:local`
@@ -62,6 +62,7 @@ The hosted TypeScript product replaced the old local-first architecture, but a l
 
 - Hosted parity now covers both static and browser-heavy archived capability families through the active TypeScript core.
 - Browser runs boot a sandbox copy of the target repo, preserve read-only treatment of the original source, and can use stored credential/session secrets for protected coverage.
+- The hosted workspace routes now cover the missing operational workflows as part of the same migration pass: secrets on the runs surface, collaboration management on access, source lifecycle actions on sources, cancel/retry on run detail, durable export from reports, and billing/GitHub lifecycle actions in settings.
 - Validation passed with `npm run validate:local`, including end-to-end browser parity tests against a bootable local fixture app.
 
 ## Reflection

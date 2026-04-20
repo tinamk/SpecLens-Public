@@ -1,3 +1,4 @@
+import nextPlugin from "@next/eslint-plugin-next";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import { defineConfig, globalIgnores } from "eslint/config";
@@ -5,8 +6,10 @@ import { defineConfig, globalIgnores } from "eslint/config";
 export default defineConfig([
   globalIgnores([
     "node_modules/**",
+    "**/next-env.d.ts",
     "dist/**",
     ".next/**",
+    "**/.next/**",
     ".speclens-workspace/**",
     "reports/**",
     "archive/**",
@@ -40,6 +43,32 @@ export default defineConfig([
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "no-console": "off"
+    }
+  },
+  {
+    files: ["eslint.config.js"],
+    plugins: {
+      "@next/next": nextPlugin,
+    },
+    settings: {
+      next: {
+        rootDir: "apps/web/",
+      },
+    },
+  },
+  {
+    files: ["apps/web/**/*.{ts,tsx}"],
+    plugins: {
+      "@next/next": nextPlugin,
+    },
+    settings: {
+      next: {
+        rootDir: "apps/web/",
+      },
+    },
+    rules: {
+      ...nextPlugin.configs["core-web-vitals"].rules,
+      "@next/next/no-html-link-for-pages": "off",
     }
   }
 ]);

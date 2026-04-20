@@ -1,0 +1,313 @@
+name: speclens-single-node
+
+services:
+  deps:
+    image: node:22-bookworm
+    restart: "no"
+    working_dir: /workspace
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: >
+      bash -lc "npm install && npm run db:generate && npm run db:migrate:deploy:safe"
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web-build:
+    image: node:22-bookworm
+    restart: "no"
+    working_dir: /workspace
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      APP_URL: https://${APP_DOMAIN}
+      API_URL: http://api:4000
+      INTERNAL_API_URL: http://api:4000
+      NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+      KEYCLOAK_ISSUER_URL: https://${AUTH_DOMAIN}/realms/speclens
+      KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
+      KEYCLOAK_BASE_URL: https://${APP_DOMAIN}
+    command: >
+      bash -lc "mkdir -p apps/web/.next && find apps/web/.next -mindepth 1 -maxdepth 1 -exec rm -rf {} + && npm run web:build"
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+  caddy:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../../docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:RELEASE.2025-02-28T09-55-16Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-03-12T17-29-24Z
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/scripts/create-bucket.sh"]
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${OBJECT_STORAGE_BUCKET}
+    volumes:
+      - ../../docker/minio/create-bucket.sh:/scripts/create-bucket.sh:ro
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    restart: unless-stopped
+    command:
+      - start
+      - --import-realm
+      - --http-enabled=true
+      - --http-port=8080
+      - --proxy-headers=xforwarded
+      - --hostname=${AUTH_DOMAIN}
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: ${KEYCLOAK_DB_NAME}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ../../docker/keycloak/realm-speclens.json:/opt/keycloak/data/import/realm-speclens.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: node:22-bookworm
+    restart: unless-stopped
+    working_dir: /workspace
+    command: >
+      bash -lc "npm run api:start"
+    env_file:
+      - .env
+    environment:
+      PORT: 4000
+      API_URL: https://${API_DOMAIN}
+      APP_URL: https://${APP_DOMAIN}
+      RUNNER_URL: http://runner:4510
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      KEYCLOAK_ISSUER_URL: https://${AUTH_DOMAIN}/realms/speclens
+      KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
+      KEYCLOAK_BASE_URL: https://${APP_DOMAIN}
+      API_TRUST_PROXY: "true"
+      RATE_LIMIT_ENABLED: "true"
+      METRICS_ENABLED: "true"
+      CODEX_HOME: /codex-host
+      OBJECT_STORAGE_PROVIDER: s3-compatible
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: https://${OBJECTS_DOMAIN}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ../..:/workspace
+      - ${HOST_CODEX_HOME:-/root/.codex}:/codex-host:ro
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  web:
+    image: node:22-bookworm
+    restart: unless-stopped
+    working_dir: /workspace
+    command: >
+      bash -lc "npm run web:start"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      APP_URL: https://${APP_DOMAIN}
+      API_URL: http://api:4000
+      INTERNAL_API_URL: http://api:4000
+      NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+      KEYCLOAK_ISSUER_URL: https://${AUTH_DOMAIN}/realms/speclens
+      KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
+      KEYCLOAK_BASE_URL: https://${APP_DOMAIN}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      web-build:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: apps/runner/docker/Dockerfile
+    image: speclens/analysis-runner:local
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      bash -lc "npm run runner:start"
+    env_file:
+      - .env
+    environment:
+      API_URL: http://api:4000
+      CODEX_HOME: /codex-host
+      RUNNER_TEMP_ROOT: ${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}
+      OBJECT_STORAGE_PROVIDER: s3-compatible
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: https://${OBJECTS_DOMAIN}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:4510:4510"
+    volumes:
+      - ../..:/app
+      - ${HOST_CODEX_HOME:-/root/.codex}:/codex-host:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}:${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4510/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  ai-worker:
+    build:
+      context: ../..
+      dockerfile: apps/ai-worker/docker/Dockerfile
+    image: speclens/ai-worker:local
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      bash -lc "npm run ai-worker:start"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CODEX_HOME: /codex-host
+      AI_WORKER_HEALTH_PORT: ${AI_WORKER_HEALTH_PORT:-4520}
+      AI_WORKER_TEMP_ROOT: ${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}
+      AI_WORKER_CODEX_BYPASS_SANDBOX: ${AI_WORKER_CODEX_BYPASS_SANDBOX:-false}
+      OBJECT_STORAGE_PROVIDER: s3-compatible
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: https://${OBJECTS_DOMAIN}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:${AI_WORKER_HEALTH_PORT:-4520}:${AI_WORKER_HEALTH_PORT:-4520}"
+    volumes:
+      - ../..:/app
+      - ${HOST_CODEX_HOME:-/root/.codex}:/codex-host:ro
+      - ${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}:${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + (process.env.AI_WORKER_HEALTH_PORT || '4520') + '/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+volumes:
+  caddy-config:
+  caddy-data:
+  minio-data:
+  postgres-data:

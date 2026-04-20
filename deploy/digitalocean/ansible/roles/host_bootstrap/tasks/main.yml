@@ -1,0 +1,69 @@
+---
+- name: Assert Ubuntu host
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == "Ubuntu"
+    fail_msg: "The bootstrap role currently expects an Ubuntu droplet."
+
+- name: Install base host packages
+  ansible.builtin.apt:
+    name:
+      - acl
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - python3-pip
+      - rsync
+      - software-properties-common
+    state: present
+    update_cache: true
+
+- name: Ensure Docker keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Install Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ 'amd64' if ansible_facts['architecture'] in ['x86_64', 'amd64'] else 'arm64' }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_facts['distribution_release'] }} stable"
+    filename: docker
+    state: present
+
+- name: Install Docker Engine and Compose plugin
+  ansible.builtin.apt:
+    name:
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-ce
+      - docker-ce-cli
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Enable Docker service
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Create SpecLens directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ speclens_remote_root }}"
+    - "{{ speclens_remote_root }}/app"
+    - "{{ speclens_remote_root }}/env"
+    - "{{ speclens_remote_root }}/runtime"
+    - "{{ speclens_remote_root }}/runtime/host-temp"
+    - "{{ speclens_remote_root }}/runtime/host-temp/runner"
+    - "{{ speclens_remote_root }}/runtime/host-temp/ai-worker"

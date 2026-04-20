@@ -8,7 +8,7 @@ Define the stable hosted JS API for workspace creation, behavioral-parity repo a
 
 - `createWorkspace(options)`
 - `analyzeRepo({ source, preset, output, workspace, mode })`
-- `listCapabilities()`
+- `listRoleDefinitions()`
 - `getRun(runId, options)`
 - `listRuns(filters)`
 - `exportPatch(runId, selection, options)`
@@ -21,7 +21,7 @@ Define the stable hosted JS API for workspace creation, behavioral-parity repo a
 ## Definitions (Source of truth)
 
 - **Workspace**: Managed SpecLens runtime area under `.speclens-workspace/`
-- **Run**: One immutable analysis snapshot with preset, capability, and runtime metadata
+- **Run**: One immutable analysis snapshot with preset, role, and runtime metadata
 - **Source descriptor**: `{ type, location, ref?, depth? }`
 
 ## Rules
@@ -37,9 +37,9 @@ Define the stable hosted JS API for workspace creation, behavioral-parity repo a
 
 ### R3 - Analysis output
 1. Each run must write a JSON run record, Markdown report, HTML dashboard, and generated spec pack.
-2. Each run must resolve a preset, capability set, and runtime mode.
-3. Reports must expose normalized sections for the migrated capability families.
-4. When a run resolves to `browser` runtime mode, SpecLens must execute browser-heavy capabilities against a sandbox copy of the target repo instead of mutating the original source.
+2. Each run must resolve a preset, role set, and runtime mode.
+3. Reports must expose normalized sections for the migrated role families.
+4. When a run resolves to `browser` runtime mode, SpecLens must execute browser-heavy roles against a sandbox copy of the target repo instead of mutating the original source.
 5. Browser runs must support secret-backed authenticated coverage through workspace-managed credential pairs or Playwright storage state.
 
 ### R4 - Patch export
@@ -50,7 +50,7 @@ Define the stable hosted JS API for workspace creation, behavioral-parity repo a
 1. An arbitrary local repo can be analyzed without a repo-local SpecLens config file.
 2. A git source can be analyzed from the same API through the workspace cache.
 3. Exporting a patch bundle leaves the target repo unchanged.
-4. A preset-capability analysis returns normalized sections and findings.
+4. A preset-role analysis returns normalized sections and findings.
 5. A bootable local repo can be analyzed in `browser` runtime mode with crawl screenshots and interaction evidence written into `.speclens-workspace/`.
 
 ## Scenarios

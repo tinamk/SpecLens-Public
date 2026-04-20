@@ -1,0 +1,9 @@
+---
+- name: Run production E2E against the SpecLens stack
+  hosts: speclens_droplets
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all.yml
+  roles:
+    - role: stack_e2e

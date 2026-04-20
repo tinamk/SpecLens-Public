@@ -1,4 +1,27 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: speclens-caddy
+    ports:
+      - "${CADDY_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - web
+      - api
+      - keycloak
+      - minio
+
+  workspace-deps:
+    image: node:22-bookworm
+    container_name: speclens-workspace-deps
+    working_dir: /workspace
+    command: >
+      bash -lc "npm ci"
+    volumes:
+      - .:/workspace
+      - root-node-modules:/workspace/node_modules
+
   postgres:
     image: postgres:16-alpine
     container_name: speclens-postgres
@@ -7,7 +30,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: speclens
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -25,8 +48,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
 
@@ -58,51 +81,98 @@ services:
       KC_DB_URL_DATABASE: keycloak
       KC_DB_USERNAME: postgres
       KC_DB_PASSWORD: postgres
-      KC_HOSTNAME: localhost
+      KC_HOSTNAME: ${KEYCLOAK_BASE_URL:-http://localhost:8080}/auth
+      KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: "true"
     ports:
-      - "8081:8080"
+      - "${KEYCLOAK_PORT:-8081}:8080"
     volumes:
       - ./docker/keycloak/realm-speclens.json:/opt/keycloak/data/import/realm-speclens.json:ro
     depends_on:
       postgres:
         condition: service_healthy
 
+  keycloak-seed:
+    image: node:22-bookworm
+    container_name: speclens-keycloak-seed
+    working_dir: /workspace
+    command: >
+      bash -lc "npm run seed:keycloak-users"
+    env_file:
+      - .env
+    environment:
+      E2E_ENV: local
+      KEYCLOAK_ADMIN_URL: http://keycloak:8080
+      KEYCLOAK_ISSUER_URL: http://keycloak:8080/realms/speclens
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    volumes:
+      - .:/workspace
+      - root-node-modules:/workspace/node_modules
+    depends_on:
+      workspace-deps:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_started
+
   api:
     image: node:22-bookworm
     container_name: speclens-api
     working_dir: /workspace
     command: >
-      bash -lc "npm install && npm run dev:api"
+      bash -lc "npm run db:generate && scripts/local/migrate-deploy.sh && npm run seed:local-users && npm run dev:api"
+    env_file:
+      - .env
     environment:
-      APP_URL: http://localhost:3000
-      API_URL: http://localhost:4000
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      API_URL: ${API_URL:-http://localhost:8080}
+      APP_STATE_BACKEND: prisma
+      APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@speclens.dev}
+      API_AUTH_MODE: keycloak
+      CSRF_SECRET: ${CSRF_SECRET:-speclens-local-dev-csrf-secret}
+      PORTAL_SESSION_SECRET: ${PORTAL_SESSION_SECRET:-speclens-local-dev-portal-session-secret}
+      CODEX_HOME: /codex-host
       PORT: 4000
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/speclens
-      KEYCLOAK_ISSUER_URL: http://localhost:8081/realms/speclens
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8080/auth/realms/speclens}
       KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
       KEYCLOAK_CLIENT_ID: speclens-web
       KEYCLOAK_CLIENT_SECRET: speclens-web-secret
       OBJECT_STORAGE_PROVIDER: s3-compatible
       OBJECT_STORAGE_BUCKET: speclens-artifacts
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
-      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-9000}
       OBJECT_STORAGE_REGION: us-east-1
       OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
       OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
       OBJECT_STORAGE_SECRET_ACCESS_KEY: minioadmin
       AI_PROVIDER_ORDER: openai,openai-codex
       RUNNER_URL: http://runner:4510
+      SPECLENS_EXPOSE_E2E_TASKS: ${SPECLENS_EXPOSE_E2E_TASKS:-false}
     ports:
-      - "4000:4000"
+      - "${API_PORT:-4000}:4000"
     volumes:
       - .:/workspace
       - root-node-modules:/workspace/node_modules
+      - ${HOME}/.codex:/codex-host:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:4000/health').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 30
     depends_on:
+      workspace-deps:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       keycloak:
         condition: service_started
+      keycloak-seed:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
 
@@ -111,49 +181,117 @@ services:
     container_name: speclens-web
     working_dir: /workspace
     command: >
-      bash -lc "npm install && npm run dev:web"
+      bash -lc "npm run dev:web"
+    env_file:
+      - .env
     environment:
-      APP_URL: http://localhost:3000
+      APP_URL: ${APP_URL:-http://localhost:8080}
       API_URL: http://api:4000
       INTERNAL_API_URL: http://api:4000
-      NEXT_PUBLIC_API_URL: http://localhost:4000
-      KEYCLOAK_ISSUER_URL: http://localhost:8081/realms/speclens
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@speclens.dev}
+      CSRF_SECRET: ${CSRF_SECRET:-speclens-local-dev-csrf-secret}
+      PORTAL_SESSION_SECRET: ${PORTAL_SESSION_SECRET:-speclens-local-dev-portal-session-secret}
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8080/auth/realms/speclens}
       KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
       KEYCLOAK_CLIENT_ID: speclens-web
       KEYCLOAK_CLIENT_SECRET: speclens-web-secret
-      KEYCLOAK_BASE_URL: http://localhost:3000
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://localhost:8080}
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:3000"
     volumes:
       - .:/workspace
       - root-node-modules:/workspace/node_modules
       - next-cache:/workspace/apps/web/.next
     depends_on:
+      workspace-deps:
+        condition: service_completed_successfully
       api:
-        condition: service_started
+        condition: service_healthy
       keycloak:
         condition: service_started
+      keycloak-seed:
+        condition: service_completed_successfully
 
   runner:
-    image: node:22-bookworm
+    build:
+      context: .
+      dockerfile: apps/runner/docker/Dockerfile
+    image: speclens/analysis-runner:local
     container_name: speclens-runner
-    working_dir: /workspace
-    command: >
-      bash -lc "npm install && npm run dev:runner"
+    env_file:
+      - .env
     environment:
+      APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
       RUNNER_POLL_INTERVAL_MS: 5000
       RUNNER_MAX_CONCURRENCY: 2
       RUNNER_HEALTH_PORT: 4510
+      CODEX_HOME: /codex-host
+      RUNNER_TEMP_ROOT: /app/.speclens-workspace/host-temp/runner
       SANDBOX_IMAGE: speclens/analysis-runner:local
-      API_URL: http://api:4000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/speclens
+      OBJECT_STORAGE_PROVIDER: s3-compatible
+      OBJECT_STORAGE_BUCKET: speclens-artifacts
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: minioadmin
     ports:
-      - "4510:4510"
+      - "${RUNNER_PORT:-4510}:4510"
     volumes:
-      - .:/workspace
-      - root-node-modules:/workspace/node_modules
+      - .:/app
+      - root-node-modules:/app/node_modules
+      - ${HOME}/.codex:/codex-host:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${RUNNER_HOST_TEMP_ROOT:-./.speclens-workspace/host-temp/runner}:/app/.speclens-workspace/host-temp/runner
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: apps/ai-worker/docker/Dockerfile
+    image: speclens/ai-worker:local
+    container_name: speclens-ai-worker
+    command: >
+      bash -lc "cd /app && npm run db:generate && npm run ai-worker:start"
+    env_file:
+      - .env
+    environment:
+      APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/speclens
+      CODEX_HOME: /codex-host
+      OBJECT_STORAGE_PROVIDER: s3-compatible
+      OBJECT_STORAGE_BUCKET: speclens-artifacts
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: minioadmin
+      AI_WORKER_HEALTH_PORT: 4520
+      AI_WORKER_MAX_CONCURRENCY: ${LOCAL_AI_WORKER_MAX_CONCURRENCY:-1}
+      AI_WORKER_TEMP_ROOT: /app/.speclens-workspace/host-temp/ai-worker
+      AI_WORKER_CODEX_BYPASS_SANDBOX: "false"
+      SPECLENS_EXPOSE_E2E_TASKS: ${SPECLENS_EXPOSE_E2E_TASKS:-false}
+    ports:
+      - "${AI_WORKER_PORT:-4520}:4520"
+    volumes:
+      - .:/app
+      - root-node-modules:/app/node_modules
+      - ${HOME}/.codex:/codex-host:ro
+      - ${AI_WORKER_HOST_TEMP_ROOT:-./.speclens-workspace/host-temp/ai-worker}:/app/.speclens-workspace/host-temp/ai-worker
+    depends_on:
+      api:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:

@@ -1,0 +1,9 @@
+---
+- name: Verify the SpecLens single-node stack
+  hosts: speclens_droplets
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all.yml
+  roles:
+    - role: stack_verify

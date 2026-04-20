@@ -17,6 +17,7 @@ dist-ssr
 generated
 coverage
 test-results
+playwright-report
 
 # Editor directories and files
 .vscode/*
@@ -31,9 +32,13 @@ test-results
 
 # Environment / secrets
 .env
+.env 
 .env.local
 .env.*.local
+deploy/digitalocean/.env.single-node
 .speclens/
+*.secrets
+*.pem
 
 # Generated outputs
 packages/db/generated
@@ -42,3 +47,11 @@ packages/db/generated
 
 # TypeScript build cache
 *.tsbuildinfo
+.act/
+.codex/
+!.codex/
+!.codex/skills/
+!.codex/skills/**
+deploy/digitalocean/.tmp/
+deploy/digitalocean/ansible/inventories/generated/*
+!deploy/digitalocean/ansible/inventories/generated/.gitkeep

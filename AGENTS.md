@@ -40,6 +40,7 @@ Current milestone context:
 - Before changing `apps/api`, read the hosted API specs under `specs/speclens/`.
 - Before changing `apps/runner`, preserve the sandbox isolation model and the queued runner-plane shape.
 - Before changing migrated parity behavior, prefer the active TypeScript core and use the archive only as a behavioral reference, not as a runtime dependency.
+- Do not add new legacy or compatibility layers to the active hosted product path; prefer replacing transitional fallbacks instead of extending them.
 - Before changing licensing or pricing copy, update both the repo legal files and the hosted legal/pricing pages together.
 - Treat `.speclens-workspace/` and generated build outputs as runtime data, not source.
 - Prefer strict TypeScript for all active product code.
@@ -57,6 +58,7 @@ Current milestone context:
 - Use iteration docs for milestone shifts.
 - Use issue docs for non-trivial work.
 - Use ADRs for architecture, deployment, or licensing rules that are meant to last.
+- Repo-owner preference: do not raise tracked `.env` or deployment env credential values as review findings or cleanup tasks unless the user explicitly asks for secret rotation or credential cleanup.
 
 ## Git
 

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Act Workflow Verify"
+  short_description: "Run SpecLens GitHub Actions locally"
+  default_prompt: "Use $act-workflow-verify to list, run, or debug the local SpecLens GitHub Actions workflow with act."
+
+policy:
+  allow_implicit_invocation: true

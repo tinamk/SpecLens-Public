@@ -1,8 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { User } from "@speclens/contracts";
+import { decodePortalSessionToken } from "@speclens/core";
+import { statusError, upsertUserIdentity as upsertDbUserIdentity } from "@speclens/db";
 import { loadApiConfig } from "./config";
-import type { AppState } from "./state";
-import { resolveCurrentUserFromCookie, upsertUserIdentity } from "./state";
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -23,6 +23,24 @@ function getRemoteJwkSet(issuerUrl: string): ReturnType<typeof createRemoteJWKSe
   return next;
 }
 
+function decodePortalSession(cookieHeader: string | null | undefined): {
+  provider: string;
+  subject: string;
+  email: string;
+  displayName: string;
+} | null {
+  const token = cookieHeader
+    ?.split(";")
+    .map(part => part.trim())
+    .find(part => part.startsWith("speclens_portal_session="))
+    ?.slice("speclens_portal_session=".length);
+
+  if (!token) {
+    return null;
+  }
+  return decodePortalSessionToken(token);
+}
+
 async function verifyKeycloakToken(token: string): Promise<{
   sub: string;
   email: string;
@@ -34,10 +52,16 @@ async function verifyKeycloakToken(token: string): Promise<{
   }
 
   const jwks = getRemoteJwkSet(config.keycloakInternalIssuerUrl);
-  const { payload } = await jwtVerify(token, jwks, {
-    issuer: config.keycloakIssuerUrl,
-    ...(config.keycloakClientId ? { audience: config.keycloakClientId } : {}),
-  });
+  let payload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
+  try {
+    ({ payload } = await jwtVerify(token, jwks, {
+      issuer: config.keycloakIssuerUrl,
+      ...(config.keycloakClientId ? { audience: config.keycloakClientId } : {}),
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid bearer token.";
+    throw statusError(401, message);
+  }
 
   const sub = typeof payload.sub === "string" ? payload.sub : null;
   if (!sub) {
@@ -60,14 +84,15 @@ async function verifyKeycloakToken(token: string): Promise<{
   };
 }
 
-export async function resolveRequestUser(
-  state: AppState,
-  headers: { authorization: string | string[] | undefined; cookie: string | null | undefined },
-): Promise<User> {
+export async function resolveAuthenticatedUser(headers: {
+  authorization?: string | string[] | undefined;
+  cookie?: string | null | undefined;
+}): Promise<User> {
+  const config = loadApiConfig();
   const bearer = readBearerToken(headers.authorization);
   if (bearer) {
     const verified = await verifyKeycloakToken(bearer);
-    return upsertUserIdentity(state, {
+    return upsertDbUserIdentity({
       provider: "keycloak",
       subject: verified.sub,
       email: verified.email,
@@ -75,5 +100,27 @@ export async function resolveRequestUser(
     });
   }
 
-  return resolveCurrentUserFromCookie(state, headers.cookie);
+  if (config.authMode === "local-dev") {
+    const session = decodePortalSession(headers.cookie);
+    if (!session) {
+      throw statusError(401, "Authentication is required.");
+    }
+    return upsertDbUserIdentity({
+      provider: session.provider,
+      subject: session.subject,
+      email: session.email,
+      displayName: session.displayName,
+    });
+  }
+
+  throw statusError(401, "Authentication is required.");
+}
+
+export function assertAdminUser(user: User): User {
+  const config = loadApiConfig();
+  const normalizedEmail = user.email.trim().toLowerCase();
+  if (config.adminEmails.includes(normalizedEmail)) {
+    return user;
+  }
+  throw statusError(403, "Administrator access is required.");
 }

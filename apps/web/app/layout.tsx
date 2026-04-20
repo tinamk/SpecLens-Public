@@ -3,7 +3,10 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SpecLens",
+  title: {
+    default: "SpecLens",
+    template: "%s | SpecLens",
+  },
   description: "Hosted spec-driven repository analysis with SaaS plans and dual licensing.",
 };
 

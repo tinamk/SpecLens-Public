@@ -1,0 +1,28 @@
+{$APP_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy web:3000
+}
+
+{$API_DOMAIN} {
+  encode gzip zstd
+  @metrics {
+    path /metrics
+  }
+  respond @metrics 404
+  reverse_proxy api:4000
+}
+
+{$AUTH_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy keycloak:8080
+}
+
+{$GITHUB_GATEWAY_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy api:4000
+}
+
+{$OBJECTS_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy minio:9000
+}

@@ -22,6 +22,8 @@ model User {
   subscriptions    BillingSubscription[]
   jobs             AnalysisJob[]
   checkoutSessions CheckoutSession[]
+  auditLogs        AuditLog[]
+  githubInstallIntents GithubInstallIntent[]
 
   @@unique([identityProvider, identitySubject])
 }
@@ -42,7 +44,10 @@ model Workspace {
   jobs             AnalysisJob[]
   installations    GithubInstallation[]
   secrets          WorkspaceSecret[]
+  learnables       SourceLearnable[]
   checkoutSessions CheckoutSession[]
+  auditLogs        AuditLog[]
+  githubInstallIntents GithubInstallIntent[]
 }
 
 model WorkspaceMembership {
@@ -64,23 +69,43 @@ model Source {
   displayName          String
   location             String
   visibility           String
+  verificationStatus   String           @default("verified")
+  verificationError    String?
   githubInstallationId String?
   uploadObjectKey      String?
   createdAt            DateTime     @default(now())
   workspace            Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  jobs                 AnalysisJob[]
+  jobs                 AnalysisJob[] @relation("AnalysisJobPrimarySource")
+  companionJobs        AnalysisJob[] @relation("AnalysisJobCompanionSource")
+  learnables           SourceLearnable[]
 }
 
 model AnalysisJob {
   id                String           @id @default(cuid())
   workspaceId       String
   sourceId          String
+  companionSourceId String?
   reportId          String?
+  parentReportId    String?
+  jobKind           String           @default("audit")
   status            String
+  agentId           String?
+  queueMessageId    String?
+  claimedRunnerId   String?
+  cancelRequestedAt DateTime?
+  failureReason     String?
+  dispatchAttempts  Int              @default(0)
+  dispatchLastError String?
+  dispatchLastAttemptAt DateTime?
+  dispatchNextAttemptAt DateTime?
+  dispatchLeaseOwner String?
+  dispatchLeaseExpiresAt DateTime?
   sourceType        String
   sourceLocation    String
-  preset            String           @default("auto")
-  capabilitiesJson  Json
+  companionSourceType String?
+  companionSourceLocation String?
+  rolesJson         Json?
+  metadataJson      Json?
   runtimeMode       String           @default("static")
   secretRefsJson    Json
   requestedByUserId String
@@ -88,10 +113,15 @@ model AnalysisJob {
   finishedAt        DateTime?
   createdAt         DateTime         @default(now())
   workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  source            Source           @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  source            Source           @relation("AnalysisJobPrimarySource", fields: [sourceId], references: [id], onDelete: Cascade)
+  companionSource   Source?          @relation("AnalysisJobCompanionSource", fields: [companionSourceId], references: [id], onDelete: SetNull)
   requestedBy       User             @relation(fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  agent             AiAgent?         @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  parentReport      AnalysisReport?  @relation("AnalysisJobParentReport", fields: [parentReportId], references: [id], onDelete: SetNull)
   logs              AnalysisJobLog[]
   report            AnalysisReport?
+  artifacts         ArtifactReference[]
+  learnables        SourceLearnable[]
 }
 
 model AnalysisJobLog {
@@ -100,6 +130,8 @@ model AnalysisJobLog {
   level      String
   scope      String
   message    String
+  visibility String      @default("default")
+  requestId String?
   createdAt  DateTime   @default(now())
   job        AnalysisJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
@@ -109,8 +141,7 @@ model AnalysisReport {
   workspaceId      String
   jobId            String              @unique
   status           String
-  preset           String              @default("auto")
-  capabilitiesJson Json
+  rolesJson        Json?
   runtimeMode      String              @default("static")
   title            String
   summaryJson      Json
@@ -119,19 +150,24 @@ model AnalysisReport {
   createdAt        DateTime            @default(now())
   workspace        Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   job              AnalysisJob         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  remediationJobs  AnalysisJob[]       @relation("AnalysisJobParentReport")
   artifacts        ArtifactReference[]
 }
 
 model ArtifactReference {
   id        String          @id @default(cuid())
-  reportId  String
+  jobId      String
+  reportId  String?
+  kind      String          @default("artifact")
   objectKey String
   bucket    String
   region    String
   mimeType  String
   sizeBytes Int
   signedUrl String?
-  report    AnalysisReport  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+  job       AnalysisJob     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  report    AnalysisReport? @relation(fields: [reportId], references: [id], onDelete: SetNull)
 }
 
 model BillingSubscription {
@@ -156,6 +192,38 @@ model GithubInstallation {
   workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
+model GithubInstallIntent {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  requestedByUserId String
+  targetAppUrl      String
+  nonce             String
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  requestedBy       User      @relation(fields: [requestedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([requestedByUserId])
+}
+
+model GithubWebhookTarget {
+  id                String   @id @default(cuid())
+  environmentLabel  String
+  appUrl            String
+  webhookForwardUrl String
+  kind              String
+  status            String   @default("active")
+  expiresAt         DateTime
+  lastSeenAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([environmentLabel, kind])
+  @@index([kind, status, expiresAt])
+}
+
 model WorkspaceSecret {
   id             String    @id @default(cuid())
   workspaceId     String
@@ -178,4 +246,142 @@ model CheckoutSession {
   createdAt   DateTime   @default(now())
   workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model StripeEvent {
+  id          String   @id
+  provider    String
+  processedAt DateTime @default(now())
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String?
+  action      String
+  targetType  String
+  targetId    String?
+  metadata    Json?
+  requestId   String?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CommercialContactRequest {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  company   String?
+  message   String
+  createdAt DateTime @default(now())
+}
+
+model AiSkill {
+  id           String        @id @default(cuid())
+  name         String
+  description  String?
+  instructions String
+  toolCapabilitiesJson Json?
+  order        Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  roles        AiRoleSkill[]
+}
+
+model AiRole {
+  id           String             @id @default(cuid())
+  name         String
+  description  String?
+  prompt       String
+  order        Int                @default(0)
+  consoleVisibility String        @default("normal")
+  executorKind String             @default("codex")
+  nativeExecutorId String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  skills       AiRoleSkill[]
+  agents       AiAgentRole[]
+  dependencies AiRoleDependency[] @relation("AiRoleDependencies")
+  dependents   AiRoleDependency[] @relation("AiRoleDependents")
+}
+
+model SourceLearnable {
+  id               String      @id @default(cuid())
+  workspaceId      String
+  sourceId         String
+  learnedFromJobId String
+  statement        String
+  category         String
+  evidenceJson     Json
+  order            Int         @default(0)
+  active           Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  workspace        Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source           Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  learnedFromJob   AnalysisJob @relation(fields: [learnedFromJobId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, sourceId, active, order])
+}
+
+model AiAgent {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  order       Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  roles       AiAgentRole[]
+  jobs        AnalysisJob[]
+}
+
+model AiRoleSkill {
+  roleId  String
+  skillId String
+  order   Int      @default(0)
+  role    AiRole   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  skill   AiSkill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, skillId])
+}
+
+model AiAgentRole {
+  agentId String
+  roleId  String
+  order   Int      @default(0)
+  agent   AiAgent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  role    AiRole   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, roleId])
+}
+
+model AiRoleDependency {
+  roleId          String
+  dependsOnRoleId String
+  order           Int      @default(0)
+  role            AiRole   @relation("AiRoleDependencies", fields: [roleId], references: [id], onDelete: Cascade)
+  dependsOnRole   AiRole   @relation("AiRoleDependents", fields: [dependsOnRoleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, dependsOnRoleId])
+}
+
+model AiAuth {
+  id                     String   @id
+  status                 String
+  authMode               String?
+  accountId              String?
+  deviceCode             String?
+  userCode               String?
+  verificationUri        String?
+  verificationUriComplete String?
+  expiresAt              DateTime?
+  intervalSeconds        Int?
+  accessTokenEncrypted   String?
+  refreshTokenEncrypted  String?
+  idTokenEncrypted       String?
+  lastRefreshAt          DateTime?
+  lastError              String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 }

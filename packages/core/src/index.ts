@@ -3,9 +3,8 @@ import type {
   AnalysisJob,
   AnalysisLogEvent,
   AnalysisReport,
-  CapabilityId,
   JobEnvelope,
-  PresetId,
+  RoleId,
   Source,
   Workspace,
 } from "@speclens/contracts";
@@ -16,18 +15,90 @@ import {
   workspaceSchema,
 } from "@speclens/contracts";
 import { createGeneratedSpecPack } from "./analyzers";
-import { generateWithOrderedProviders, resolveAiProvidersFromEnv, type AiProviderDescriptor } from "./ai";
-import { analyzeBrowserCapabilities } from "./browser";
+import { inspectGitRepositoryPathAsync } from "./archive";
+export {
+  extractArchiveFileAsync,
+  inspectArchiveFileAsync,
+  inspectGitRepositoryArchiveFileAsync,
+  inspectGitRepositoryPathAsync,
+  type ArchiveInspection,
+  type ArchiveKind,
+  type GitRepositoryArchiveInspection,
+  type GitRepositoryPathInspection,
+} from "./archive";
+export {
+  downloadPublicFileToPath,
+  filenameFromPublicUrl,
+  isValidPublicHttpUrl,
+  resolvePublicCodeLocation,
+  type ResolvedPublicCodeLocation,
+} from "./public-download";
+export {
+  isAllowedDynamicReturnOrigin,
+  isPrivateOrLocalHostname,
+  isTrustedInternalServiceHostname,
+  isTrustedLocalHostname,
+  parseAllowedOrigins,
+  resolvePublicRequestOrigin,
+} from "./origin";
+export { snapshotPublicWebsite } from "./web-snapshot";
+export { analyzeBrowserRoles } from "./browser";
+export { buildRepoInventory } from "./inventory";
+export {
+  createHomeTempDirSync,
+  ensureSpecLensTempRoot,
+  resolveSpecLensAppStatePath,
+  resolveSpecLensCacheRoot,
+  resolveSpecLensObjectStorageRoot,
+  resolveSpecLensStateRoot,
+  resolveSpecLensTempRoot,
+} from "./local-paths";
+export {
+  createGithubAppJwt,
+  createGithubCloneUrl,
+  createGithubGitAuthEnv,
+  createGithubInstallationAccessToken,
+  parseGithubRepoLocation,
+} from "./github-app";
+export {
+  buildPortalCsrfToken,
+  decodePortalSessionToken,
+  encodePortalSessionToken,
+  type PortalSession,
+} from "./portal-session";
+export { presetIdSchema, type PresetId } from "./presets";
+export { analyzeRoles } from "./parity";
+export {
+  createChangesetSummary,
+  createRemediationTempDir,
+  materializeRemediationRepo,
+  maybePublishGithubPullRequest,
+  resolveValidationCommands,
+  runCodexRemediation,
+  runGit,
+  runValidationCommands,
+  selectRemediationFindings,
+} from "./remediation";
 import {
-  listCapabilities as listCapabilityDefinitions,
+  createAiBudgetTracker,
+  generateWithOrderedProviders,
+  resolveAiDefaults,
+  resolveAiProvidersFromEnv,
+  type AiProviderDescriptor,
+} from "./ai";
+import { analyzeBrowserRoles } from "./browser";
+import {
+  listRoleDefinitions as listRoleDefinitionsInternal,
   listPresetDefinitions,
-  resolveCapabilities,
   resolvePresetId,
+  resolvePresetRoles,
+  resolveRoleDefinitionsForRoles,
   resolveRuntimeMode,
-} from "./capabilities";
+} from "./roles";
 import { buildRepoInventory } from "./inventory";
 import { exportPatchBundle, type ExportPatchOptions, type ExportPatchResult, type ExportPatchSelection } from "./patch";
-import { analyzeCapabilities } from "./parity";
+import { analyzeRoles } from "./parity";
+import { type PresetId } from "./presets";
 import { writeRunArtifacts } from "./reporting";
 import { acquireSource, asHostedSource, type SourceDescriptor } from "./source";
 import { createId, makeRunId, nowIso } from "./utils";
@@ -43,9 +114,10 @@ export interface AnalyzeRepoOptions {
   rootDir?: string;
   workspace?: WorkspaceOptions;
   jobId?: string;
-  source: SourceDescriptor;
+  source?: SourceDescriptor;
+  repoPath?: string;
   preset?: PresetId;
-  capabilities?: CapabilityId[];
+  roles?: RoleId[];
   runtimeMode?: "static" | "browser";
   secretRefs?: string[];
   secrets?: Array<{
@@ -55,6 +127,7 @@ export interface AnalyzeRepoOptions {
     name?: string;
   }>;
   mode?: "standard" | "hosted";
+  allowHostExecution?: boolean;
 }
 
 function createWorkspaceRecord(handle: WorkspaceHandle): Workspace {
@@ -74,7 +147,7 @@ function createJobRecord(
   workspace: Workspace,
   source: Source,
   preset: Exclude<PresetId, "auto">,
-  capabilities: CapabilityId[],
+  roles: RoleId[],
   runtimeMode: "static" | "browser",
   secretRefs: string[],
   jobId?: string,
@@ -83,12 +156,16 @@ function createJobRecord(
     id: jobId ?? makeRunId(path.basename(source.location)),
     workspaceId: workspace.id,
     sourceId: source.id,
+    companionSourceId: null,
     reportId: null,
     status: "succeeded",
+    executionPath: "unified-agent",
+    agentId: null,
     sourceType: source.type,
     sourceLocation: source.location,
-    preset,
-    capabilities,
+    companionSourceType: null,
+    companionSourceLocation: null,
+    roles,
     runtimeMode,
     secretRefs,
     requestedByUserId: workspace.ownerUserId,
@@ -125,56 +202,133 @@ export function createWorkspace(options: WorkspaceOptions = {}): WorkspaceHandle
   return createWorkspaceHandle(options);
 }
 
+export function writeHostedJobArtifacts(options: {
+  rootDir?: string;
+  workspaceName: string;
+  repoPath: string;
+  envelope: JobEnvelope;
+}): JobEnvelope {
+  const workspaceHandle = createWorkspaceHandle({
+    ...(options.rootDir ? { rootDir: options.rootDir } : {}),
+    name: options.workspaceName,
+  });
+  const inventory = buildRepoInventory(options.repoPath);
+  return writeRunArtifacts({
+    workspace: workspaceHandle,
+    envelope: options.envelope,
+    generatedSpecPack: createGeneratedSpecPack(inventory),
+  });
+}
+
+function createLocalRepoSource(workspaceId: string, repoPath: string): Source {
+  return {
+    id: createId("source", `local:${repoPath}`),
+    workspaceId,
+    type: "git-public",
+    displayName: `Local git repo: ${path.basename(repoPath)}`,
+    location: repoPath,
+    visibility: "private",
+    verificationStatus: "verified",
+    verificationError: null,
+    githubInstallationId: null,
+    uploadObjectKey: null,
+    createdAt: nowIso(),
+  };
+}
+
 export async function analyzeRepo(options: AnalyzeRepoOptions): Promise<JobEnvelope> {
   const workspaceHandle = createWorkspaceHandle(
     options.workspace ?? (options.rootDir ? { rootDir: options.rootDir } : {}),
   );
   const workspace = createWorkspaceRecord(workspaceHandle);
-  const acquiredSource = acquireSource(options.source, workspaceHandle);
-  const source = asHostedSource(acquiredSource, workspace.id);
-  const inventory = buildRepoInventory(acquiredSource.repoPath);
+  const usingRepoPath = typeof options.repoPath === "string" && options.repoPath.trim().length > 0;
+  const usingSource = options.source !== undefined;
+  if (usingRepoPath === usingSource) {
+    throw new Error("analyzeRepo requires exactly one of source or repoPath.");
+  }
+
+  let source: Source;
+  let repoPath: string;
+  if (usingRepoPath) {
+    const inspected = await inspectGitRepositoryPathAsync(options.repoPath!);
+    if (inspected.ok === false) {
+      throw new Error(inspected.message);
+    }
+    repoPath = inspected.rootPath;
+    source = createLocalRepoSource(workspace.id, repoPath);
+  } else {
+    const acquiredSource = await acquireSource(options.source!, workspaceHandle);
+    source = asHostedSource(acquiredSource, workspace.id);
+    repoPath = acquiredSource.repoPath;
+  }
+
+  const inventory = buildRepoInventory(repoPath);
   const preset = resolvePresetId(options.preset, inventory);
-  const capabilities = resolveCapabilities(preset, options.capabilities);
-  const runtimeMode = resolveRuntimeMode(preset, capabilities, options.runtimeMode);
+  const requestedRoles = options.roles && options.roles.length > 0 ? options.roles : undefined;
+  const presetRoles = resolvePresetRoles(preset, requestedRoles);
+  const roleIds = requestedRoles && requestedRoles.length > 0 ? requestedRoles : presetRoles;
+  const roleDefinitions = resolveRoleDefinitionsForRoles(roleIds);
+  const runtimeMode = resolveRuntimeMode(preset, presetRoles, options.runtimeMode);
   const secretRefs = options.secretRefs ?? [];
-  const job = createJobRecord(workspace, source, preset, capabilities, runtimeMode, secretRefs, options.jobId);
-  const capabilityResult = await analyzeCapabilities({
+  const aiDefaults = resolveAiDefaults();
+  const aiBudget = createAiBudgetTracker(aiDefaults.budgetUsd);
+  const job = createJobRecord(workspace, source, preset, roleIds, runtimeMode, secretRefs, options.jobId);
+  const roleResult = await analyzeRoles({
     jobId: job.id,
-    repoPath: acquiredSource.repoPath,
+    repoPath,
     inventory,
     preset,
-    capabilities,
+    roles: presetRoles,
     runtimeMode,
     workspace: workspaceHandle,
+    aiDefaults,
+    aiBudget,
   });
   const browserResult = runtimeMode === "browser"
-    ? await analyzeBrowserCapabilities({
+    ? await analyzeBrowserRoles({
         jobId: job.id,
-        repoPath: acquiredSource.repoPath,
+        repoPath,
         inventory,
-        capabilities,
+        roles: presetRoles,
         workspace: workspaceHandle,
         secrets: options.secrets ?? [],
+        allowHostExecution: options.allowHostExecution === true,
+        aiDefaults,
+        aiBudget,
       })
     : { findings: [], sections: [], logs: [] };
-  const logs: AnalysisLogEvent[] = [...createLogs(job.id, runtimeMode), ...capabilityResult.logs, ...browserResult.logs];
+  const logs: AnalysisLogEvent[] = [...createLogs(job.id, runtimeMode), ...roleResult.logs, ...browserResult.logs];
   const report: AnalysisReport = {
     id: `report-${job.id}`,
     workspaceId: workspace.id,
     jobId: job.id,
     status: "ready",
-    preset,
-    capabilities,
+    roles: roleDefinitions,
     runtimeMode,
     title: `${inventory.repoName} parity analysis report`,
     summary: {
-      totalFindings: [...capabilityResult.findings, ...browserResult.findings].length,
-      high: [...capabilityResult.findings, ...browserResult.findings].filter(item => item.severity === "high").length,
-      medium: [...capabilityResult.findings, ...browserResult.findings].filter(item => item.severity === "medium").length,
-      low: [...capabilityResult.findings, ...browserResult.findings].filter(item => item.severity === "low").length,
+      totalFindings: [...roleResult.findings, ...browserResult.findings].length,
+      high: [...roleResult.findings, ...browserResult.findings].filter(item => item.severity === "high").length,
+      medium: [...roleResult.findings, ...browserResult.findings].filter(item => item.severity === "medium").length,
+      low: [...roleResult.findings, ...browserResult.findings].filter(item => item.severity === "low").length,
+      auditBundleId: "standard",
+      categoryCounts: {},
+      releaseGateDecision: null,
+      remediationPacks: [],
+      fixHandoff: null,
+      changeset: null,
+      latestRemediationJobId: null,
+      executionCoverage: {
+        attempted: [],
+        skipped: [],
+      },
+      qualityScorecard: null,
+      capabilityGaps: [],
+      artifactAnalysis: null,
+      executionSteps: [],
     },
-    findings: [...capabilityResult.findings, ...browserResult.findings],
-    sections: [...capabilityResult.sections, ...browserResult.sections],
+    findings: [...roleResult.findings, ...browserResult.findings],
+    sections: [...roleResult.sections, ...browserResult.sections],
     artifacts: [],
     createdAt: nowIso(),
   };
@@ -186,6 +340,21 @@ export async function analyzeRepo(options: AnalyzeRepoOptions): Promise<JobEnvel
     },
     logs,
     report,
+    artifacts: report.artifacts,
+    timing: {
+      queueDurationMs: null,
+      runDurationMs: null,
+      totalDurationMs: null,
+      elapsedMs: 0,
+      estimatedTotalMs: null,
+      estimatedRemainingMs: null,
+      confidence: "low",
+      basis: "Core analysis did not compute job-level timing estimates.",
+    },
+    qualityScorecard: report.summary.qualityScorecard,
+    capabilityGaps: report.summary.capabilityGaps,
+    artifactAnalysis: report.summary.artifactAnalysis,
+    executionSteps: report.summary.executionSteps,
   });
 
   return writeRunArtifacts({
@@ -211,15 +380,35 @@ export function exportPatch(
   return exportPatchBundle(runId, selection, options);
 }
 
-export function listPresets(): Array<{ id: string; description: string }> {
+export function listPresets(): Array<{
+  id: string;
+  title: string;
+  description: string;
+  runtimeMode: "static" | "browser" | "auto";
+}> {
   return [
-    { id: "auto", description: "Auto-detect the best behavioral parity preset for the repository." },
-    ...listPresetDefinitions().map(preset => ({ id: preset.id, description: preset.description })),
+    {
+      id: "auto",
+      title: "Auto detect best fit",
+      description: "Choose the most likely preset for the repository automatically.",
+      runtimeMode: "auto",
+    },
+    ...listPresetDefinitions().map(preset => ({
+      id: preset.id,
+      title: preset.title,
+      description: preset.description,
+      runtimeMode: preset.runtimeMode,
+    })),
   ];
 }
 
-export function listCapabilities(): Array<{ id: CapabilityId; title: string; runtime: "static" | "browser"; description: string }> {
-  return listCapabilityDefinitions();
+export function listRoleDefinitions(): Array<{ id: string; title: string; description: string; order: number }> {
+  return listRoleDefinitionsInternal().map(role => ({
+    id: role.id,
+    title: role.title,
+    description: role.description,
+    order: role.order,
+  }));
 }
 
 export function listAiProviders(): Array<{ id: string; label: string; model: string; kind: string }> {
@@ -231,5 +420,16 @@ export function listAiProviders(): Array<{ id: string; label: string; model: str
   }));
 }
 
-export { generateWithOrderedProviders, resolveAiProvidersFromEnv };
+export {
+  createAiBudgetTracker,
+  generateWithOrderedProviders,
+  resolveAiDefaults,
+  resolveAiProvidersFromEnv,
+};
+export {
+  resolvePresetRoles,
+  resolvePresetId,
+  resolveRoleDefinitionsForRoles,
+  resolveRuntimeMode,
+} from "./roles";
 export type { AiProviderDescriptor };

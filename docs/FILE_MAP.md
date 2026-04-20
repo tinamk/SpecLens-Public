@@ -15,7 +15,7 @@ This map reflects the Iteration 5 hosted SaaS + behavioral parity layout.
 | Path | Purpose |
 |---|---|
 | `packages/core/` | Shared strict-TypeScript analysis engine |
-| `packages/contracts/` | Zod schemas and typed contracts for presets, capabilities, jobs, secrets, and reports |
+| `packages/contracts/` | Zod schemas and typed contracts for hosted jobs, reports, code review, remediation, and secrets |
 | `packages/db/` | Prisma schema and typed database access |
 | `packages/ui/` | Shared React components for hosted pages |
 
@@ -25,6 +25,7 @@ This map reflects the Iteration 5 hosted SaaS + behavioral parity layout.
 |---|---|
 | `deploy/digitalocean/` | App Platform and runner deployment scaffolding |
 | `apps/runner/docker/` | Runner image scaffolding |
+| `deploy/observability/` | Prometheus scrape + alerting starter config |
 
 ## Legal and pricing
 
@@ -40,10 +41,16 @@ This map reflects the Iteration 5 hosted SaaS + behavioral parity layout.
 
 | Path | Purpose |
 |---|---|
+| `docs/architecture/` | Living architecture diagrams and system structure docs |
 | `docs/iterations/ITERATION-004-hosted-saas.md` | Archived hosted SaaS pivot iteration |
 | `docs/iterations/ITERATION-005-behavioral-parity-migration.md` | Current iteration doc |
 | `docs/issues/behavioral-parity-migration.md` | Active parity migration tracker |
 | `docs/adr/ADR-0005-behavioral-parity-on-hosted-typescript-architecture.md` | Iteration 5 architecture ADR |
+| `docs/ops/production-readiness.md` | Production readiness checklist and operator expectations |
+| `docs/ops/incident-runbooks.md` | Incident response runbooks for hosted operations |
+| `docs/ops/production-smoke-checklist.md` | Go-live smoke checklist for hosted deployments |
+| `docs/ops/scaling-guidelines.md` | Scaling guidance for API, runner, and queue |
+| `docs/ops/provider-rotation.md` | Provider secret rotation procedures |
 | `docs/archive/` | Archived root planning docs |
 
 ## Archive

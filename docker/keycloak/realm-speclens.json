@@ -16,33 +16,91 @@
       "secret": "speclens-web-secret",
       "protocol": "openid-connect",
       "redirectUris": [
+        "http://localhost:3000/*",
         "http://localhost:3000/api/auth/callback",
-        "http://localhost:3000/api/auth/callback*"
+        "http://localhost:3000/api/auth/callback*",
+        "http://127.0.0.1:3000/*",
+        "http://127.0.0.1:3000/api/auth/callback",
+        "http://127.0.0.1:3000/api/auth/callback*",
+        "http://localhost:3300/*",
+        "http://localhost:3300/api/auth/callback",
+        "http://localhost:3300/api/auth/callback*",
+        "http://127.0.0.1:3300/*",
+        "http://127.0.0.1:3300/api/auth/callback",
+        "http://127.0.0.1:3300/api/auth/callback*",
+        "http://192.168.0.100:8080/*",
+        "http://192.168.0.100:8080/api/auth/callback",
+        "http://192.168.0.100:8080/api/auth/callback*",
+        "https://speclens.tinamk.no/*",
+        "https://speclens.tinamk.no/api/auth/callback",
+        "https://speclens.tinamk.no/api/auth/callback*",
+        "https://www.speclens.tinamk.no/*",
+        "https://www.speclens.tinamk.no/api/auth/callback",
+        "https://www.speclens.tinamk.no/api/auth/callback*"
       ],
       "webOrigins": [
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3300",
+        "http://127.0.0.1:3300",
+        "http://192.168.0.100:8080",
+        "https://speclens.tinamk.no",
+        "https://www.speclens.tinamk.no"
       ],
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:3000/*"
+        "post.logout.redirect.uris": "+"
       }
     }
   ],
   "users": [
     {
-      "username": "demo",
+      "id": "00000000-0000-0000-0000-000000000101",
+      "username": "owner",
       "enabled": true,
       "emailVerified": true,
-      "firstName": "Demo",
+      "firstName": "Owner",
       "lastName": "User",
-      "email": "demo@speclens.dev",
+      "email": "owner@speclens.dev",
       "credentials": [
         {
           "type": "password",
-          "value": "demo-password",
+          "value": "owner-password",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000102",
+      "username": "member",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Member",
+      "lastName": "User",
+      "email": "member@speclens.dev",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "member-password",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000103",
+      "username": "outsider",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Outsider",
+      "lastName": "User",
+      "email": "outsider@speclens.dev",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "outsider-password",
           "temporary": false
         }
       ]

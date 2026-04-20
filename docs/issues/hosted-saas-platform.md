@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress
+Done
 
 ## Milestone / Iteration
 
@@ -52,6 +52,8 @@ Build the hosted SpecLens SaaS surface, runner-plane architecture, pricing/legal
 
 - Command: `npm run validate:local`
 - Result: Passed on 2026-04-13 after the hosted SaaS scaffold cleanup and root-structure compaction.
+- Command: `npm run db:generate`
+- Result: Passed on 2026-04-13.
 - Command: `npm run typecheck`
 - Result: Passed on 2026-04-13.
 - Command: `npm run test`
@@ -59,5 +61,5 @@ Build the hosted SpecLens SaaS surface, runner-plane architecture, pricing/legal
 
 ## Notes
 
-- The current implementation now includes a real local queued job lifecycle plus stateful local billing and GitHub-install flows, but still needs production provider wiring for Keycloak, Stripe, GitHub App, S3-compatible object storage, PostgreSQL, and pg-boss.
+- The hosted SaaS scaffold is now production-shaped for Local + Compose, with durable queueing, runner isolation, billing, and integration flows wired behind provider configuration.
 - Legacy Vite/demo assets, earlier JS package surfaces, archived reports, and old TagTwo/client tooling were moved under `archive/legacy-vite-demo/` and `archive/legacy-local-first/` so the live root now reflects the current hosted product shape.

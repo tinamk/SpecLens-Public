@@ -1,0 +1,97 @@
+---
+do_api_token: "{{ lookup('env', 'DIGITALOCEAN_ACCESS_TOKEN') or lookup('env', 'DO_API_TOKEN') or lookup('env', 'DO_SECRET') or lookup('ansible.builtin.ini', 'DIGITALOCEAN_ACCESS_TOKEN type=properties file=' ~ (playbook_dir ~ '/../../../..' ~ '/.env'), errors='ignore') or lookup('ansible.builtin.ini', 'DO_API_TOKEN type=properties file=' ~ (playbook_dir ~ '/../../../..' ~ '/.env'), errors='ignore') or lookup('ansible.builtin.ini', 'DO_SECRET type=properties file=' ~ (playbook_dir ~ '/../../../..' ~ '/.env'), errors='ignore') or '' }}"
+
+speclens_project_name: "speclens"
+speclens_project_description: "SpecLens single-node hosted SaaS environment"
+speclens_project_environment: "Production"
+speclens_project_purpose: "Service or API"
+speclens_project_state: "present"
+
+speclens_do_region: "ams3"
+speclens_do_size: "s-2vcpu-4gb"
+speclens_do_image: "ubuntu-24-04-x64"
+speclens_do_tag: "speclens"
+speclens_do_droplet_name: "speclens-single-node"
+speclens_do_firewall_name: "speclens-single-node"
+speclens_do_enable_backups: false
+speclens_do_enable_ipv6: true
+speclens_do_enable_monitoring: true
+speclens_do_timeout: 600
+
+speclens_ssh_key_name: "speclens-controller"
+speclens_ssh_public_key_path: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519.pub"
+speclens_ssh_allowed_cidrs: []
+speclens_remote_user: "root"
+
+speclens_manage_dns: false
+speclens_dns_records: []
+speclens_destroy_project: false
+
+speclens_app_domain: "speclens.tinamk.no"
+speclens_api_domain: "api.speclens.tinamk.no"
+speclens_auth_domain: "auth.speclens.tinamk.no"
+speclens_objects_domain: "objects.speclens.tinamk.no"
+speclens_github_gateway_domain: "github.speclens.tinamk.no"
+
+speclens_cloud_init_file: "{{ playbook_dir }}/../../cloud-init.yaml"
+speclens_local_repo_root: "{{ playbook_dir }}/../../../.."
+speclens_local_dotenv_file: "{{ speclens_local_repo_root }}/.env"
+speclens_env_file: "{{ lookup('env', 'SPECLENS_ENV_FILE') or (playbook_dir ~ '/../../env.single-node') }}"
+
+speclens_remote_root: "/opt/speclens"
+speclens_remote_release_dir: "{{ speclens_remote_root }}/app/current"
+speclens_remote_compose_dir: "{{ speclens_remote_release_dir }}/deploy/digitalocean"
+speclens_remote_env_path: "{{ speclens_remote_compose_dir }}/.env"
+speclens_remote_env_archive_path: "{{ speclens_remote_root }}/env/single-node.env"
+
+# Production E2E settings
+speclens_e2e_base_url: "{{ lookup('env', 'E2E_BASE_URL') or lookup('ansible.builtin.ini', 'E2E_BASE_URL type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or ('https://' ~ speclens_app_domain) }}"
+speclens_e2e_owner_username: "{{ lookup('env', 'E2E_OWNER_USERNAME') or lookup('ansible.builtin.ini', 'E2E_OWNER_USERNAME type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_owner_password: "{{ lookup('env', 'E2E_OWNER_PASSWORD') or lookup('ansible.builtin.ini', 'E2E_OWNER_PASSWORD type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_member_username: "{{ lookup('env', 'E2E_MEMBER_USERNAME') or lookup('ansible.builtin.ini', 'E2E_MEMBER_USERNAME type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_member_password: "{{ lookup('env', 'E2E_MEMBER_PASSWORD') or lookup('ansible.builtin.ini', 'E2E_MEMBER_PASSWORD type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_outsider_username: "{{ lookup('env', 'E2E_OUTSIDER_USERNAME') or lookup('ansible.builtin.ini', 'E2E_OUTSIDER_USERNAME type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_outsider_password: "{{ lookup('env', 'E2E_OUTSIDER_PASSWORD') or lookup('ansible.builtin.ini', 'E2E_OUTSIDER_PASSWORD type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_admin_username: "{{ lookup('env', 'E2E_ADMIN_USERNAME') or lookup('ansible.builtin.ini', 'E2E_ADMIN_USERNAME type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_admin_password: "{{ lookup('env', 'E2E_ADMIN_PASSWORD') or lookup('ansible.builtin.ini', 'E2E_ADMIN_PASSWORD type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+speclens_e2e_github_public_url: "{{ lookup('env', 'E2E_GITHUB_PUBLIC_URL') or lookup('ansible.builtin.ini', 'E2E_GITHUB_PUBLIC_URL type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or 'https://github.com/octocat/Hello-World.git' }}"
+speclens_e2e_expect_entitlement: "{{ lookup('env', 'E2E_EXPECT_ENTITLEMENT') or lookup('ansible.builtin.ini', 'E2E_EXPECT_ENTITLEMENT type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or 'pro' }}"
+speclens_e2e_skip_entitlement_check: "{{ lookup('env', 'E2E_SKIP_ENTITLEMENT_CHECK') or lookup('ansible.builtin.ini', 'E2E_SKIP_ENTITLEMENT_CHECK type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or 'false' }}"
+speclens_e2e_upload_archive_path: "{{ lookup('env', 'E2E_UPLOAD_ARCHIVE_PATH') or lookup('ansible.builtin.ini', 'E2E_UPLOAD_ARCHIVE_PATH type=properties file=' ~ speclens_local_dotenv_file, errors='ignore') or '' }}"
+
+speclens_firewall_inbound_rules:
+  - protocol: tcp
+    ports: "22"
+    sources:
+      addresses: "{{ speclens_ssh_allowed_cidrs }}"
+  - protocol: tcp
+    ports: "80"
+    sources:
+      addresses:
+        - "0.0.0.0/0"
+        - "::/0"
+  - protocol: tcp
+    ports: "443"
+    sources:
+      addresses:
+        - "0.0.0.0/0"
+        - "::/0"
+
+speclens_firewall_outbound_rules:
+  - protocol: tcp
+    ports: "1-65535"
+    destinations:
+      addresses:
+        - "0.0.0.0/0"
+        - "::/0"
+  - protocol: udp
+    ports: "1-65535"
+    destinations:
+      addresses:
+        - "0.0.0.0/0"
+        - "::/0"
+  - protocol: icmp
+    destinations:
+      addresses:
+        - "0.0.0.0/0"
+        - "::/0"

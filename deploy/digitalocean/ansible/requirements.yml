@@ -1,0 +1,4 @@
+collections:
+  - name: digitalocean.cloud
+  - name: community.docker
+  - name: ansible.posix

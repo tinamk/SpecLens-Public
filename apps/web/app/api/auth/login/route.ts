@@ -1,15 +1,37 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { buildLocalDevSession, getKeycloakConfig, idTokenCookieName, sessionCookieName, stateCookieName } from "../../../../lib/auth";
+import { buildCsrfToken, buildLocalDevSession, csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, sessionCookieName, stateCookieName } from "../../../../lib/auth";
+import { resolvePublicRequestOrigin } from "../../../../lib/request-origin";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/portal";
+  const returnTo = url.searchParams.get("returnTo") ?? "/portal/workspaces";
   const config = getKeycloakConfig();
+  let forwardedHost = request.headers.get("x-forwarded-host");
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  const forwardedPort = request.headers.get("x-forwarded-port");
+  if (forwardedHost && forwardedPort && !forwardedHost.includes(":")) {
+    forwardedHost = `${forwardedHost}:${forwardedPort}`;
+  }
+  const requestUrl = resolvePublicRequestOrigin({
+    requestUrl: request.url,
+    forwardedProto,
+    forwardedHost,
+    forwardedPort,
+    configuredBaseUrl: process.env.APP_URL ?? null,
+  }) + `${url.pathname}${url.search}`;
+  const appBaseUrl = resolveAuthBaseUrl(requestUrl, config.baseUrl);
 
   if (!config.enabled || !config.issuer || !config.clientId) {
-    const response = NextResponse.redirect(new URL(returnTo, url.origin));
-    response.cookies.set(sessionCookieName(), buildLocalDevSession(), {
+    const response = NextResponse.redirect(new URL(returnTo, appBaseUrl));
+    const sessionValue = buildLocalDevSession();
+    response.cookies.set(sessionCookieName(), sessionValue, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: url.protocol === "https:",
+      path: "/",
+    });
+    response.cookies.set(csrfCookieName(), buildCsrfToken(sessionValue), {
       httpOnly: true,
       sameSite: "lax",
       secure: url.protocol === "https:",
@@ -20,7 +42,7 @@ export async function GET(request: Request) {
   }
 
   const state = crypto.randomUUID();
-  const callbackUrl = new URL("/api/auth/callback", url.origin);
+  const callbackUrl = new URL("/api/auth/callback", appBaseUrl);
   callbackUrl.searchParams.set("returnTo", returnTo);
   const authUrl = new URL(`${config.issuer}/protocol/openid-connect/auth`);
   authUrl.searchParams.set("client_id", config.clientId);

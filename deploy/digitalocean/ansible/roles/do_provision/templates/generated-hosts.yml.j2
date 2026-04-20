@@ -1,0 +1,7 @@
+all:
+  children:
+    speclens_droplets:
+      hosts:
+        {{ speclens_do_droplet_name }}:
+          ansible_host: {{ speclens_droplet_ipv4 }}
+          ansible_user: {{ speclens_remote_user }}

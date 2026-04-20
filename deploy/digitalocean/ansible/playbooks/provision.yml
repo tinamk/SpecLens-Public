@@ -1,0 +1,9 @@
+---
+- name: Provision DigitalOcean resources for SpecLens
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all.yml
+  roles:
+    - role: do_provision

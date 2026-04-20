@@ -1,0 +1,66 @@
+---
+- name: Assert production E2E credentials are set
+  ansible.builtin.assert:
+    that:
+      - speclens_e2e_owner_username | length > 0
+      - speclens_e2e_owner_password | length > 0
+      - speclens_e2e_member_username | length > 0
+      - speclens_e2e_member_password | length > 0
+      - speclens_e2e_outsider_username | length > 0
+      - speclens_e2e_outsider_password | length > 0
+    fail_msg: "Set E2E_OWNER/MEMBER/OUTSIDER credentials in your environment before running production E2E."
+
+- name: Run production E2E tests inside Playwright container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - host
+      - --ipc
+      - host
+      - --shm-size
+      - 1gb
+      - -e
+      - "PLAYWRIGHT_BASE_URL={{ speclens_e2e_base_url }}"
+      - -e
+      - "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"
+      - -e
+      - "CI=1"
+      - -e
+      - "E2E_BASE_URL={{ speclens_e2e_base_url }}"
+      - -e
+      - "E2E_OWNER_USERNAME={{ speclens_e2e_owner_username }}"
+      - -e
+      - "E2E_OWNER_PASSWORD={{ speclens_e2e_owner_password }}"
+      - -e
+      - "E2E_MEMBER_USERNAME={{ speclens_e2e_member_username }}"
+      - -e
+      - "E2E_MEMBER_PASSWORD={{ speclens_e2e_member_password }}"
+      - -e
+      - "E2E_OUTSIDER_USERNAME={{ speclens_e2e_outsider_username }}"
+      - -e
+      - "E2E_OUTSIDER_PASSWORD={{ speclens_e2e_outsider_password }}"
+      - -e
+      - "E2E_ADMIN_USERNAME={{ speclens_e2e_admin_username }}"
+      - -e
+      - "E2E_ADMIN_PASSWORD={{ speclens_e2e_admin_password }}"
+      - -e
+      - "E2E_GITHUB_PUBLIC_URL={{ speclens_e2e_github_public_url }}"
+      - -e
+      - "E2E_EXPECT_ENTITLEMENT={{ speclens_e2e_expect_entitlement }}"
+      - -e
+      - "E2E_SKIP_ENTITLEMENT_CHECK={{ speclens_e2e_skip_entitlement_check }}"
+      - -e
+      - "E2E_UPLOAD_ARCHIVE_PATH={{ speclens_e2e_upload_archive_path }}"
+      - -e
+      - "API_URL=https://{{ speclens_api_domain }}"
+      - -v
+      - "{{ speclens_remote_release_dir }}:/workspace"
+      - -w
+      - /workspace
+      - mcr.microsoft.com/playwright:v1.54.2-jammy
+      - bash
+      - -lc
+      - "npm ci && npm run e2e:production"

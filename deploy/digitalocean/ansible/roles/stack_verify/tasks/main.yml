@@ -1,0 +1,160 @@
+---
+- name: Resolve expected public IPv4 for this host
+  ansible.builtin.set_fact:
+    speclens_expected_public_ipv4: "{{ ansible_host | default(ansible_facts['default_ipv4']['address']) }}"
+
+- name: Resolve public DNS for the app domain
+  ansible.builtin.command:
+    argv:
+      - getent
+      - ahostsv4
+      - "{{ speclens_app_domain }}"
+  register: speclens_app_dns
+  changed_when: false
+
+- name: Resolve public DNS for the GitHub gateway domain
+  ansible.builtin.command:
+    argv:
+      - getent
+      - ahostsv4
+      - "{{ speclens_github_gateway_domain }}"
+  register: speclens_github_gateway_dns
+  changed_when: false
+
+- name: Assert app domain A record points to this host
+  ansible.builtin.assert:
+    that:
+      - speclens_app_dns.stdout is search(speclens_expected_public_ipv4)
+    fail_msg: >-
+      The A record for {{ speclens_app_domain }} must point to {{ speclens_expected_public_ipv4 }}
+      before public HTTPS verification can succeed.
+
+- name: Assert GitHub gateway domain A record points to this host
+  ansible.builtin.assert:
+    that:
+      - speclens_github_gateway_dns.stdout is search(speclens_expected_public_ipv4)
+    fail_msg: >-
+      The A record for {{ speclens_github_gateway_domain }} must point to {{ speclens_expected_public_ipv4 }}
+      before GitHub gateway HTTPS verification can succeed.
+
+- name: Wait for local service ports
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ item }}"
+    timeout: 180
+  loop:
+    - 3000
+    - 4000
+    - 4510
+    - 8080
+    - 9000
+
+- name: Verify runner readiness endpoint
+  ansible.builtin.uri:
+    url: http://127.0.0.1:4510/ready
+    return_content: true
+  register: speclens_runner_health
+
+- name: Verify runner metrics endpoint
+  ansible.builtin.uri:
+    url: http://127.0.0.1:4510/metrics
+    return_content: false
+  register: speclens_runner_metrics
+
+- name: Verify API readiness endpoint
+  ansible.builtin.uri:
+    url: http://127.0.0.1:4000/ready
+    return_content: true
+  register: speclens_api_health
+
+- name: Verify API metrics endpoint
+  ansible.builtin.uri:
+    url: http://127.0.0.1:4000/metrics
+    return_content: false
+  register: speclens_api_metrics
+
+- name: Verify MinIO health endpoint
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9000/minio/health/live
+    return_content: true
+  register: speclens_minio_health
+
+- name: Verify public app route
+  ansible.builtin.uri:
+    url: "https://{{ speclens_app_domain }}"
+    follow_redirects: safe
+    status_code:
+      - 200
+      - 302
+    validate_certs: true
+  register: speclens_app_public
+
+- name: Verify public API route
+  ansible.builtin.uri:
+    url: "https://{{ speclens_api_domain }}/ready"
+    status_code: 200
+    validate_certs: true
+  register: speclens_api_public
+
+- name: Verify auth route
+  ansible.builtin.uri:
+    url: "https://{{ speclens_auth_domain }}"
+    follow_redirects: safe
+    status_code:
+      - 200
+      - 302
+    validate_certs: true
+  register: speclens_auth_public
+
+- name: Run shared ops validation probe against the deployed stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
+      - exec
+      - -T
+      - -e
+      - "APP_URL=https://{{ speclens_app_domain }}"
+      - -e
+      - "API_URL=http://127.0.0.1:4000"
+      - -e
+      - "RUNNER_URL=http://runner:4510"
+      - -e
+      - "AI_WORKER_URL=http://ai-worker:4520"
+      - -e
+      - "KEYCLOAK_ISSUER_URL=https://{{ speclens_auth_domain }}/realms/speclens"
+      - api
+      - npm
+      - run
+      - ops:validate
+  args:
+    chdir: "{{ speclens_remote_compose_dir }}"
+  register: speclens_ops_validate
+  changed_when: false
+
+- name: Verify GitHub gateway callback route rejects invalid state
+  ansible.builtin.uri:
+    url: "https://{{ speclens_github_gateway_domain }}/auth/github/callback?state=invalid&installation_id=1"
+    follow_redirects: none
+    status_code:
+      - 400
+      - 404
+    validate_certs: true
+  register: speclens_github_gateway_public
+
+- name: Show verification summary
+  ansible.builtin.debug:
+    msg:
+      - "App DNS {{ speclens_app_domain }} -> {{ speclens_expected_public_ipv4 }}"
+      - "Runner health: {{ speclens_runner_health.status }}"
+      - "Runner metrics: {{ speclens_runner_metrics.status }}"
+      - "API ready: {{ speclens_api_health.status }}"
+      - "API metrics: {{ speclens_api_metrics.status }}"
+      - "MinIO health: {{ speclens_minio_health.status }}"
+      - "Public app: {{ speclens_app_public.status }}"
+      - "Public API: {{ speclens_api_public.status }}"
+      - "Public auth: {{ speclens_auth_public.status }}"
+      - "Ops validate: {{ speclens_ops_validate.rc }}"
+      - "Public GitHub gateway: {{ speclens_github_gateway_public.status }}"

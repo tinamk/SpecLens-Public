@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type {
   AnalysisFinding,
   AnalysisLogEvent,
   AnalysisReportSection,
-  CapabilityId,
+  RoleId,
   WorkspaceSecretKind,
 } from "@speclens/contracts";
 import {
@@ -13,6 +13,13 @@ import {
   analysisLogEventSchema,
   analysisReportSectionSchema,
 } from "@speclens/contracts";
+import {
+  generateWithOrderedProviders,
+  resolveAiDefaults,
+  type AiBudgetTracker,
+  type AiRuntimeDefaults,
+  type GenerateWithProvidersOptions,
+} from "./ai";
 import type { RepoInventory } from "./inventory";
 import { createId, ensureDir, hashValue, nowIso, relativePosix, writeTextFile } from "./utils";
 import type { WorkspaceHandle } from "./workspace";
@@ -28,9 +35,12 @@ interface BrowserAnalysisContext {
   jobId: string;
   repoPath: string;
   inventory: RepoInventory;
-  capabilities: CapabilityId[];
+  roles: RoleId[];
   workspace: WorkspaceHandle;
   secrets: BrowserSecretInput[];
+  allowHostExecution?: boolean;
+  aiDefaults?: AiRuntimeDefaults;
+  aiBudget?: AiBudgetTracker;
 }
 
 interface BrowserPageRecord {
@@ -85,7 +95,7 @@ function createLog(jobId: string, scope: string, message: string, level: "info" 
 }
 
 function createFinding(
-  capability: CapabilityId,
+  roleId: RoleId,
   severity: "high" | "medium" | "low",
   title: string,
   message: string,
@@ -93,8 +103,8 @@ function createFinding(
   evidence: string[] = [],
 ): AnalysisFinding {
   return analysisFindingSchema.parse({
-    id: createId("finding", `${capability}:${title}:${message}`),
-    capability,
+    id: createId("finding", `${roleId}:${title}:${message}`),
+    roleId,
     severity,
     title,
     message,
@@ -104,15 +114,15 @@ function createFinding(
 }
 
 function createSection(
-  capability: CapabilityId,
+  roleId: RoleId,
   title: string,
   status: "ready" | "planned" | "skipped",
   summary: string,
   data: Record<string, unknown>,
 ): AnalysisReportSection {
   return analysisReportSectionSchema.parse({
-    id: createId("section", `${capability}:${title}:${summary}`),
-    capability,
+    id: createId("section", `${roleId}:${title}:${summary}`),
+    roleId,
     title,
     status,
     summary,
@@ -180,7 +190,7 @@ function buildRuntimeContract(context: BrowserAnalysisContext): RuntimeContract 
   return null;
 }
 
-function installDependencies(sandboxRepoPath: string): { ok: boolean; message: string } {
+async function installDependencies(sandboxRepoPath: string): Promise<{ ok: boolean; message: string }> {
   const manifestPath = path.join(sandboxRepoPath, "package.json");
   if (!fs.existsSync(manifestPath)) {
     return { ok: false, message: "No package.json found for browser runtime." };
@@ -191,19 +201,73 @@ function installDependencies(sandboxRepoPath: string): { ok: boolean; message: s
   }
 
   const hasPackageLock = fs.existsSync(path.join(sandboxRepoPath, "package-lock.json"));
-  const result = spawnSync(
-    "npm",
-    hasPackageLock ? ["ci"] : ["install", "--no-fund", "--no-audit"],
-    {
-      cwd: sandboxRepoPath,
-      encoding: "utf8",
-      timeout: 180000,
-      env: {
-        ...process.env,
-        CI: "1",
+  const result = await new Promise<{
+    status: number;
+    stdout: string;
+    stderr: string;
+    timedOut: boolean;
+    error: Error | null;
+  }>(resolve => {
+    const child = spawn(
+      "npm",
+      hasPackageLock ? ["ci"] : ["install", "--no-fund", "--no-audit"],
+      {
+        cwd: sandboxRepoPath,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          CI: "1",
+        },
       },
-    },
-  );
+    );
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, 180000);
+    child.stdout.on("data", chunk => {
+      stdout.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    child.stderr.on("data", chunk => {
+      stderr.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    child.once("error", error => {
+      clearTimeout(timeout);
+      resolve({
+        status: 1,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        timedOut,
+        error,
+      });
+    });
+    child.once("close", status => {
+      clearTimeout(timeout);
+      resolve({
+        status: status ?? 1,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        timedOut,
+        error: null,
+      });
+    });
+  });
+
+  if (result.timedOut) {
+    return {
+      ok: false,
+      message: "Dependency installation timed out.",
+    };
+  }
+
+  if (result.error) {
+    return {
+      ok: false,
+      message: result.error.message,
+    };
+  }
 
   if (result.status !== 0) {
     return {
@@ -235,6 +299,7 @@ function startRuntime(contract: RuntimeContract): ChildProcess {
   const [command, ...args] = contract.command;
   return spawn(command ?? "npm", args, {
     cwd: contract.sandboxRepoPath,
+    detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
@@ -244,6 +309,47 @@ function startRuntime(contract: RuntimeContract): ChildProcess {
       SPECLENS_BASE_URL: contract.baseUrl,
     },
   });
+}
+
+async function stopRuntime(runtime: ChildProcess | null): Promise<void> {
+  if (!runtime?.pid) {
+    return;
+  }
+
+  const waitForExit = new Promise<void>(resolve => {
+    if (runtime.exitCode !== null || runtime.signalCode !== null) {
+      resolve();
+      return;
+    }
+    runtime.once("exit", () => resolve());
+  });
+
+  const terminate = (signal: NodeJS.Signals): void => {
+    try {
+      if (process.platform === "win32") {
+        runtime.kill(signal);
+        return;
+      }
+      process.kill(-runtime.pid!, signal);
+    } catch {
+      // Process already exited.
+    }
+  };
+
+  terminate("SIGTERM");
+  const terminated = await Promise.race([
+    waitForExit.then(() => true),
+    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 3000)),
+  ]);
+  if (terminated) {
+    return;
+  }
+
+  terminate("SIGKILL");
+  await Promise.race([
+    waitForExit,
+    new Promise(resolve => setTimeout(resolve, 1000)),
+  ]);
 }
 
 function normalizeUrl(rawUrl: string): string {
@@ -425,22 +531,56 @@ async function runInteractionPass(
   return interactions;
 }
 
-export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext): Promise<BrowserAnalysisResult> {
-  const browserCapabilities = context.capabilities.filter(capability =>
-    capability === "browser-self-check" || capability === "visual-inspection" || capability === "interaction-test");
-  if (browserCapabilities.length === 0) {
+export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Promise<BrowserAnalysisResult> {
+  const browserRoles = context.roles.filter(roleId =>
+    roleId === "browser-self-check" || roleId === "visual-inspection" || roleId === "interaction-test");
+  if (browserRoles.length === 0) {
     return { findings: [], sections: [], logs: [] };
   }
 
   const findings: AnalysisFinding[] = [];
   const sections: AnalysisReportSection[] = [];
   const logs: AnalysisLogEvent[] = [];
+  const aiDefaults = context.aiDefaults ?? resolveAiDefaults();
+  const reserveAiCall = (scope: string): boolean => {
+    if (!context.aiBudget) {
+      return true;
+    }
+    const allowed = context.aiBudget.reserve();
+    if (!allowed) {
+      logs.push(createLog(context.jobId, scope, "AI budget exhausted; skipping AI synthesis.", "warn"));
+    }
+    return allowed;
+  };
   const artifactsDir = path.join(context.workspace.generatedDir, "browser", context.jobId);
   ensureDir(artifactsDir);
 
+  if (context.allowHostExecution !== true) {
+    if (browserRoles.includes("browser-self-check")) {
+      findings.push(createFinding(
+        "browser-self-check",
+        "high",
+        "Host-side browser execution is disabled",
+        "Direct browser runtime boot from @speclens/core is disabled unless host execution is explicitly allowed.",
+        "Run browser analysis through the hosted worker/runner path or opt in explicitly before executing repository code locally.",
+      ));
+    }
+    for (const roleId of browserRoles) {
+      sections.push(createSection(
+        roleId,
+        roleId === "browser-self-check" ? "Browser self-check" : roleId === "visual-inspection" ? "Visual inspection" : "Interaction testing",
+        roleId === "browser-self-check" ? "planned" : "skipped",
+        "Browser execution was not started because host-side runtime execution is disabled by default in @speclens/core.",
+        {},
+      ));
+    }
+    logs.push(createLog(context.jobId, "browser-policy", "Skipped direct browser runtime execution because allowHostExecution was not enabled.", "warn"));
+    return { findings, sections, logs };
+  }
+
   const runtimeContract = buildRuntimeContract(context);
   if (!runtimeContract) {
-    if (browserCapabilities.includes("browser-self-check")) {
+    if (browserRoles.includes("browser-self-check")) {
       findings.push(createFinding(
         "browser-self-check",
         "high",
@@ -458,7 +598,7 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
         },
       ));
     }
-    if (browserCapabilities.includes("visual-inspection")) {
+    if (browserRoles.includes("visual-inspection")) {
       sections.push(createSection(
         "visual-inspection",
         "Visual inspection",
@@ -467,7 +607,7 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
         {},
       ));
     }
-    if (browserCapabilities.includes("interaction-test")) {
+    if (browserRoles.includes("interaction-test")) {
       sections.push(createSection(
         "interaction-test",
         "Interaction testing",
@@ -479,9 +619,9 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
     return { findings, sections, logs };
   }
 
-  const installResult = installDependencies(runtimeContract.sandboxRepoPath);
+  const installResult = await installDependencies(runtimeContract.sandboxRepoPath);
   logs.push(createLog(context.jobId, "runtime-install", installResult.message, installResult.ok ? "info" : "error"));
-  if (!installResult.ok) {
+  if (installResult.ok === false) {
     findings.push(createFinding(
       "browser-self-check",
       "high",
@@ -489,11 +629,11 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
       installResult.message,
       "Verify the target repository installs cleanly in a fresh environment before requesting browser parity analysis.",
     ));
-    for (const capability of browserCapabilities) {
+    for (const roleId of browserRoles) {
       sections.push(createSection(
-        capability,
-        capability === "browser-self-check" ? "Browser self-check" : capability === "visual-inspection" ? "Visual inspection" : "Interaction testing",
-        capability === "browser-self-check" ? "planned" : "skipped",
+        roleId,
+        roleId === "browser-self-check" ? "Browser self-check" : roleId === "visual-inspection" ? "Visual inspection" : "Interaction testing",
+        roleId === "browser-self-check" ? "planned" : "skipped",
         "Browser execution stopped before runtime boot because dependency installation failed.",
         {},
       ));
@@ -526,11 +666,11 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
         [...stdoutLines, ...stderrLines].join("").trim() ? [`runtime-log:${path.join(artifactsDir, "runtime.log")}`] : [],
       ));
       writeTextFile(path.join(artifactsDir, "runtime.log"), `${stdoutLines.join("")}\n${stderrLines.join("")}`.trim());
-      for (const capability of browserCapabilities) {
+      for (const roleId of browserRoles) {
         sections.push(createSection(
-          capability,
-          capability === "browser-self-check" ? "Browser self-check" : capability === "visual-inspection" ? "Visual inspection" : "Interaction testing",
-          capability === "browser-self-check" ? "planned" : "skipped",
+          roleId,
+          roleId === "browser-self-check" ? "Browser self-check" : roleId === "visual-inspection" ? "Visual inspection" : "Interaction testing",
+          roleId === "browser-self-check" ? "planned" : "skipped",
           "Runtime boot failed before browser evidence could be collected.",
           {
             baseUrl: runtimeContract.baseUrl,
@@ -714,7 +854,7 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
         ));
       }
 
-      if (browserCapabilities.includes("interaction-test")) {
+      if (browserRoles.includes("interaction-test")) {
         const pageInteractions = await runInteractionPass(page, normalizedUrl, artifactsDir, context.workspace);
         interactions.push(...pageInteractions);
         for (const interaction of pageInteractions.filter(item => !item.success)) {
@@ -732,12 +872,80 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
 
     await browser.close();
 
-    if (browserCapabilities.includes("browser-self-check")) {
+    const visualSummary = browserRoles.includes("visual-inspection") && pages.length > 0 && reserveAiCall("visual-inspection")
+      ? await generateWithOrderedProviders((() => {
+          const options: GenerateWithProvidersOptions = {
+            task: "visual-inspection",
+            prompt: [
+              `Repository: ${context.inventory.repoName}`,
+              `Pages inspected: ${pages.length}`,
+              "Page snapshots:",
+              ...pages.slice(0, 6).map(pageRecord =>
+                `- ${pageRecord.url} | title: ${pageRecord.title || "n/a"} | h1: ${pageRecord.h1 ?? "n/a"} | status: ${pageRecord.status ?? "n/a"}`),
+              "Summarize the visual health in 2-3 short bullets. Call out obvious inconsistencies or layout risks if they appear, otherwise note overall consistency.",
+            ].join("\n"),
+          };
+          if (aiDefaults.maxTokens !== undefined) {
+            options.maxTokens = aiDefaults.maxTokens;
+          }
+          if (aiDefaults.timeoutMs !== undefined) {
+            options.timeoutMs = aiDefaults.timeoutMs;
+          }
+          if (aiDefaults.budgetUsd !== undefined) {
+            options.budgetUsd = aiDefaults.budgetUsd;
+          }
+          return options;
+        })())
+      : { content: null, providerId: null, attempted: [], errors: [] };
+
+    if (visualSummary.attempted.length > 0) {
+      logs.push(createLog(context.jobId, "visual-inspection", `AI providers attempted for visual inspection: ${visualSummary.attempted.join(", ")}.`));
+    }
+    if (!visualSummary.content && visualSummary.errors.length > 0) {
+      logs.push(createLog(context.jobId, "visual-inspection", `AI visual summary failed: ${visualSummary.errors.join(" | ")}`, "warn"));
+    }
+
+    const interactionFailures = interactions.filter(item => !item.success);
+    const interactionSummary = browserRoles.includes("interaction-test") && interactions.length > 0 && reserveAiCall("interaction-test")
+      ? await generateWithOrderedProviders((() => {
+          const options: GenerateWithProvidersOptions = {
+            task: "interaction-test",
+            prompt: [
+              `Repository: ${context.inventory.repoName}`,
+              `Interaction attempts: ${interactions.length}`,
+              `Failures: ${interactionFailures.length}`,
+              "Sample results:",
+              ...interactions.slice(0, 8).map(interaction =>
+                `- ${interaction.label} on ${interaction.pageUrl} | ${interaction.action} | ${interaction.success ? "ok" : `failed: ${interaction.error ?? "unknown"}`}`),
+              "Summarize interaction stability in 2-3 short bullets and highlight the dominant failure modes if any.",
+            ].join("\n"),
+          };
+          if (aiDefaults.maxTokens !== undefined) {
+            options.maxTokens = aiDefaults.maxTokens;
+          }
+          if (aiDefaults.timeoutMs !== undefined) {
+            options.timeoutMs = aiDefaults.timeoutMs;
+          }
+          if (aiDefaults.budgetUsd !== undefined) {
+            options.budgetUsd = aiDefaults.budgetUsd;
+          }
+          return options;
+        })())
+      : { content: null, providerId: null, attempted: [], errors: [] };
+
+    if (interactionSummary.attempted.length > 0) {
+      logs.push(createLog(context.jobId, "interaction-test", `AI providers attempted for interaction synthesis: ${interactionSummary.attempted.join(", ")}.`));
+    }
+    if (!interactionSummary.content && interactionSummary.errors.length > 0) {
+      logs.push(createLog(context.jobId, "interaction-test", `AI interaction summary failed: ${interactionSummary.errors.join(" | ")}`, "warn"));
+    }
+
+    if (browserRoles.includes("browser-self-check")) {
       sections.push(createSection(
         "browser-self-check",
         "Browser self-check",
         "ready",
-        `${pages.length} page(s) were crawled with ${findings.filter(item => item.capability === "browser-self-check").length} browser self-check finding(s).`,
+        `${pages.length} page(s) were crawled with ${findings.filter(item => item.roleId === "browser-self-check").length} browser self-check finding(s).`,
         {
           baseUrl: runtimeContract.baseUrl,
           scriptName: runtimeContract.scriptName,
@@ -747,7 +955,7 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
       ));
     }
 
-    if (browserCapabilities.includes("visual-inspection")) {
+    if (browserRoles.includes("visual-inspection")) {
       sections.push(createSection(
         "visual-inspection",
         "Visual inspection",
@@ -759,11 +967,13 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
             screenshot: pageRecord.screenshot,
             title: pageRecord.title,
           })),
+          aiSummary: visualSummary.content,
+          aiProvider: visualSummary.providerId,
         },
       ));
     }
 
-    if (browserCapabilities.includes("interaction-test")) {
+    if (browserRoles.includes("interaction-test")) {
       sections.push(createSection(
         "interaction-test",
         "Interaction testing",
@@ -771,6 +981,8 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
         `${interactions.length} interaction attempt(s) were exercised with ${interactions.filter(item => !item.success).length} failure(s).`,
         {
           interactions,
+          aiSummary: interactionSummary.content,
+          aiProvider: interactionSummary.providerId,
         },
       ));
     }
@@ -786,19 +998,19 @@ export async function analyzeBrowserCapabilities(context: BrowserAnalysisContext
       error instanceof Error ? error.message : "Unknown browser execution error.",
       "Inspect the runner environment, Playwright availability, and runtime boot script.",
     ));
-    for (const capability of browserCapabilities) {
-      if (!sections.some(section => section.capability === capability)) {
+    for (const roleId of browserRoles) {
+      if (!sections.some(section => section.roleId === roleId)) {
         sections.push(createSection(
-          capability,
-          capability === "browser-self-check" ? "Browser self-check" : capability === "visual-inspection" ? "Visual inspection" : "Interaction testing",
-          capability === "browser-self-check" ? "planned" : "skipped",
-          "Browser execution terminated before this capability could complete.",
+          roleId,
+          roleId === "browser-self-check" ? "Browser self-check" : roleId === "visual-inspection" ? "Visual inspection" : "Interaction testing",
+          roleId === "browser-self-check" ? "planned" : "skipped",
+          "Browser execution terminated before this role could complete.",
           {},
         ));
       }
     }
     return { findings, sections, logs };
   } finally {
-    runtime?.kill("SIGTERM");
+    await stopRuntime(runtime);
   }
 }

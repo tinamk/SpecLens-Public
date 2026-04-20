@@ -1,0 +1,9 @@
+---
+- name: Bootstrap the SpecLens single-node host
+  hosts: speclens_droplets
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all.yml
+  roles:
+    - role: host_bootstrap

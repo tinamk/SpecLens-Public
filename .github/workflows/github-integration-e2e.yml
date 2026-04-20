@@ -1,0 +1,116 @@
+name: GitHub Integration E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_local:
+        description: Run the local/dev GitHub integration flow
+        required: true
+        default: true
+        type: boolean
+      run_public:
+        description: Run the public-host/prod GitHub integration flow
+        required: true
+        default: false
+        type: boolean
+      public_base_url:
+        description: Optional override for the public-host base URL
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      run_local:
+        required: false
+        default: true
+        type: boolean
+      run_public:
+        required: false
+        default: false
+        type: boolean
+      public_base_url:
+        required: false
+        default: ""
+        type: string
+    secrets:
+      E2E_BASE_URL:
+        required: false
+      E2E_OWNER_USERNAME:
+        required: false
+      E2E_OWNER_PASSWORD:
+        required: false
+      E2E_GITHUB_INSTALLATION_ID:
+        required: false
+      E2E_GITHUB_PRIVATE_REPO_URL:
+        required: false
+      E2E_GITHUB_PRIVATE_REPO_FULL_NAME:
+        required: false
+
+jobs:
+  github-e2e:
+    name: GitHub E2E (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    if: ${{ (matrix.target == 'local' && inputs.run_local) || (matrix.target == 'public' && inputs.run_public) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: local
+            command: npm run e2e:github:local
+          - target: public
+            command: npm run e2e:github:production
+
+    env:
+      E2E_GITHUB_INSTALLATION_ID: ${{ secrets.E2E_GITHUB_INSTALLATION_ID }}
+      E2E_GITHUB_PRIVATE_REPO_URL: ${{ secrets.E2E_GITHUB_PRIVATE_REPO_URL }}
+      E2E_GITHUB_PRIVATE_REPO_FULL_NAME: ${{ secrets.E2E_GITHUB_PRIVATE_REPO_FULL_NAME }}
+      E2E_OWNER_USERNAME: ${{ secrets.E2E_OWNER_USERNAME }}
+      E2E_OWNER_PASSWORD: ${{ secrets.E2E_OWNER_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Resolve public-host base URL
+        if: ${{ matrix.target == 'public' }}
+        run: |
+          BASE_URL="${{ inputs.public_base_url }}"
+          if [ -z "$BASE_URL" ]; then
+            BASE_URL="${{ secrets.E2E_BASE_URL }}"
+          fi
+          if [ -z "$BASE_URL" ]; then
+            echo "Provide inputs.public_base_url or secrets.E2E_BASE_URL for the public-host matrix entry." >&2
+            exit 1
+          fi
+          echo "PLAYWRIGHT_BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
+
+      - name: Run GitHub integration E2E
+        run: ${{ matrix.command }}
+
+      - name: Upload Playwright report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.target }}
+          path: playwright-report
+          if-no-files-found: warn
+
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.target }}
+          path: test-results
+          if-no-files-found: warn

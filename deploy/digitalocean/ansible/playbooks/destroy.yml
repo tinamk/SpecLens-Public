@@ -1,0 +1,11 @@
+---
+- name: Destroy DigitalOcean resources for SpecLens
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all.yml
+  vars:
+    speclens_project_state: "absent"
+  roles:
+    - role: do_provision

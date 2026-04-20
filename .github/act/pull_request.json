@@ -1,0 +1,15 @@
+{
+  "pull_request": {
+    "number": 1,
+    "head": {
+      "ref": "local-act-head"
+    },
+    "base": {
+      "ref": "main"
+    }
+  },
+  "repository": {
+    "full_name": "tina/SpecLens",
+    "default_branch": "main"
+  }
+}

@@ -49,13 +49,15 @@ Restore the analysis breadth of the archived SpecLens system inside the active h
 ## Validation
 
 - Command: `npm run typecheck`
-- Result: Passed on 2026-04-13.
+- Result: Passed on 2026-04-19.
 - Command: `npm run test`
-- Result: Passed on 2026-04-13.
+- Result: Passed on 2026-04-19.
 - Command: `npm run validate:local`
-- Result: Passed on 2026-04-13.
+- Result: Passed on 2026-04-19.
 
 ## Notes
 
 - This pass restores behavioral breadth and public interfaces first.
 - Browser-heavy archived workflows now execute through the active hosted core using a sandbox copy of the target repo, runtime boot detection, secret-backed browser auth, crawl evidence, screenshots, and interaction probes.
+- The hosted workspace lifecycle is now closed through the existing portal routes: secret-backed run queueing, owner-managed member add/remove by email, source rename/delete with provenance protection, run cancel/retry, durable report export artifacts, Stripe billing portal entry, and GitHub installation unlink/reconnect.
+- Linked GitHub repository inventory is aggregated across all workspace installations, and private-source creation now preserves the selected installation instead of inferring from the first linked installation.

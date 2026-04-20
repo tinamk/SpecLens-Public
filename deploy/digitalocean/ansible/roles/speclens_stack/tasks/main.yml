@@ -1,0 +1,249 @@
+---
+- name: Check local runtime env file
+  ansible.builtin.stat:
+    path: "{{ speclens_env_file }}"
+  delegate_to: localhost
+  become: false
+  register: speclens_local_env_file
+
+- name: Assert runtime env file exists
+  ansible.builtin.assert:
+    that:
+      - speclens_local_env_file.stat.exists
+    fail_msg: "Create {{ speclens_env_file }} from deploy/digitalocean/env.single-node.example before deploying."
+
+- name: Ensure remote release directory exists
+  ansible.builtin.file:
+    path: "{{ speclens_remote_release_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Create local release archive path
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .tar.gz
+  delegate_to: localhost
+  become: false
+  register: speclens_local_release_archive
+
+- name: Build local release archive
+  ansible.builtin.shell: |
+    set -euo pipefail
+    git -C "{{ speclens_local_repo_root }}" ls-files --cached --others --exclude-standard -z \
+      | while IFS= read -r -d '' path; do
+          if [ -e "{{ speclens_local_repo_root }}/$path" ]; then
+            printf '%s\0' "$path"
+          fi
+        done \
+      | tar -C "{{ speclens_local_repo_root }}" --null --files-from - -czf "{{ speclens_local_release_archive.path }}"
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+
+- name: Create remote release staging directory
+  ansible.builtin.tempfile:
+    state: directory
+    path: /tmp
+    prefix: speclens-release-
+  register: speclens_remote_release_stage
+
+- name: Upload staged release archive to remote host
+  ansible.builtin.copy:
+    src: "{{ speclens_local_release_archive.path }}"
+    dest: "{{ speclens_remote_release_stage.path }}/release.tar.gz"
+    mode: "0600"
+
+- name: Ensure remote release extraction directory exists
+  ansible.builtin.file:
+    path: "{{ speclens_remote_release_stage.path }}/repo"
+    state: directory
+    mode: "0755"
+
+- name: Extract staged release archive on remote host
+  ansible.builtin.unarchive:
+    src: "{{ speclens_remote_release_stage.path }}/release.tar.gz"
+    dest: "{{ speclens_remote_release_stage.path }}/repo"
+    remote_src: true
+
+- name: Mirror staged release into the active release directory
+  ansible.builtin.command:
+    argv:
+      - rsync
+      - -a
+      - --delete
+      - "{{ speclens_remote_release_stage.path }}/repo/"
+      - "{{ speclens_remote_release_dir }}/"
+
+- name: Remove remote release staging directory
+  ansible.builtin.file:
+    path: "{{ speclens_remote_release_stage.path }}"
+    state: absent
+
+- name: Remove local release archive
+  ansible.builtin.file:
+    path: "{{ speclens_local_release_archive.path }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+
+- name: Resolve configured GitHub App private key file
+  ansible.builtin.set_fact:
+    speclens_github_app_private_key_file: "{{ lookup('ansible.builtin.ini', 'GITHUB_APP_PRIVATE_KEY_FILE type=properties file=' ~ speclens_env_file, errors='ignore') | trim }}"
+    speclens_github_app_private_key_inline: "{{ lookup('ansible.builtin.ini', 'GITHUB_APP_PRIVATE_KEY type=properties file=' ~ speclens_env_file, errors='ignore') | trim }}"
+
+- name: Check local GitHub App private key file
+  ansible.builtin.stat:
+    path: >-
+      {{
+        speclens_github_app_private_key_file
+        if speclens_github_app_private_key_file.startswith('/')
+        else (speclens_local_repo_root ~ '/' ~ (speclens_github_app_private_key_file | regex_replace('^\\./', '')))
+      }}
+  delegate_to: localhost
+  become: false
+  register: speclens_local_github_app_private_key
+  when:
+    - speclens_github_app_private_key_file | length > 0
+    - speclens_github_app_private_key_inline | length == 0
+
+- name: Assert configured GitHub App private key file exists
+  ansible.builtin.assert:
+    that:
+      - speclens_local_github_app_private_key.stat.exists
+    fail_msg: >-
+      Configured GITHUB_APP_PRIVATE_KEY_FILE {{ speclens_github_app_private_key_file }} was not found on the controller.
+  when:
+    - speclens_github_app_private_key_file | length > 0
+    - speclens_github_app_private_key_inline | length == 0
+
+- name: Ensure remote GitHub App private key directory exists
+  ansible.builtin.file:
+    path: >-
+      {{
+        speclens_remote_release_dir ~ '/' ~ ((speclens_github_app_private_key_file | regex_replace('^\\./', '')) | dirname)
+      }}
+    state: directory
+    mode: "0755"
+  when:
+    - speclens_github_app_private_key_file | length > 0
+    - speclens_github_app_private_key_inline | length == 0
+
+- name: Copy GitHub App private key into the release tree
+  ansible.builtin.copy:
+    src: >-
+      {{
+        speclens_github_app_private_key_file
+        if speclens_github_app_private_key_file.startswith('/')
+        else (speclens_local_repo_root ~ '/' ~ (speclens_github_app_private_key_file | regex_replace('^\\./', '')))
+      }}
+    dest: >-
+      {{
+        speclens_remote_release_dir ~ '/' ~ (speclens_github_app_private_key_file | regex_replace('^\\./', ''))
+      }}
+    mode: "0600"
+  when:
+    - speclens_github_app_private_key_file | length > 0
+    - speclens_github_app_private_key_inline | length == 0
+
+- name: Copy runtime env file into compose directory
+  ansible.builtin.copy:
+    src: "{{ speclens_env_file }}"
+    dest: "{{ speclens_remote_env_path }}"
+    mode: "0600"
+
+- name: Archive runtime env file for operators
+  ansible.builtin.copy:
+    src: "{{ speclens_env_file }}"
+    dest: "{{ speclens_remote_env_archive_path }}"
+    mode: "0600"
+
+- name: Start or update the compose stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
+      - up
+      - -d
+      - --build
+      - --remove-orphans
+  args:
+    chdir: "{{ speclens_remote_compose_dir }}"
+
+- name: Ensure Keycloak bootstrap admin service account exists for deterministic seeding
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
+      - exec
+      - -T
+      - -e
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - -e
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - keycloak
+      - sh
+      - -lc
+      - >-
+        if [ -z "${KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID:-}" ] || [ -z "${KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET:-}" ]; then
+          echo "bootstrap admin service credentials not configured";
+          exit 1;
+        fi;
+        /opt/keycloak/bin/kc.sh bootstrap-admin service --no-prompt --optimized --client-id "$KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID" --client-secret:env KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET
+  args:
+    chdir: "{{ speclens_remote_compose_dir }}"
+
+- name: Seed Keycloak users for production E2E (if configured)
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
+      - exec
+      - -T
+      - -e
+      - "KEYCLOAK_ADMIN_URL=http://keycloak:8080"
+      - -e
+      - "KEYCLOAK_ISSUER_URL=http://keycloak:8080/realms/speclens"
+      - -e
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - -e
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - -e
+      - "E2E_OWNER_USERNAME={{ speclens_e2e_owner_username }}"
+      - -e
+      - "E2E_OWNER_PASSWORD={{ speclens_e2e_owner_password }}"
+      - -e
+      - "E2E_MEMBER_USERNAME={{ speclens_e2e_member_username }}"
+      - -e
+      - "E2E_MEMBER_PASSWORD={{ speclens_e2e_member_password }}"
+      - -e
+      - "E2E_OUTSIDER_USERNAME={{ speclens_e2e_outsider_username }}"
+      - -e
+      - "E2E_OUTSIDER_PASSWORD={{ speclens_e2e_outsider_password }}"
+      - -e
+      - "E2E_ADMIN_USERNAME={{ speclens_e2e_admin_username }}"
+      - -e
+      - "E2E_ADMIN_PASSWORD={{ speclens_e2e_admin_password }}"
+      - -e
+      - "E2E_BASE_URL={{ speclens_e2e_base_url }}"
+      - -e
+      - "APP_URL=https://{{ speclens_app_domain }}"
+      - api
+      - npm
+      - run
+      - seed:keycloak-users
+  when:
+    - speclens_e2e_owner_username | length > 0
+    - speclens_e2e_owner_password | length > 0
+    - speclens_e2e_member_username | length > 0
+    - speclens_e2e_member_password | length > 0
+    - speclens_e2e_outsider_username | length > 0
+    - speclens_e2e_outsider_password | length > 0
+    - speclens_e2e_admin_username | length > 0
+    - speclens_e2e_admin_password | length > 0

@@ -24,7 +24,7 @@
     "apps/**/*.tsx",
     "packages/**/*.ts",
     "packages/**/*.tsx",
-    "tests/**/*.test.ts",
+    "tests/**/*.ts",
     "next-env.d.ts"
   ],
   "exclude": [

@@ -1,0 +1,39 @@
+---
+- name: Assert DigitalOcean token is available
+  ansible.builtin.assert:
+    that:
+      - do_api_token | length > 0
+    fail_msg: "Set DIGITALOCEAN_ACCESS_TOKEN, DO_API_TOKEN, or DO_SECRET before running destroy."
+
+- name: Remove DNS records when enabled
+  digitalocean.cloud.domain_record:
+    token: "{{ do_api_token }}"
+    state: absent
+    domain_name: "{{ item.domain_name }}"
+    type: "{{ item.type }}"
+    name: "{{ item.name }}"
+    data: "{{ item.data | default('127.0.0.1') }}"
+    ttl: "{{ item.ttl | default(300) }}"
+  loop: "{{ speclens_dns_records }}"
+  when: speclens_manage_dns
+
+- name: Remove firewall
+  digitalocean.cloud.firewall:
+    token: "{{ do_api_token }}"
+    state: absent
+    name: "{{ speclens_do_firewall_name }}"
+
+- name: Remove droplet
+  digitalocean.cloud.droplet:
+    token: "{{ do_api_token }}"
+    state: absent
+    unique_name: true
+    name: "{{ speclens_do_droplet_name }}"
+    region: "{{ speclens_do_region }}"
+
+- name: Remove project when requested
+  digitalocean.cloud.project:
+    token: "{{ do_api_token }}"
+    state: absent
+    name: "{{ speclens_project_name }}"
+  when: speclens_destroy_project | bool

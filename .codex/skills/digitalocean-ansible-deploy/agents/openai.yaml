@@ -1,0 +1,7 @@
+interface:
+  display_name: "DigitalOcean Ansible Deploy"
+  short_description: "Provision and deploy SpecLens on DO"
+  default_prompt: "Use $digitalocean-ansible-deploy to provision, deploy, verify, or tear down the SpecLens DigitalOcean environment."
+
+policy:
+  allow_implicit_invocation: true

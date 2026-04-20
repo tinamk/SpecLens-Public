@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress
+Done
 
 ## Milestone / Iteration
 
@@ -19,7 +19,7 @@ Replace Auth0-specific assumptions with Keycloak-first identity, introduce an or
   - Keycloak-first env/config, login/callback flow, and local dev support
   - ordered AI-provider registry and OpenAI Codex support
   - self-hosted S3-compatible storage config and local dev MinIO support
-  - Docker Compose development stack for web, API, runner, Postgres, Keycloak, and MinIO
+  - Docker Compose development stack for web, API, runner, AI worker, Postgres, Keycloak, and MinIO
 - Out of scope:
   - production-ready third-party deployment credentials
   - complete live migration from local persisted state to PostgreSQL-backed auth/session state
@@ -46,10 +46,12 @@ Replace Auth0-specific assumptions with Keycloak-first identity, introduce an or
 ## Validation
 
 - Command: `npm run validate:local`
-- Result: Passed on 2026-04-13.
+- Result: Passed on 2026-04-19.
+- Command: `STACK_VALIDATE_BUILD=0 STACK_VALIDATE_SHUTDOWN_STACK=1 npm run stack:validate`
+- Result: Passed on 2026-04-20.
 
 ## Notes
 
 - The goal is to make the hosted stack portable rather than tied to one identity provider, one AI path, or one storage vendor.
 - The hosted web path now includes a same-origin API proxy so browser requests can forward a Keycloak bearer token and keep auth on the active hosted path instead of relying on cross-origin cookies.
-- The local development stack was added at `docker-compose.yml` plus `docker/`, but it could not be boot-verified in this execution environment because neither `docker compose` nor `docker-compose` was installed on the machine.
+- The local development stack at `docker-compose.yml` plus `docker/` is now boot-verified with the stack validation path, including the AI worker, richer ops validation, and the broader hosted E2E slice.

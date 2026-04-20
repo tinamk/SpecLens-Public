@@ -1,110 +1,200 @@
 import Link from "next/link";
 import { PricingCard } from "@speclens/ui";
 import { SiteHeader } from "../components/site-header";
+import { SiteFooter } from "../components/site-footer";
 
 export default function HomePage() {
   return (
-    <div className="marketing-shell">
+    <div className="marketing-shell" data-testid="public-home-page">
       <SiteHeader />
+      <main data-testid="public-home-main">
+        <section className="hero" data-testid="public-home-hero">
+          <div className="hero-card">
+            <div className="hero-grid">
+              <div className="hero-copy">
+                <p className="eyebrow">Spec-driven repository intelligence</p>
+                <h1 className="text-balance">Understand a repo&apos;s risks, behavior, and next moves before you inherit the work.</h1>
+                <p className="hero-lede">
+                  SpecLens turns source trees, runtime signals, and hosted job output into reviewable narratives with live
+                  logs, structured findings, and portal-ready artifacts. Free and Pro govern the managed SaaS. Commercial
+                  licensing covers company usage of the codebase and self-hosted rights.
+                </p>
+                <div className="nav-links">
+                  <Link className="button" data-testid="public-home-compare-plans" href="/pricing">Compare plans</Link>
+                  <Link className="button-secondary" data-testid="public-home-open-portal" href="/api/auth/login">Open the portal</Link>
+                </div>
+                <div className="hero-proof">
+                  <article className="hero-proof__item">
+                    <span className="tag tag--success">Hosted SaaS</span>
+                    <p>Analyze public and private repositories without maintaining a fragile local setup.</p>
+                  </article>
+                  <article className="hero-proof__item">
+                    <span className="tag tag--warning">Dual license</span>
+                    <p>Keep SaaS usage and codebase rights explicit instead of burying them in ambiguous terms.</p>
+                  </article>
+                </div>
+              </div>
 
-      <section className="hero">
-        <div className="hero-card">
-          <div className="hero-grid">
-            <div>
-              <p className="eyebrow">Spec-driven repository intelligence</p>
-              <h1>Stop guessing what a repo is doing. See its risks, story, and next moves in one run.</h1>
-              <p>
-                SpecLens turns repositories into reviewable, auditable narratives. Hosted SaaS plans for public and private
-                repos. Commercial licensing for companies that want self-hosted or broader commercial rights.
-              </p>
-              <div className="nav-links">
-                <Link className="button" href="/pricing">Compare plans</Link>
-                <Link className="button-secondary" href="/api/auth/login">Log in with Keycloak</Link>
+              <div className="hero-stage">
+                <div className="hero-stage__panel">
+                  <span className="tag tag--neutral">Hosted flow</span>
+                  <div className="hero-stage__steps">
+                    <article className="hero-stage__step">
+                      <span className="hero-stage__step-label">01 Queue a source</span>
+                      <p>Connect a public Git repo, a private GitHub installation, or a Git repo archive upload.</p>
+                    </article>
+                    <article className="hero-stage__step">
+                      <span className="hero-stage__step-label">02 Watch the run</span>
+                      <p>Follow durable job logs from isolated Docker sandboxes while the analysis progresses.</p>
+                    </article>
+                    <article className="hero-stage__step">
+                      <span className="hero-stage__step-label">03 Review the report</span>
+                      <p>Share normalized parity sections, findings, and export-ready artifacts with the team.</p>
+                    </article>
+                  </div>
+                </div>
+                <div className="hero-metrics">
+                  <article className="hero-metric">
+                    <span className="hero-metric__value">Free</span>
+                    <span className="hero-metric__label">Public GitHub review</span>
+                  </article>
+                  <article className="hero-metric">
+                    <span className="hero-metric__value">Pro</span>
+                    <span className="hero-metric__label">Private repos and uploads</span>
+                  </article>
+                  <article className="hero-metric">
+                    <span className="hero-metric__value">Commercial</span>
+                    <span className="hero-metric__label">Licensing and self-hosting rights</span>
+                  </article>
+                </div>
               </div>
             </div>
-            <div className="panel">
-              <span className="tag">Why teams use SpecLens</span>
-              <ul className="bullet-list">
-                <li>Captures live analysis logs like a GitHub Actions job, but focused on repo understanding.</li>
-                <li>Runs code analysis in isolated Docker sandboxes.</li>
-                <li>Stores artifacts in S3-compatible object storage and renders polished review reports.</li>
-                <li>Supports shared workspaces, public repo review, and paid private-repo analysis.</li>
-              </ul>
-            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="section">
-        <div className="feature-grid">
-          <article className="panel">
-            <h2>See the repo before you touch it</h2>
-            <p>
-              SpecLens turns source trees, manifests, and hosted job output into a structured report your team can actually use.
+        <section className="section">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">Why teams use SpecLens</p>
+              <h2 className="text-balance">A hosted analysis surface designed for reviewability, not just raw output.</h2>
+            </div>
+            <p className="section-copy">
+              The current product path in `docs/` centers on hosted workspaces, queued execution, parity-oriented reports,
+              and a cleaner separation between SaaS access and codebase licensing.
             </p>
-          </article>
-          <article className="panel">
-            <h2>Private repos without fragile local setup</h2>
-            <p>
-              Pro users connect private GitHub repositories through a GitHub App and run analysis in hosted sandbox workers.
-            </p>
-          </article>
-          <article className="panel">
-            <h2>Commercial rights are explicit</h2>
-            <p>
-              The codebase is dual licensed: source-available and non-commercial by default, with separate commercial terms for companies.
-            </p>
-          </article>
-        </div>
-      </section>
+          </div>
+          <div className="feature-grid">
+            <article className="panel">
+              <span className="tag tag--neutral">Review clarity</span>
+              <h3>See the repository before you touch it</h3>
+              <p>
+                SpecLens turns source trees, manifests, runtime behavior, and job output into a structured story your team
+                can act on.
+              </p>
+            </article>
+            <article className="panel">
+              <span className="tag tag--success">Hosted access</span>
+              <h3>Private repos without local setup debt</h3>
+              <p>
+                Pro users connect private GitHub repositories through the GitHub App path and run analysis inside hosted
+                sandbox workers.
+              </p>
+            </article>
+            <article className="panel">
+              <span className="tag tag--warning">Licensing clarity</span>
+              <h3>Commercial rights are explicit</h3>
+              <p>
+                Free and Pro define service usage. Commercial agreements handle company rights for the codebase and
+                self-hosted deployments.
+              </p>
+            </article>
+          </div>
+        </section>
 
-      <section className="section">
-        <h2>Hosted SaaS plans and commercial licensing</h2>
-        <div className="pricing-grid">
-          <PricingCard
-            name="Free"
-            price="$0"
-            description="For public GitHub repositories and early exploration."
-            bullets={[
-              "Analyze public GitHub repos only",
-              "Shared workspace portal",
-              "Hosted log stream and report view",
-              "No private repos or archive uploads",
-            ]}
-            cta={<Link className="button-ghost" href="/api/auth/login">Start free</Link>}
-          />
-          <div className="pricing-card pricing-card--featured">
+        <section className="section">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">What the experience feels like</p>
+              <h2 className="text-balance">One product language from landing page to queue, logs, and report.</h2>
+            </div>
+            <p className="section-copy">
+              The hosted surface covers the full journey: workspace setup, source intake, durable job execution, live log
+              review, and report interpretation.
+            </p>
+          </div>
+          <div className="feature-grid">
+            <article className="timeline-card">
+              <span className="tag tag--info">Portal</span>
+              <h3>Shared workspaces</h3>
+              <p>Organize repositories, team members, and billing state in one control surface.</p>
+            </article>
+            <article className="timeline-card">
+              <span className="tag tag--neutral">Runner plane</span>
+              <h3>Live sandbox logs</h3>
+              <p>Follow queued jobs in terminal-style views instead of waiting for a black-box result.</p>
+            </article>
+            <article className="timeline-card">
+              <span className="tag tag--success">Report view</span>
+              <h3>Normalized findings</h3>
+              <p>Review parity sections, severity-tagged findings, and downloadable artifacts without context switching.</p>
+            </article>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">Plans</p>
+              <h2>Hosted SaaS plans and commercial licensing</h2>
+            </div>
+            <p className="section-copy">
+              The managed SaaS is self-serve for individuals and teams. Commercial code licensing is a separate, direct
+              path for organizations that need broader rights.
+            </p>
+          </div>
+          <div className="pricing-grid">
             <PricingCard
-              name="Pro"
-              price="$19.99 / ~200 NOK"
-              description="For private repositories, uploads, and continuous hosted use."
+              name="Free"
+              price="$0"
+              description="For public GitHub repositories and early exploration."
               bullets={[
-                "Everything in Free",
-                "Private GitHub repos through GitHub App access",
-                "ZIP/TAR codebase uploads",
-                "Shared workspaces with owner/member access",
+                "Analyze public GitHub repos only",
+                "Shared workspace portal",
+                "Hosted log stream and report view",
+                "No private repos or Git repo archive uploads",
               ]}
-              cta={<Link className="button" href="/pricing">Subscribe to Pro</Link>}
+              cta={<Link className="button-ghost" href="/api/auth/login">Start free</Link>}
+            />
+            <div className="pricing-card--featured">
+              <PricingCard
+                name="Pro"
+                price="$19.99 / ~200 NOK"
+                description="For private repositories, Git repo archive uploads, and continuous hosted use."
+                bullets={[
+                  "Everything in Free",
+                  "Private GitHub repos through GitHub App access",
+                  "ZIP/TAR Git repository uploads",
+                  "Shared workspaces with owner/member access",
+                ]}
+                cta={<Link className="button" href="/pricing">Subscribe to Pro</Link>}
+              />
+            </div>
+            <PricingCard
+              name="Commercial"
+              price="Contact us"
+              description="For companies that need commercial licensing or self-hosted rights."
+              bullets={[
+                "Commercial rights for company usage of the codebase",
+                "Separate self-hosted and licensing discussions",
+                "Procurement-friendly commercial agreement path",
+                "Direct contact for tailored terms",
+              ]}
+              cta={<Link className="button-secondary" href="/commercial">Talk commercial licensing</Link>}
             />
           </div>
-          <PricingCard
-            name="Commercial"
-            price="Contact us"
-            description="For companies that need commercial licensing or self-hosted rights."
-            bullets={[
-              "Commercial rights for company usage of the codebase",
-              "Separate self-hosted and licensing discussions",
-              "Procurement-friendly commercial agreement path",
-              "Direct contact for tailored terms",
-            ]}
-            cta={<Link className="button-secondary" href="/commercial">Talk commercial licensing</Link>}
-          />
-        </div>
-      </section>
-
-      <footer className="site-footer">
-        <p>SpecLens is hosted SaaS plus dual-licensed code. Public SaaS plans are self-serve; commercial code licensing is handled separately.</p>
-      </footer>
+        </section>
+      </main>
+      <SiteFooter />
     </div>
   );
 }

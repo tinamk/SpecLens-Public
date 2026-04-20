@@ -11,11 +11,15 @@ export interface WriteRunArtifactsInput {
 }
 
 function renderMarkdown(report: AnalysisReport): string {
+  const roleLookup = new Map(report.roles.map(role => [role.id, role]));
+  const roleLabel = (roleId: string) => roleLookup.get(roleId)?.title ?? roleId;
+  const roleSummary = report.roles.length > 0
+    ? report.roles.map(role => role.title || role.id).join(", ")
+    : "n/a";
   const lines = [
     `# ${report.title}`,
     "",
     `Generated: ${report.createdAt}`,
-    `Preset: ${report.preset}`,
     `Runtime mode: ${report.runtimeMode}`,
     "",
     "## Summary",
@@ -24,7 +28,7 @@ function renderMarkdown(report: AnalysisReport): string {
     `- High: ${report.summary.high}`,
     `- Medium: ${report.summary.medium}`,
     `- Low: ${report.summary.low}`,
-    `- Capabilities: ${report.capabilities.join(", ")}`,
+    `- Roles: ${roleSummary}`,
     "",
     "## Sections",
     "",
@@ -35,7 +39,7 @@ function renderMarkdown(report: AnalysisReport): string {
   } else {
     for (const section of report.sections) {
       lines.push(`### ${section.title}`);
-      lines.push(`- Capability: ${section.capability}`);
+      lines.push(`- Role: ${roleLabel(section.roleId)}`);
       lines.push(`- Status: ${section.status}`);
       lines.push(`- Summary: ${section.summary}`);
       lines.push("");
@@ -49,7 +53,7 @@ function renderMarkdown(report: AnalysisReport): string {
   } else {
     for (const finding of report.findings) {
       lines.push(`### ${finding.title}`);
-      lines.push(`- Capability: ${finding.capability}`);
+      lines.push(`- Role: ${roleLabel(finding.roleId)}`);
       lines.push(`- Severity: ${finding.severity}`);
       lines.push(`- Message: ${finding.message}`);
       lines.push(`- Suggestion: ${finding.suggestion}`);
@@ -72,6 +76,8 @@ function escapeHtml(value: string): string {
 }
 
 function renderHtml(report: AnalysisReport, logs: AnalysisLogEvent[]): string {
+  const roleLookup = new Map(report.roles.map(role => [role.id, role]));
+  const roleLabel = (roleId: string) => roleLookup.get(roleId)?.title ?? roleId;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -88,7 +94,7 @@ function renderHtml(report: AnalysisReport, logs: AnalysisLogEvent[]): string {
     .finding{padding:16px;border-top:1px solid #e6ddd0}
     .badge{display:inline-block;padding:4px 10px;border-radius:999px;background:#23463d;color:#fff;font-size:12px}
     .badge--planned{background:#8a6f33}
-    .capability{font-size:12px;color:#6b5c4d;text-transform:uppercase;letter-spacing:.08em}
+    .role-label{font-size:12px;color:#6b5c4d;text-transform:uppercase;letter-spacing:.08em}
     .logline{padding:10px 14px;margin:8px 0;font-family:ui-monospace,monospace}
   </style>
 </head>
@@ -97,7 +103,7 @@ function renderHtml(report: AnalysisReport, logs: AnalysisLogEvent[]): string {
     <section class="hero">
       <p>SpecLens behavioral parity report</p>
       <h1>${escapeHtml(report.title)}</h1>
-      <p>Preset <strong>${escapeHtml(report.preset)}</strong> running in <strong>${escapeHtml(report.runtimeMode)}</strong> mode.</p>
+      <p>Running in <strong>${escapeHtml(report.runtimeMode)}</strong> mode.</p>
       <div class="grid">
         <div><strong>Total</strong><br>${report.summary.totalFindings}</div>
         <div><strong>High</strong><br>${report.summary.high}</div>
@@ -110,7 +116,7 @@ function renderHtml(report: AnalysisReport, logs: AnalysisLogEvent[]): string {
       ${report.sections.map(section => `
         <article class="finding">
           <span class="badge ${section.status === "planned" ? "badge--planned" : ""}">${section.status.toUpperCase()}</span>
-          <p class="capability">${escapeHtml(section.capability)}</p>
+          <p class="role-label">${escapeHtml(roleLabel(section.roleId))}</p>
           <h3>${escapeHtml(section.title)}</h3>
           <p>${escapeHtml(section.summary)}</p>
         </article>
@@ -121,7 +127,7 @@ function renderHtml(report: AnalysisReport, logs: AnalysisLogEvent[]): string {
       ${report.findings.map(finding => `
         <article class="finding">
           <span class="badge">${finding.severity.toUpperCase()}</span>
-          <p class="capability">${escapeHtml(finding.capability)}</p>
+          <p class="role-label">${escapeHtml(roleLabel(finding.roleId))}</p>
           <h3>${escapeHtml(finding.title)}</h3>
           <p>${escapeHtml(finding.message)}</p>
           <p><strong>Suggestion:</strong> ${escapeHtml(finding.suggestion)}</p>
@@ -146,6 +152,42 @@ function detectMimeType(filePath: string): string {
   if (extension === ".png") return "image/png";
   if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
   return "application/octet-stream";
+}
+
+function detectArtifactKind(filePath: string): ArtifactReference["kind"] {
+  const normalized = filePath.split(path.sep).join("/");
+  const baseName = path.basename(normalized).toLowerCase();
+  if (baseName === "report.json" || baseName === "report.md" || baseName === "report.html") {
+    return "report";
+  }
+  if (baseName.endsWith(".png") || baseName.endsWith(".jpg") || baseName.endsWith(".jpeg")) {
+    return "screenshot";
+  }
+  if (baseName.endsWith("trace.zip")) {
+    return "trace";
+  }
+  if (baseName.includes("storage-state") && baseName.endsWith(".json")) {
+    return "storage-state";
+  }
+  if (baseName === "runtime.log") {
+    return "runtime-log";
+  }
+  if (normalized.includes("/playwright-report/")) {
+    return "playwright-report";
+  }
+  if (normalized.includes("/test-results/")) {
+    return "test-results";
+  }
+  if (baseName.includes("component-inventory")) {
+    return "component-inventory";
+  }
+  if (baseName.includes("route-map")) {
+    return "route-map";
+  }
+  if (baseName.includes("remediation-pack")) {
+    return "remediation-pack";
+  }
+  return "artifact";
 }
 
 function collectFiles(rootDir: string): string[] {
@@ -181,6 +223,7 @@ function buildArtifactReferences(workspace: WorkspaceHandle, jobId: string, runD
       key: relativePosix(workspace.rootDir, filePath),
       bucket: "local-workspace",
       region: "local",
+      kind: detectArtifactKind(filePath),
       mimeType: detectMimeType(filePath),
       sizeBytes: fs.statSync(filePath).size,
     }));

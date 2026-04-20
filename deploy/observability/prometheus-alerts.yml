@@ -1,0 +1,56 @@
+groups:
+  - name: speclens-alerts
+    rules:
+      - alert: SpecLensQueueBacklog
+        expr: speclens_queue_depth{status="pending"} > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SpecLens queue backlog growing"
+          description: "Pending jobs are above 10 for more than 5 minutes."
+
+      - alert: SpecLensJobFailures
+        expr: increase(speclens_job_events_total{event="failed"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SpecLens job failures detected"
+          description: "One or more jobs failed in the last 10 minutes."
+
+      - alert: SpecLensWebhookFailures
+        expr: sum(increase(speclens_api_requests_total{route=~"/api/webhooks/(stripe|github)",status=~"4..|5.."}[10m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook failures detected"
+          description: "GitHub or Stripe webhook requests are repeatedly failing with 4xx/5xx responses."
+
+      - alert: SpecLensStorageDegraded
+        expr: increase(speclens_api_requests_total{route="/ready",status="503"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SpecLens storage or database readiness failed"
+          description: "Readiness checks are failing; investigate storage or database health."
+
+      - alert: SpecLensAiWorkerFailures
+        expr: sum(increase(speclens_ai_worker_jobs_total{status=~"failed|cancelled|unknown"}[10m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SpecLens AI worker failures detected"
+          description: "One or more AI worker jobs ended unsuccessfully in the last 10 minutes."
+
+      - alert: SpecLensAiWorkerUnavailable
+        expr: up{job="speclens-ai-worker"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SpecLens AI worker unavailable"
+          description: "Prometheus cannot scrape the AI worker metrics endpoint."

@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Source } from "@speclens/contracts";
 import { createId, ensureDir, isGitLocation, slugify } from "./utils";
 import type { WorkspaceHandle } from "./workspace";
 
 export interface SourceDescriptor {
-  type?: "path" | "git" | "workspace";
+  type?: "git";
   location: string;
   ref?: string;
   depth?: number;
@@ -14,80 +14,81 @@ export interface SourceDescriptor {
 
 export interface AcquiredSource {
   sourceId: string;
-  type: "path" | "git" | "workspace";
+  type: "git";
   location: string;
   repoPath: string;
 }
 
-function runGit(args: string[], cwd?: string): void {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `git ${args.join(" ")} failed`);
-  }
+async function runGit(args: string[], cwd?: string): Promise<void> {
+  const child = spawn("git", args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    child.stdout.on("data", chunk => {
+      stdout.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    child.stderr.on("data", chunk => {
+      stderr.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    child.once("error", reject);
+    child.once("close", status => {
+      if (status !== 0) {
+        reject(new Error(
+          Buffer.concat(stderr).toString("utf8").trim()
+          || Buffer.concat(stdout).toString("utf8").trim()
+          || `git ${args.join(" ")} failed`,
+        ));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
-function inferSourceType(source: SourceDescriptor): "path" | "git" | "workspace" {
-  if (source.type) return source.type;
-  return isGitLocation(source.location) ? "git" : "path";
-}
-
-export function acquireSource(source: SourceDescriptor, workspace: WorkspaceHandle): AcquiredSource {
-  const type = inferSourceType(source);
-
-  if (type === "path") {
-    const repoPath = path.resolve(workspace.rootDir, source.location);
-    if (!fs.existsSync(repoPath)) throw new Error(`Path source not found: ${repoPath}`);
-    return {
-      sourceId: createId("src", `path:${repoPath}`),
-      type,
-      location: source.location,
-      repoPath,
-    };
+export async function acquireSource(source: SourceDescriptor, workspace: WorkspaceHandle): Promise<AcquiredSource> {
+  if (!isGitLocation(source.location)) {
+    throw new Error("Hosted source descriptors must be Git locations. Use repoPath for local repository analysis.");
   }
 
-  if (type === "workspace") {
-    const repoPath = path.resolve(workspace.uploadsDir, source.location);
-    if (!fs.existsSync(repoPath)) throw new Error(`Workspace source not found: ${repoPath}`);
-    return {
-      sourceId: createId("src", `workspace:${repoPath}`),
-      type,
-      location: source.location,
-      repoPath,
-    };
-  }
-
-  const checkoutDir = path.join(workspace.cacheDir, `${slugify(path.basename(source.location.replace(/\.git$/i, "")))}-${createId("git", source.location).slice(-6)}`);
+  const checkoutSeed = `${source.location}:${source.ref ?? "HEAD"}:${source.depth ?? "full"}`;
+  const checkoutDir = path.join(workspace.cacheDir, `${slugify(path.basename(source.location.replace(/\.git$/i, "")))}-${createId("git", checkoutSeed).slice(-6)}`);
   ensureDir(workspace.cacheDir);
 
   if (!fs.existsSync(path.join(checkoutDir, ".git"))) {
     const args = ["clone"];
     if (source.depth) args.push("--depth", String(source.depth));
     args.push(source.location, checkoutDir);
-    runGit(args);
+    await runGit(args);
   } else {
-    runGit(["fetch", "--all", "--prune", "--tags"], checkoutDir);
+    await runGit(["fetch", "--all", "--prune", "--tags"], checkoutDir);
   }
 
   if (source.ref) {
-    runGit(["checkout", "--force", source.ref], checkoutDir);
+    await runGit(["checkout", "--force", source.ref], checkoutDir);
   }
 
   return {
     sourceId: createId("src", `git:${source.location}:${source.ref ?? "HEAD"}`),
-    type,
+    type: "git",
     location: source.location,
     repoPath: checkoutDir,
   };
 }
 
 export function asHostedSource(source: AcquiredSource, workspaceId: string): Source {
+  const normalizedLocation = source.location.replace(/\/+$/g, "").replace(/\.git$/i, "");
   return {
     id: source.sourceId,
     workspaceId,
-    type: source.type === "git" ? "github-public" : source.type === "workspace" ? "upload-archive" : "workspace",
-    displayName: path.basename(source.repoPath),
+    type: "git-public",
+    displayName: path.basename(normalizedLocation) || path.basename(source.repoPath),
     location: source.location,
-    visibility: source.type === "git" ? "public" : "private",
+    visibility: "public",
+    verificationStatus: "verified",
+    verificationError: null,
     githubInstallationId: null,
     uploadObjectKey: null,
     createdAt: new Date().toISOString(),

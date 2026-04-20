@@ -1,0 +1,19 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - rsync
+
+write_files:
+  - path: /etc/motd
+    permissions: "0644"
+    content: |
+      SpecLens single-node deployment host
+      Managed primarily through Ansible playbooks in deploy/digitalocean/ansible/
+
+runcmd:
+  - timedatectl set-timezone UTC || true
