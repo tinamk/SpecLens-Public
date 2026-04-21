@@ -14,10 +14,10 @@ import {
 
 const { Client: PgClient } = pg;
 
-const apiUrl = process.env.API_URL ?? "http://localhost:4000";
-const runnerUrl = process.env.RUNNER_URL ?? "http://localhost:4510";
-const aiWorkerUrl = process.env.AI_WORKER_URL ?? "http://localhost:4520";
-const appUrl = process.env.APP_URL ?? "http://localhost:8080";
+const apiUrl = process.env.API_URL ?? "http://localhost:14000";
+const runnerUrl = process.env.RUNNER_URL ?? "http://localhost:14510";
+const aiWorkerUrl = process.env.AI_WORKER_URL ?? "http://localhost:14520";
+const appUrl = process.env.APP_URL ?? "http://localhost:18080";
 const keycloakIssuerUrl = process.env.KEYCLOAK_ISSUER_URL ?? "";
 const emitJson = process.env.OPS_VALIDATE_JSON === "1";
 

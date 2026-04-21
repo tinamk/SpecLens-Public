@@ -238,14 +238,15 @@ npm run dev:compose
 
 That Compose stack starts:
 
-- `web` on `http://localhost:3000`
-- `api` on `http://localhost:4000`
-- `runner` health on `http://localhost:4510`
-- `ai-worker` health on `http://localhost:4520`
-- `keycloak` on `http://localhost:8081`
-- `postgres` on `localhost:5432`
-- `minio` S3 API on `http://localhost:9000`
-- `minio` console on `http://localhost:9001`
+- `caddy` on `http://localhost:18080`
+- `web` on `http://localhost:13000`
+- `api` on `http://localhost:14000`
+- `runner` health on `http://localhost:14510`
+- `ai-worker` health on `http://localhost:14520`
+- `keycloak` on `http://localhost:18081`
+- `postgres` on `localhost:15433`
+- `minio` S3 API on `http://localhost:19000`
+- `minio` console on `http://localhost:19001`
 
 Local mutable state now defaults to home/XDG-scoped paths instead of `/tmp` or `/var/tmp`:
 
@@ -335,7 +336,7 @@ npm run dev:compose
 npm run stripe:webhooks:listen
 ```
 
-That forwards Stripe events to `http://localhost:4000/api/webhooks/stripe`.
+That forwards Stripe events to `http://localhost:14000/api/webhooks/stripe`.
 The CLI prints a `whsec_...` signing secret on startup. Save it into `.env` with:
 
 ```bash
@@ -352,7 +353,7 @@ npm run stripe:webhooks:create-checkout
 
 That helper is meant for `API_AUTH_MODE=local-dev`. It prints a hosted Stripe Checkout URL from the local API. Open it in a browser, complete the test checkout, and the forwarded `checkout.session.completed` event should upgrade the local user/workspace entitlement to `pro`.
 
-If you keep the default local Keycloak flow enabled, log into `http://localhost:3000`, create the checkout from the portal, and let the Stripe CLI handle only the webhook forwarding.
+If you keep the default local Keycloak flow enabled, log into `http://localhost:18080`, create the checkout from the portal, and let the Stripe CLI handle only the webhook forwarding.
 
 ### GitHub localhost webhooks
 
@@ -415,8 +416,8 @@ Start from `.env.example` and configure:
 
 ## Operations
 
-- readiness: `GET /ready` (API) and `http://localhost:4510/ready` (runner)
-- metrics: `GET /metrics` (API) and `http://localhost:4510/metrics` (runner)
+- readiness: `http://localhost:14000/ready` (API) and `http://localhost:14510/ready` (runner)
+- metrics: `http://localhost:14000/metrics` (API) and `http://localhost:14510/metrics` (runner)
 - rate limiting: enable with `RATE_LIMIT_ENABLED=true`
 - audit export: `npm run audit:export` (uses `AUDIT_EXPORT_*` env vars)
 - backups: `npm run backup:postgres` and `npm run backup:object-storage`

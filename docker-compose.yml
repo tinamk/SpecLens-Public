@@ -2,7 +2,7 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
-      - "${CADDY_HTTP_PORT:-8080}:80"
+      - "${CADDY_HTTP_PORT:-18080}:80"
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
@@ -27,7 +27,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: speclens
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-15433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -44,8 +44,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${MINIO_PORT:-19000}:9000"
+      - "${MINIO_CONSOLE_PORT:-19001}:9001"
     volumes:
       - minio-data:/data
 
@@ -76,11 +76,11 @@ services:
       KC_DB_URL_DATABASE: keycloak
       KC_DB_USERNAME: postgres
       KC_DB_PASSWORD: postgres
-      KC_HOSTNAME: ${KEYCLOAK_BASE_URL:-http://localhost:8080}/auth
+      KC_HOSTNAME: ${KEYCLOAK_BASE_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}/auth
       KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: "true"
     ports:
-      - "${KEYCLOAK_PORT:-8081}:8080"
+      - "${KEYCLOAK_PORT:-18081}:8080"
     volumes:
       - ./docker/keycloak/realm-speclens.json:/opt/keycloak/data/import/realm-speclens.json:ro
     depends_on:
@@ -117,8 +117,8 @@ services:
     env_file:
       - .env
     environment:
-      APP_URL: ${APP_URL:-http://localhost:8080}
-      API_URL: ${API_URL:-http://localhost:8080}
+      APP_URL: ${APP_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
+      API_URL: ${API_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
       APP_STATE_BACKEND: prisma
       APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@speclens.dev}
@@ -128,14 +128,14 @@ services:
       CODEX_HOME: /codex-host
       PORT: 4000
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/speclens
-      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8080/auth/realms/speclens}
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}/auth/realms/speclens}
       KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
       KEYCLOAK_CLIENT_ID: speclens-web
       KEYCLOAK_CLIENT_SECRET: speclens-web-secret
       OBJECT_STORAGE_PROVIDER: s3-compatible
       OBJECT_STORAGE_BUCKET: speclens-artifacts
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
-      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-9000}
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-19000}
       OBJECT_STORAGE_REGION: us-east-1
       OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
       OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
@@ -144,7 +144,7 @@ services:
       RUNNER_URL: http://runner:4510
       SPECLENS_EXPOSE_E2E_TASKS: ${SPECLENS_EXPOSE_E2E_TASKS:-false}
     ports:
-      - "${API_PORT:-4000}:4000"
+      - "${API_PORT:-14000}:4000"
     volumes:
       - .:/workspace
       - root-node-modules:/workspace/node_modules
@@ -177,21 +177,21 @@ services:
     env_file:
       - .env
     environment:
-      APP_URL: ${APP_URL:-http://localhost:8080}
+      APP_URL: ${APP_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
       API_URL: http://api:4000
       INTERNAL_API_URL: http://api:4000
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
       APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@speclens.dev}
       CSRF_SECRET: ${CSRF_SECRET:-speclens-local-dev-csrf-secret}
       PORTAL_SESSION_SECRET: ${PORTAL_SESSION_SECRET:-speclens-local-dev-portal-session-secret}
-      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8080/auth/realms/speclens}
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}/auth/realms/speclens}
       KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
       KEYCLOAK_CLIENT_ID: speclens-web
       KEYCLOAK_CLIENT_SECRET: speclens-web-secret
-      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://localhost:8080}
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${WEB_PORT:-13000}:3000"
     volumes:
       - .:/workspace
       - root-node-modules:/workspace/node_modules
@@ -231,7 +231,7 @@ services:
       OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
       OBJECT_STORAGE_SECRET_ACCESS_KEY: minioadmin
     ports:
-      - "${RUNNER_PORT:-4510}:4510"
+      - "${RUNNER_PORT:-14510}:4510"
     volumes:
       - .:/app
       - root-node-modules:/app/node_modules
@@ -271,7 +271,7 @@ services:
       AI_WORKER_CODEX_BYPASS_SANDBOX: "false"
       SPECLENS_EXPOSE_E2E_TASKS: ${SPECLENS_EXPOSE_E2E_TASKS:-false}
     ports:
-      - "${AI_WORKER_PORT:-4520}:4520"
+      - "${AI_WORKER_PORT:-14520}:4520"
     volumes:
       - .:/app
       - root-node-modules:/app/node_modules

@@ -53,7 +53,7 @@ async function apiFetch(pathname, init = {}) {
 const authMode = readConfigValue("API_AUTH_MODE", "keycloak");
 if (authMode !== "local-dev") {
   console.error("stripe:webhooks:create-checkout is for local-dev auth mode.");
-  console.error("With Keycloak enabled, create the checkout from http://localhost:3000 after logging in.");
+  console.error("With Keycloak enabled, create the checkout from http://localhost:18080 after logging in.");
   console.error("If you want a pure CLI loop, start the API with API_AUTH_MODE=local-dev and rerun this command.");
   process.exit(1);
 }

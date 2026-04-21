@@ -7,7 +7,7 @@ This document describes the default Docker Compose topology used for local devel
 ```mermaid
 flowchart LR
   Browser[Browser]
-  Caddy[Caddy :8080]
+  Caddy[Caddy :18080 host]
   Web[web :3000]
   Api[api :4000]
   Keycloak[keycloak :8080 internal]
@@ -41,10 +41,21 @@ In local Compose, Caddy is the browser-facing entry point.
 
 Typical public URLs:
 
-- app root: `http://<host>:8080`
-- portal: `http://<host>:8080/portal`
-- Keycloak public path: `http://<host>:8080/auth`
-- MinIO object proxy: `http://<host>:8080/minio/*`
+- app root: `http://<host>:18080`
+- portal: `http://<host>:18080/portal`
+- Keycloak public path: `http://<host>:18080/auth`
+- MinIO object proxy: `http://<host>:18080/minio/*`
+
+Default direct host-bound ports:
+
+- `web`: `13000`
+- `api`: `14000`
+- `runner`: `14510`
+- `ai-worker`: `14520`
+- `postgres`: `15433`
+- `keycloak`: `18081`
+- `minio`: `19000`
+- `minio-console`: `19001`
 
 ## Route Shape
 

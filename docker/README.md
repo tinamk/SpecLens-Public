@@ -4,13 +4,15 @@ This repo ships a full local hosted-development stack via `docker-compose.yml`.
 
 Services:
 
-- `web`: Next.js marketing site and portal on `http://localhost:3000`
-- `api`: Fastify API on `http://localhost:4000`
-- `runner`: runner health endpoint on `http://localhost:4510`
-- `postgres`: app and Keycloak database host on `localhost:5432`
-- `keycloak`: OIDC provider on `http://localhost:8081`
-- `minio`: S3-compatible object storage on `http://localhost:9000`
-- `minio` console: `http://localhost:9001`
+- `caddy`: browser-facing entry point on `http://localhost:18080`
+- `web`: Next.js marketing site and portal on `http://localhost:13000`
+- `api`: Fastify API on `http://localhost:14000`
+- `runner`: runner health endpoint on `http://localhost:14510`
+- `ai-worker`: AI worker health endpoint on `http://localhost:14520`
+- `postgres`: app and Keycloak database host on `localhost:15433`
+- `keycloak`: direct OIDC provider access on `http://localhost:18081`
+- `minio`: S3-compatible object storage on `http://localhost:19000`
+- `minio` console: `http://localhost:19001`
 
 Default local credentials:
 
@@ -36,6 +38,7 @@ COMPOSE_PROJECT_NAME=speclens-redesign npm run dev:compose
 
 Notes:
 
+- The local stack now defaults to a distinct host-port profile so it can run alongside `SpecLens-frontend-redesign` without container-name or port collisions.
 - The Compose stack uses a public Keycloak issuer URL for browser redirects and an internal issuer URL for server-to-server token exchange.
 - The local dev stack intentionally avoids fixed Docker container names so separate checkouts can run side by side without name collisions.
 - The Compose stack uses MinIO as a self-hosted S3-compatible backend by default. To use an external S3-compatible provider, update the `OBJECT_STORAGE_*` variables in `.env` (bucket, endpoint, region, access keys).

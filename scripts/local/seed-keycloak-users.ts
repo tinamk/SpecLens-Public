@@ -273,6 +273,10 @@ async function ensurePortalClient(baseUrl: string, realm: string, token: string)
   const baseOrigins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:13000",
+    "http://127.0.0.1:13000",
+    "http://localhost:18080",
+    "http://127.0.0.1:18080",
     "http://localhost:3300",
     "http://127.0.0.1:3300",
   ];

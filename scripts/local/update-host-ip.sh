@@ -37,15 +37,20 @@ upsert() {
   fi
 }
 
+caddy_http_port="$(awk -F= '/^CADDY_HTTP_PORT=/{print $2}' "$env_file" | tail -n 1)"
+if [ -z "$caddy_http_port" ]; then
+  caddy_http_port="18080"
+fi
+
 upsert "HOST_IP" "$host_ip"
-upsert "APP_URL" "http://${host_ip}:8080"
-upsert "API_URL" "http://${host_ip}:8080"
-upsert "NEXT_PUBLIC_API_URL" "http://${host_ip}:8080"
-upsert "KEYCLOAK_ISSUER_URL" "http://${host_ip}:8080/auth/realms/speclens"
-upsert "KEYCLOAK_BASE_URL" "http://${host_ip}:8080"
-upsert "STRIPE_SUCCESS_URL" "http://${host_ip}:8080/portal?billing=success"
-upsert "STRIPE_CANCEL_URL" "http://${host_ip}:8080/pricing?billing=cancelled"
-upsert "GITHUB_LOCAL_WEBHOOK_TARGET_URL" "http://${host_ip}:8080/api/webhooks/github"
-upsert "GITHUB_ALLOWED_RETURN_ORIGINS" "http://${host_ip}:8080"
+upsert "APP_URL" "http://${host_ip}:${caddy_http_port}"
+upsert "API_URL" "http://${host_ip}:${caddy_http_port}"
+upsert "NEXT_PUBLIC_API_URL" "http://${host_ip}:${caddy_http_port}"
+upsert "KEYCLOAK_ISSUER_URL" "http://${host_ip}:${caddy_http_port}/auth/realms/speclens"
+upsert "KEYCLOAK_BASE_URL" "http://${host_ip}:${caddy_http_port}"
+upsert "STRIPE_SUCCESS_URL" "http://${host_ip}:${caddy_http_port}/portal?billing=success"
+upsert "STRIPE_CANCEL_URL" "http://${host_ip}:${caddy_http_port}/pricing?billing=cancelled"
+upsert "GITHUB_LOCAL_WEBHOOK_TARGET_URL" "http://${host_ip}:${caddy_http_port}/api/webhooks/github"
+upsert "GITHUB_ALLOWED_RETURN_ORIGINS" "http://${host_ip}:${caddy_http_port}"
 
 echo "Updated $env_file for public host ${host_ip}"
