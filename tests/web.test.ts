@@ -414,6 +414,35 @@ test("workspace-scoped report context helper accepts report and job payloads fro
   );
 });
 
+test("workspace-scoped report page context helper accepts report and workspace console payloads from the active workspace", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedReportPageContext(
+      "ws_demo",
+      [
+        { workspaceId: "ws_demo" },
+        { workspaceId: "ws_demo" },
+        { workspaceId: "ws_demo" },
+      ],
+      {
+        workspace: {
+          id: "ws_demo",
+        },
+        members: [{ workspaceId: "ws_demo" }],
+        sources: [{ workspaceId: "ws_demo" }],
+        installations: [{ workspaceId: "ws_demo" }],
+        jobs: [
+          {
+            job: { workspaceId: "ws_demo" },
+            report: { workspaceId: "ws_demo" },
+          },
+        ],
+      },
+    ),
+    true,
+  );
+});
+
 test("workspace-scoped report context helper rejects mismatched report workspace payloads", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(
@@ -421,6 +450,30 @@ test("workspace-scoped report context helper rejects mismatched report workspace
       "ws_demo",
       { workspaceId: "ws_other" },
       { workspaceId: "ws_demo" },
+    ),
+    false,
+  );
+});
+
+test("workspace-scoped report page context helper rejects mismatched workspace console payloads", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedReportPageContext(
+      "ws_demo",
+      [
+        { workspaceId: "ws_demo" },
+        { workspaceId: "ws_demo" },
+        null,
+      ],
+      {
+        workspace: {
+          id: "ws_other",
+        },
+        members: [{ workspaceId: "ws_demo" }],
+        sources: [{ workspaceId: "ws_demo" }],
+        installations: [{ workspaceId: "ws_demo" }],
+        jobs: [],
+      },
     ),
     false,
   );

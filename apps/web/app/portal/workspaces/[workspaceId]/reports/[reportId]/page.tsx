@@ -13,7 +13,7 @@ import {
   getWorkspaceReportRemediationSummary,
   getWorkspaceReportSectionsEmptyState,
   getWorkspaceRunHref,
-  isWorkspaceScopedReportContext,
+  isWorkspaceScopedReportPageContext,
 } from "../../../../../../lib/portal";
 
 function getTagTone(tone: string): string {
@@ -49,7 +49,11 @@ export default async function WorkspaceReportPage({
     ]);
     const roleLookup = new Map(report.roles.map(role => [role.id, role.title]));
     const canMutate = currentUser.id === workspaceConsole.workspace.ownerUserId || isPortalAdminSession(session);
-    if (!isWorkspaceScopedReportContext(workspaceId, report, job.job, latestRemediationJob?.job)) {
+    if (!isWorkspaceScopedReportPageContext(
+      workspaceId,
+      [report, job.job, latestRemediationJob?.job],
+      workspaceConsole,
+    )) {
       throw new ApiResponseError(404, `Report ${reportId} does not belong to workspace ${workspaceId}.`);
     }
     const sourceOptions = [

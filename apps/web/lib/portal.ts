@@ -250,6 +250,21 @@ export function isWorkspaceScopedWorkspaceConsoleContext(
   ].every(entity => entity.workspaceId === workspaceId);
 }
 
+export function isWorkspaceScopedReportPageContext(
+  workspaceId: string,
+  scopedEntities: Array<{ workspaceId: string } | null | undefined>,
+  workspaceConsole: {
+    workspace: { id: string };
+    members: Array<{ workspaceId: string }>;
+    sources: Array<{ workspaceId: string }>;
+    installations: Array<{ workspaceId: string }>;
+    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
+  },
+): boolean {
+  return isWorkspaceScopedReportContext(workspaceId, ...scopedEntities)
+    && isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole);
+}
+
 export function isWorkspaceScopedEntityPage(
   workspaceId: string,
   entities: Array<{ workspaceId: string }>,
