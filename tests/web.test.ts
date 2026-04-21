@@ -395,3 +395,27 @@ test("workspace-scoped report context helper rejects mismatched report workspace
     false,
   );
 });
+
+test("workspace-scoped job context helper accepts job and report payloads from the active workspace", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedJobContext(
+      "ws_demo",
+      { workspaceId: "ws_demo" },
+      { workspaceId: "ws_demo" },
+    ),
+    true,
+  );
+});
+
+test("workspace-scoped job context helper rejects mismatched job workspace payloads", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedJobContext(
+      "ws_demo",
+      { workspaceId: "ws_other" },
+      { workspaceId: "ws_demo" },
+    ),
+    false,
+  );
+});

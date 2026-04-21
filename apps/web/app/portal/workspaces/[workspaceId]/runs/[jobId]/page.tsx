@@ -4,7 +4,13 @@ import { PortalShell } from "@speclens/ui";
 import { JobLifecycleActions, JobLogConsole } from "../../../../../../components/portal-actions";
 import { ApiResponseError, getHostedJob, getPortalAnalysisTasks, getSourceLearnables } from "../../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../../lib/auth";
-import { buildPortalPrimaryNav, buildWorkspaceNav, formatJobExecutionMode, formatJobLabel } from "../../../../../../lib/portal";
+import {
+  buildPortalPrimaryNav,
+  buildWorkspaceNav,
+  formatJobExecutionMode,
+  formatJobLabel,
+  isWorkspaceScopedJobContext,
+} from "../../../../../../lib/portal";
 
 export default async function WorkspaceJobPage({
   params,
@@ -19,6 +25,9 @@ export default async function WorkspaceJobPage({
       getHostedJob(jobId, "default"),
       getPortalAnalysisTasks(),
     ]);
+    if (!isWorkspaceScopedJobContext(workspaceId, envelope.job, envelope.report)) {
+      throw new ApiResponseError(404, `Job ${jobId} does not belong to workspace ${workspaceId}.`);
+    }
     const sourceLearnables = await getSourceLearnables(envelope.job.workspaceId, envelope.job.sourceId);
     const executionLabel = formatJobLabel(envelope.job, tasks);
 
