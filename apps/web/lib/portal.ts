@@ -9,6 +9,19 @@ import {
   type PortalAnalysisTask,
 } from "./api";
 
+type WorkspaceScopedEntityLike = { workspaceId?: string | null } | null | undefined;
+type WorkspaceScopedJobEnvelopeLike = {
+  job?: WorkspaceScopedEntityLike;
+  report?: WorkspaceScopedEntityLike;
+} | null | undefined;
+type WorkspaceConsoleContextLike = {
+  workspace?: { id?: string | null } | null;
+  members?: WorkspaceScopedEntityLike[] | null;
+  sources?: Array<({ id?: string | null } & { workspaceId?: string | null }) | null | undefined> | null;
+  installations?: Array<({ githubInstallationId?: string | null } & { workspaceId?: string | null }) | null | undefined> | null;
+  jobs?: WorkspaceScopedJobEnvelopeLike[] | null;
+};
+
 export function getEntitlementTagClass(entitlement: string): string {
   if (entitlement === "commercial") return "tag tag--warning";
   if (entitlement === "pro") return "tag tag--success";
@@ -206,75 +219,57 @@ export function getWorkspaceReportRemediationSummary(input: {
 
 export function isWorkspaceScopedReportContext(
   workspaceId: string,
-  ...scopedEntities: Array<{ workspaceId: string } | null | undefined>
+  ...scopedEntities: WorkspaceScopedEntityLike[]
 ): boolean {
-  return scopedEntities.every(entity => !entity || entity.workspaceId === workspaceId);
+  return scopedEntities.every(entity => entity?.workspaceId === workspaceId);
 }
 
 export function isWorkspaceScopedJobContext(
   workspaceId: string,
-  ...scopedEntities: Array<{ workspaceId: string } | null | undefined>
+  ...scopedEntities: WorkspaceScopedEntityLike[]
 ): boolean {
-  return scopedEntities.every(entity => !entity || entity.workspaceId === workspaceId);
+  return scopedEntities.every(entity => entity?.workspaceId === workspaceId);
 }
 
 export function isWorkspaceScopedCodeReviewContext(
   workspaceId: string,
-  review: { workspaceId: string; source: { id: string } },
-  workspaceSources: Array<{ id: string }>,
+  review: { workspaceId?: string | null; source?: { id?: string | null } | null } | null | undefined,
+  workspaceSources: Array<{ id?: string | null } | null | undefined>,
 ): boolean {
-  if (review.workspaceId !== workspaceId) {
+  if (review?.workspaceId !== workspaceId || !review.source?.id) {
     return false;
   }
-  return workspaceSources.some(source => source.id === review.source.id);
+  return workspaceSources.some(source => source?.id === review.source?.id);
 }
 
 export function isWorkspaceScopedCodePageContext(
   workspaceId: string,
-  review: { workspaceId: string; source: { id: string } },
-  workspaceConsole: {
-    workspace: { id: string };
-    members: Array<{ workspaceId: string }>;
-    sources: Array<{ id: string; workspaceId: string }>;
-    installations: Array<{ workspaceId: string }>;
-    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
-  },
+  review: { workspaceId?: string | null; source?: { id?: string | null } | null } | null | undefined,
+  workspaceConsole: WorkspaceConsoleContextLike,
 ): boolean {
-  return isWorkspaceScopedCodeReviewContext(workspaceId, review, workspaceConsole.sources)
+  return isWorkspaceScopedCodeReviewContext(workspaceId, review, workspaceConsole.sources ?? [])
     && isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole);
 }
 
 export function isWorkspaceScopedWorkspaceConsoleContext(
   workspaceId: string,
-  workspaceConsole: {
-    workspace: { id: string };
-    members: Array<{ workspaceId: string }>;
-    sources: Array<{ workspaceId: string }>;
-    installations: Array<{ workspaceId: string }>;
-    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
-  },
+  workspaceConsole: WorkspaceConsoleContextLike,
 ): boolean {
-  if (workspaceConsole.workspace.id !== workspaceId) {
+  if (workspaceConsole.workspace?.id !== workspaceId) {
     return false;
   }
   return [
-    ...workspaceConsole.members,
-    ...workspaceConsole.sources,
-    ...workspaceConsole.installations,
-    ...workspaceConsole.jobs.flatMap(envelope => [envelope.job, envelope.report].filter(Boolean) as Array<{ workspaceId: string }>),
-  ].every(entity => entity.workspaceId === workspaceId);
+    ...(workspaceConsole.members ?? []),
+    ...(workspaceConsole.sources ?? []),
+    ...(workspaceConsole.installations ?? []),
+    ...((workspaceConsole.jobs ?? []).flatMap(envelope => [envelope?.job, envelope?.report])),
+  ].every(entity => entity?.workspaceId === workspaceId);
 }
 
 export function isWorkspaceScopedReportPageContext(
   workspaceId: string,
-  scopedEntities: Array<{ workspaceId: string } | null | undefined>,
-  workspaceConsole: {
-    workspace: { id: string };
-    members: Array<{ workspaceId: string }>;
-    sources: Array<{ workspaceId: string }>;
-    installations: Array<{ workspaceId: string }>;
-    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
-  },
+  scopedEntities: WorkspaceScopedEntityLike[],
+  workspaceConsole: WorkspaceConsoleContextLike,
 ): boolean {
   return isWorkspaceScopedReportContext(workspaceId, ...scopedEntities)
     && isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole);
@@ -282,41 +277,39 @@ export function isWorkspaceScopedReportPageContext(
 
 export function isWorkspaceScopedEntityPage(
   workspaceId: string,
-  entities: Array<{ workspaceId: string }>,
+  entities: WorkspaceScopedEntityLike[],
 ): boolean {
-  return entities.every(entity => entity.workspaceId === workspaceId);
+  return entities.every(entity => entity?.workspaceId === workspaceId);
 }
 
 export function isWorkspaceScopedJobsPage(
   workspaceId: string,
-  jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>,
+  jobs: WorkspaceScopedJobEnvelopeLike[],
 ): boolean {
-  return jobs.every(({ job, report }) => job.workspaceId === workspaceId && (!report || report.workspaceId === workspaceId));
+  return jobs.every(job => job?.job?.workspaceId === workspaceId && (!job.report || job.report.workspaceId === workspaceId));
 }
 
 export function isWorkspaceScopedGithubRepositoriesPage(
-  workspaceInstallations: Array<{ githubInstallationId: string }>,
-  repositories: Array<{ githubInstallationId: string }>,
+  workspaceInstallations: Array<{ githubInstallationId?: string | null } | null | undefined>,
+  repositories: Array<{ githubInstallationId?: string | null } | null | undefined>,
 ): boolean {
-  const installationIds = new Set(workspaceInstallations.map(installation => installation.githubInstallationId));
-  return repositories.every(repository => installationIds.has(repository.githubInstallationId));
+  const installationIds = new Set(
+    workspaceInstallations
+      .map(installation => installation?.githubInstallationId)
+      .filter((installationId): installationId is string => Boolean(installationId)),
+  );
+  return repositories.every(repository => Boolean(repository?.githubInstallationId) && installationIds.has(repository.githubInstallationId));
 }
 
 export function isWorkspaceScopedSourcesPageContext(
   workspaceId: string,
-  workspaceConsole: {
-    workspace: { id: string };
-    members: Array<{ workspaceId: string }>;
-    sources: Array<{ workspaceId: string }>;
-    installations: Array<{ workspaceId: string; githubInstallationId: string }>;
-    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
-  },
-  sources: Array<{ workspaceId: string }>,
-  githubRepositories: Array<{ githubInstallationId: string }>,
+  workspaceConsole: WorkspaceConsoleContextLike,
+  sources: WorkspaceScopedEntityLike[],
+  githubRepositories: Array<{ githubInstallationId?: string | null } | null | undefined>,
 ): boolean {
   return isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
     && isWorkspaceScopedEntityPage(workspaceId, sources)
-    && isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations, githubRepositories);
+    && isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations ?? [], githubRepositories);
 }
 
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
