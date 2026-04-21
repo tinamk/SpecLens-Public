@@ -13,8 +13,8 @@ PLAN_FILE="$STATE_DIR/OVERARCHING-PLAN.md"
 HISTORY_FILE="$STATE_DIR/history.ndjson"
 LOG_DIR="$STATE_DIR/logs"
 LOOP_LOG="$LOG_DIR/loop.log"
-INTERVAL_SECONDS="${SPECLENS_AGENT_INTERVAL_SECONDS:-60}"
-BACKOFF_SECONDS="${SPECLENS_AGENT_BACKOFF_SECONDS:-120}"
+INTERVAL_SECONDS="${SPECLENS_AGENT_INTERVAL_SECONDS:-15}"
+BACKOFF_SECONDS="${SPECLENS_AGENT_BACKOFF_SECONDS:-60}"
 DIRTY_REPO_EXIT_CODE=20
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "$REPO_MAIN/.hermes/agents"
@@ -49,6 +49,14 @@ write_status() {
   python3 - <<'PY' "$STATUS_FILE" "$state" "$summary" "$BRANCH" "$WORKTREE_DIR" "$head"
 import json, sys, datetime
 status_file, state, summary, branch, worktree, head = sys.argv[1:]
+existing = {}
+try:
+    with open(status_file, "r", encoding="utf-8") as f:
+        existing = json.load(f)
+except FileNotFoundError:
+    existing = {}
+except Exception:
+    existing = {}
 payload = {
     "state": state,
     "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -56,9 +64,9 @@ payload = {
     "branch": branch,
     "worktree": worktree,
     "head": head,
-    "evidence": [],
-    "next_steps": [],
-    "blockers": [],
+    "evidence": existing.get("evidence", []) if isinstance(existing.get("evidence"), list) else [],
+    "next_steps": existing.get("next_steps", []) if isinstance(existing.get("next_steps"), list) else [],
+    "blockers": existing.get("blockers", []) if isinstance(existing.get("blockers"), list) else [],
 }
 with open(status_file, "w", encoding="utf-8") as f:
     json.dump(payload, f, indent=2)
@@ -116,8 +124,8 @@ run_pass() {
   hermes_bin="$(resolve_hermes)"
   ensure_worktree
   reset_worktree_to_head
-  write_status "working" "Starting autonomous pass in dedicated PR worktree."
-  log "Starting autonomous pass in $WORKTREE_DIR"
+  write_status "working" "Starting autonomous review-and-fix pass in dedicated PR worktree."
+  log "Starting autonomous review-and-fix pass in $WORKTREE_DIR"
   (
     cd "$WORKTREE_DIR"
     "$hermes_bin" --yolo chat -q "$(cat "$PROMPT_FILE")"
