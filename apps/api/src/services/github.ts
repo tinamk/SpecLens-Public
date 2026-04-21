@@ -330,6 +330,15 @@ export function parseGithubRepoLocation(location: string): {
   };
 }
 
+export function isGithubRepoLocation(location: string): boolean {
+  try {
+    parseGithubRepoLocation(location);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function listGithubInstallationRepositories(installationId: string): Promise<GithubRepositoryRecord[]> {
   const token = await createGithubInstallationAccessToken(installationId);
   const payload = await githubApiFetch<{

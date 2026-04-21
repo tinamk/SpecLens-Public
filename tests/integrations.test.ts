@@ -81,6 +81,8 @@ test("GitHub service creates an app JWT from a PKCS8 private key and resolves re
     repo: "repo",
     normalizedUrl: "https://github.com/example/repo.git",
   });
+  assert.equal(githubService.isGithubRepoLocation("https://github.com/example/repo"), true);
+  assert.equal(githubService.isGithubRepoLocation("https://gitlab.com/github.com/repo.git"), false);
   assert.deepEqual(
     githubService.selectGithubInstallationForRepo(
       [{ githubInstallationId: "1", githubAccountLogin: "example" }],

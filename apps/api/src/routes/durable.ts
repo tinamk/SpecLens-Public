@@ -113,6 +113,7 @@ import {
   getGithubPullRequest,
   getGithubWebhookTargetTtlSeconds,
   isGithubGatewayHost,
+  isGithubRepoLocation,
   listGithubPullRequests,
   listGithubInstallationRepositories,
   parseGithubGatewayRegisterInput,
@@ -307,10 +308,6 @@ function buildConfiguredAppUrl(pathname: string, searchParams?: Record<string, s
 
 function safeFilename(value: string): string {
   return path.basename(value).replace(/[^a-zA-Z0-9._-]+/g, "-") || "upload.bin";
-}
-
-function isGithubRepoLocation(location: string): boolean {
-  return /github\.com[:/]/i.test(location);
 }
 
 function getCodexAuthConfig() {
