@@ -9,6 +9,7 @@ import {
   buildWorkspaceNav,
   getWorkspaceReportFindingsEmptyState,
   getWorkspaceReportFindingsEmptyStateTagClass,
+  getWorkspaceReportRemediationCodeHref,
   getWorkspaceReportRemediationSummary,
   getWorkspaceReportSectionsEmptyState,
   getWorkspaceRunHref,
@@ -157,7 +158,14 @@ export default async function WorkspaceReportPage({
                       <Link
                         className="button-ghost"
                         data-testid={`report-open-code-${file.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
-                        href={`/portal/workspaces/${workspaceId}/code?sourceId=${encodeURIComponent(remediationSourceId)}&path=${encodeURIComponent(file)}&reportId=${encodeURIComponent(report.id)}` as Route}
+                        href={getWorkspaceReportRemediationCodeHref({
+                          workspaceId,
+                          sourceId: remediationSourceId,
+                          reportId: report.id,
+                          filePath: file,
+                          branchName: report.summary.changeset?.branchName ?? null,
+                          baseRef: report.summary.changeset?.baseRef ?? null,
+                        })}
                         key={file}
                       >
                         Open {file}

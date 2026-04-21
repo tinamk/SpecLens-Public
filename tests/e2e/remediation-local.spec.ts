@@ -96,7 +96,14 @@ test.describe.serial("report remediation local", () => {
     await expect(page.getByTestId("report-remediation-changeset")).toBeVisible();
     await expect(page.getByTestId("report-open-remediation-job")).toHaveAttribute("href", new RegExp(`${remediationJobId}$`));
     await expect(page.locator('[data-testid^="report-remediation-artifact-"]')).not.toHaveCount(0);
+    const remediationCodeLink = page.locator('[data-testid^="report-open-code-"]').first();
+    await expect(remediationCodeLink).toHaveAttribute("href", /[?&]ref=/);
+    await expect(remediationCodeLink).toHaveAttribute("href", /[?&]compare=/);
+    await remediationCodeLink.click();
+    await expect(page).toHaveURL(/\/portal\/workspaces\/.*\/code\?/);
+    await expect(page.getByTestId("workspace-code-diff-header")).toBeVisible();
 
+    await page.goto(reportUrl);
     await addWorkspaceMember(page, workspace.id, memberUser.email);
 
     const memberReviewContext = await page.context().browser().newContext();

@@ -371,6 +371,36 @@ test("workspace report remediation helper keeps first-run guidance when no remed
   });
 });
 
+test("workspace report remediation code href helper preserves branch diff context for changed files", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.getWorkspaceReportRemediationCodeHref({
+      workspaceId: "ws_demo",
+      sourceId: "source_demo",
+      reportId: "report_demo",
+      filePath: "src/fix me.ts",
+      branchName: "autofix/report_demo",
+      baseRef: "main",
+    }),
+    "/portal/workspaces/ws_demo/code?sourceId=source_demo&path=src%2Ffix+me.ts&reportId=report_demo&ref=autofix%2Freport_demo&compare=main",
+  );
+});
+
+test("workspace report remediation code href helper omits diff parameters when no remediation branch exists", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.getWorkspaceReportRemediationCodeHref({
+      workspaceId: "ws_demo",
+      sourceId: "source_demo",
+      reportId: "report_demo",
+      filePath: "src/fix.ts",
+      branchName: null,
+      baseRef: "main",
+    }),
+    "/portal/workspaces/ws_demo/code?sourceId=source_demo&path=src%2Ffix.ts&reportId=report_demo",
+  );
+});
+
 test("workspace-scoped report context helper accepts report and job payloads from the active workspace", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(

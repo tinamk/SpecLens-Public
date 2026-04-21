@@ -121,6 +121,26 @@ export function getWorkspaceReportFindingsEmptyState(input: {
   };
 }
 
+export function getWorkspaceReportRemediationCodeHref(input: {
+  workspaceId: string;
+  sourceId: string;
+  reportId: string;
+  filePath: string;
+  branchName?: string | null;
+  baseRef?: string | null;
+}): Route {
+  const params = new URLSearchParams({
+    sourceId: input.sourceId,
+    path: input.filePath,
+    reportId: input.reportId,
+  });
+  if (input.branchName) {
+    params.set("ref", input.branchName);
+    params.set("compare", input.baseRef && input.baseRef.trim().length > 0 ? input.baseRef : "HEAD");
+  }
+  return `/portal/workspaces/${input.workspaceId}/code?${params.toString()}` as Route;
+}
+
 export function getWorkspaceReportRemediationSummary(input: {
   changesetGenerated: boolean;
   latestRemediationJobId?: string | null;
