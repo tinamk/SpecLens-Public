@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, sessionCookieName, stateCookieName } from "../../../../lib/auth";
+import { csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, resolveConfiguredUrlForRequest, sessionCookieName, stateCookieName } from "../../../../lib/auth";
 import { resolvePublicRequestOrigin } from "../../../../lib/request-origin";
 
 export async function GET(request: Request) {
@@ -19,23 +19,24 @@ export async function GET(request: Request) {
     configuredBaseUrl: process.env.APP_URL ?? null,
   }) + `${url.pathname}${url.search}`;
   const appBaseUrl = resolveAuthBaseUrl(requestUrl, config.baseUrl);
+  const issuer = resolveConfiguredUrlForRequest(requestUrl, config.issuer);
   const redirectTarget = new URL("/pricing", appBaseUrl);
   const idToken = (request.headers.get("cookie") ?? "")
     .split(";")
     .map(part => part.trim())
     .find(part => part.startsWith(`${idTokenCookieName()}=`))
     ?.slice(`${idTokenCookieName()}=`.length);
-  const keycloakCookiePath = config.issuer
-    ? `${new URL(config.issuer).pathname.replace(/\/+$/, "")}/`
+  const keycloakCookiePath = issuer
+    ? `${new URL(issuer).pathname.replace(/\/+$/, "")}/`
     : "/auth/";
   const secureLogoutCookies = redirectTarget.protocol === "https:"
     || redirectTarget.hostname === "localhost"
     || redirectTarget.hostname === "127.0.0.1";
-  const logoutTarget = config.issuer
-    ? new URL(`${config.issuer}/protocol/openid-connect/logout`)
+  const logoutTarget = issuer
+    ? new URL(`${issuer}/protocol/openid-connect/logout`)
     : redirectTarget;
 
-  if (config.issuer) {
+  if (issuer) {
     logoutTarget.searchParams.set("post_logout_redirect_uri", redirectTarget.toString());
     if (config.clientId) {
       logoutTarget.searchParams.set("client_id", config.clientId);

@@ -62,7 +62,21 @@
     public_key: "{{ speclens_ssh_public_key_material }}"
   register: speclens_ssh_key
 
-- name: Create or reuse single-node droplet
+- name: Inspect existing single-node droplet
+  digitalocean.cloud.droplets_info:
+    token: "{{ do_api_token }}"
+    name: "{{ speclens_do_droplet_name }}"
+  register: speclens_existing_droplets
+
+- name: Assert droplet name is unique
+  ansible.builtin.assert:
+    that:
+      - (speclens_existing_droplets.droplets | length) <= 1
+    fail_msg: >-
+      Expected at most one droplet named {{ speclens_do_droplet_name }}, found
+      {{ speclens_existing_droplets.droplets | length }}.
+
+- name: Create single-node droplet only when absent
   digitalocean.cloud.droplet:
     token: "{{ do_api_token }}"
     state: present
@@ -80,7 +94,22 @@
       - "{{ speclens_do_tag }}"
     user_data: "{{ speclens_cloud_init_payload }}"
     timeout: "{{ speclens_do_timeout }}"
-  register: speclens_droplet
+  register: speclens_created_droplet
+  when: (speclens_existing_droplets.droplets | length) == 0
+
+- name: Normalize droplet data for downstream tasks
+  ansible.builtin.set_fact:
+    speclens_droplet: >-
+      {{
+        {
+          'droplet': (
+            (speclens_existing_droplets.droplets | first)
+            if (speclens_existing_droplets.droplets | length) > 0
+            else speclens_created_droplet.droplet
+          )
+        }
+      }}
+    speclens_droplet_reused: "{{ (speclens_existing_droplets.droplets | length) > 0 }}"
 
 - name: Capture droplet public IPv4
   ansible.builtin.set_fact:
@@ -168,6 +197,8 @@
 - name: Show provision summary
   ansible.builtin.debug:
     msg:
-      - "Provisioned droplet {{ speclens_do_droplet_name }} at {{ speclens_droplet_ipv4 }}"
+      - >-
+        {{ 'Reused existing' if speclens_droplet_reused else 'Provisioned new' }}
+        droplet {{ speclens_do_droplet_name }} at {{ speclens_droplet_ipv4 }}
       - "Project: {{ speclens_project.project.name }}"
       - "Firewall: {{ speclens_firewall.firewall.name }}"

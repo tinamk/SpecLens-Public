@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { buildCsrfToken, buildLocalDevSession, csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, resolveSafeReturnTo, sessionCookieName, stateCookieName } from "../../../../lib/auth";
+import { buildCsrfToken, buildLocalDevSession, csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, resolveConfiguredUrlForRequest, resolveSafeReturnTo, sessionCookieName, stateCookieName } from "../../../../lib/auth";
 import { resolvePublicRequestOrigin } from "../../../../lib/request-origin";
 
 export async function GET(request: Request) {
@@ -21,9 +21,10 @@ export async function GET(request: Request) {
     configuredBaseUrl: process.env.APP_URL ?? null,
   }) + `${url.pathname}${url.search}`;
   const appBaseUrl = resolveAuthBaseUrl(requestUrl, config.baseUrl);
+  const issuer = resolveConfiguredUrlForRequest(requestUrl, config.issuer);
   const returnTo = resolveSafeReturnTo(requestedReturnTo, appBaseUrl);
 
-  if (!config.enabled || !config.issuer || !config.clientId) {
+  if (!config.enabled || !issuer || !config.clientId) {
     const response = NextResponse.redirect(new URL(returnTo, appBaseUrl));
     const sessionValue = buildLocalDevSession();
     response.cookies.set(sessionCookieName(), sessionValue, {
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
   const state = crypto.randomUUID();
   const callbackUrl = new URL("/api/auth/callback", appBaseUrl);
   callbackUrl.searchParams.set("returnTo", returnTo);
-  const authUrl = new URL(`${config.issuer}/protocol/openid-connect/auth`);
+  const authUrl = new URL(`${issuer}/protocol/openid-connect/auth`);
   authUrl.searchParams.set("client_id", config.clientId);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("scope", "openid profile email");

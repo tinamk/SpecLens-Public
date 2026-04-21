@@ -33,13 +33,20 @@ export function resolvePublicRequestOrigin(input: {
   const canTrustForwardedHeaders = isTrustedLocalHostname(fallbackUrl.hostname);
   if (forwardedHost && canTrustForwardedHeaders) {
     const protocol = forwardedProto || fallbackUrl.protocol.replace(/:$/, "") || "http";
+    const forwardedOrigin = `${protocol}://${withPort(forwardedHost, forwardedPort)}`;
     if (configuredOrigin) {
-      if (hostnameOfHost(forwardedHost) !== configuredOrigin.hostname) {
+      const forwardedHostname = hostnameOfHost(forwardedHost);
+      const allowTrustedLocalHostSwap = isTrustedLocalHostname(forwardedHostname)
+        && isTrustedLocalHostname(configuredOrigin.hostname);
+      if (forwardedHostname !== configuredOrigin.hostname && !allowTrustedLocalHostSwap) {
         return configuredOrigin.origin;
       }
-      return `${protocol}://${configuredOrigin.host}`;
+      if (forwardedHostname === configuredOrigin.hostname) {
+        return `${protocol}://${configuredOrigin.host}`;
+      }
+      return forwardedOrigin;
     }
-    return `${protocol}://${withPort(forwardedHost, forwardedPort)}`;
+    return forwardedOrigin;
   }
 
   if (configuredOrigin) {

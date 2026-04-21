@@ -176,6 +176,16 @@ export function resolveAuthBaseUrl(requestUrl: string, configuredBaseUrl: string
   return configuredOrigin;
 }
 
+export function resolveConfiguredUrlForRequest(requestUrl: string, configuredUrl: string | null): string | null {
+  if (!configuredUrl) {
+    return null;
+  }
+
+  const configured = new URL(configuredUrl);
+  const publicOrigin = resolveAuthBaseUrl(requestUrl, configured.origin);
+  return new URL(`${configured.pathname}${configured.search}${configured.hash}`, `${publicOrigin}/`).toString();
+}
+
 export function resolveSafeReturnTo(returnTo: string | null | undefined, appBaseUrl: string, fallback: string = "/portal/workspaces"): string {
   const candidate = returnTo?.trim();
   if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {

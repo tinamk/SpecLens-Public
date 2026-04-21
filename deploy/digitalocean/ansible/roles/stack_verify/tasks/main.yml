@@ -83,11 +83,46 @@
   ansible.builtin.uri:
     url: "https://{{ speclens_app_domain }}"
     follow_redirects: safe
+    return_content: true
     status_code:
       - 200
       - 302
     validate_certs: true
   register: speclens_app_public
+
+- name: Extract first public stylesheet path from app HTML
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import os
+        import re
+
+        html = os.environ.get("SPECLENS_APP_HTML", "")
+        match = re.search(r'/_next/static/css/[^"]+\.css', html)
+        print(match.group(0) if match else "")
+  environment:
+    SPECLENS_APP_HTML: "{{ speclens_app_public.content }}"
+  register: speclens_app_stylesheet_path_extract
+  changed_when: false
+
+- name: Store public stylesheet path for verification
+  ansible.builtin.set_fact:
+    speclens_app_stylesheet_path: "{{ speclens_app_stylesheet_path_extract.stdout | trim }}"
+
+- name: Assert public app HTML exposes a stylesheet asset
+  ansible.builtin.assert:
+    that:
+      - speclens_app_stylesheet_path | length > 0
+    fail_msg: "Public app HTML did not expose a Next stylesheet asset for verification."
+
+- name: Verify public app stylesheet asset
+  ansible.builtin.uri:
+    url: "https://{{ speclens_app_domain }}{{ speclens_app_stylesheet_path }}"
+    status_code: 200
+    validate_certs: true
+  register: speclens_app_stylesheet
 
 - name: Verify public API route
   ansible.builtin.uri:
@@ -154,6 +189,7 @@
       - "API metrics: {{ speclens_api_metrics.status }}"
       - "MinIO health: {{ speclens_minio_health.status }}"
       - "Public app: {{ speclens_app_public.status }}"
+      - "Public app stylesheet: {{ speclens_app_stylesheet.status }} {{ speclens_app_stylesheet_path }}"
       - "Public API: {{ speclens_api_public.status }}"
       - "Public auth: {{ speclens_auth_public.status }}"
       - "Ops validate: {{ speclens_ops_validate.rc }}"

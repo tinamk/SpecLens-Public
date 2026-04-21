@@ -1,50 +1,6 @@
 name: speclens-single-node
 
 services:
-  deps:
-    image: node:22-bookworm
-    restart: "no"
-    working_dir: /workspace
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    command: >
-      bash -lc "npm install && npm run db:generate && npm run db:migrate:deploy:safe"
-    volumes:
-      - ../..:/workspace
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  web-build:
-    image: node:22-bookworm
-    restart: "no"
-    working_dir: /workspace
-    env_file:
-      - .env
-    environment:
-      NODE_ENV: production
-      NEXT_TELEMETRY_DISABLED: "1"
-      APP_URL: https://${APP_DOMAIN}
-      API_URL: http://api:4000
-      INTERNAL_API_URL: http://api:4000
-      NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
-      KEYCLOAK_ISSUER_URL: https://${AUTH_DOMAIN}/realms/speclens
-      KEYCLOAK_INTERNAL_ISSUER_URL: http://keycloak:8080/realms/speclens
-      KEYCLOAK_BASE_URL: https://${APP_DOMAIN}
-    command: >
-      bash -lc "mkdir -p apps/web/.next && find apps/web/.next -mindepth 1 -maxdepth 1 -exec rm -rf {} + && npm run web:build"
-    volumes:
-      - ../..:/workspace
-    depends_on:
-      deps:
-        condition: service_completed_successfully
-      api:
-        condition: service_healthy
-      keycloak:
-        condition: service_started
-
   caddy:
     image: caddy:2.10.2
     restart: unless-stopped
@@ -170,8 +126,6 @@ services:
       - ../..:/workspace
       - ${HOST_CODEX_HOME:-/root/.codex}:/codex-host:ro
     depends_on:
-      deps:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       keycloak:
@@ -208,8 +162,6 @@ services:
     volumes:
       - ../..:/workspace
     depends_on:
-      web-build:
-        condition: service_completed_successfully
       api:
         condition: service_healthy
       keycloak:
@@ -251,8 +203,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}:${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}
     depends_on:
-      deps:
-        condition: service_completed_successfully
       api:
         condition: service_healthy
     healthcheck:
@@ -293,8 +243,6 @@ services:
       - ${HOST_CODEX_HOME:-/root/.codex}:/codex-host:ro
       - ${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}:${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}
     depends_on:
-      deps:
-        condition: service_completed_successfully
       api:
         condition: service_healthy
       minio-init:

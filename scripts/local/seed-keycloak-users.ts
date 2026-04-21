@@ -15,6 +15,12 @@ type KeycloakClient = {
   attributes?: Record<string, string>;
 };
 
+type KeycloakRealm = {
+  realm: string;
+  sslRequired?: string;
+  [key: string]: unknown;
+};
+
 type SeedUser = {
   username: string;
   email: string;
@@ -35,6 +41,15 @@ function resolveOptionalEnv(name: string): string | null {
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function resolveHostIpBaseUrl(): string | null {
+  const hostIp = resolveOptionalEnv("HOST_IP");
+  if (!hostIp) {
+    return null;
+  }
+  const caddyHttpPort = trimEnv("CADDY_HTTP_PORT", "18080");
+  return `http://${hostIp}:${caddyHttpPort}`;
 }
 
 function deriveAdminBaseUrl(): string {
@@ -264,6 +279,38 @@ async function findClient(baseUrl: string, realm: string, token: string, clientI
   return clients[0] ?? null;
 }
 
+async function ensureRealmSettings(baseUrl: string, realm: string, token: string): Promise<void> {
+  if (resolveSeedMode() !== "local") {
+    return;
+  }
+
+  const currentRealm = await requestJson<KeycloakRealm>(
+    `${baseUrl}/admin/realms/${realm}`,
+    {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (currentRealm.sslRequired === "NONE") {
+    return;
+  }
+
+  await requestJson<void>(`${baseUrl}/admin/realms/${realm}`, {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      ...currentRealm,
+      sslRequired: "NONE",
+    }),
+  });
+}
+
 async function ensurePortalClient(baseUrl: string, realm: string, token: string): Promise<void> {
   const client = await findClient(baseUrl, realm, token, trimEnv("KEYCLOAK_CLIENT_ID", "speclens-web"));
   if (!client) {
@@ -285,6 +332,7 @@ async function ensurePortalClient(baseUrl: string, realm: string, token: string)
     resolveOptionalEnv("PLAYWRIGHT_BASE_URL"),
     resolveOptionalEnv("E2E_BASE_URL"),
     resolveOptionalEnv("KEYCLOAK_BASE_URL"),
+    resolveHostIpBaseUrl(),
   ].filter(Boolean) as string[];
   for (const base of extraBases.map(normalizeBaseUrl)) {
     baseOrigins.push(base);
@@ -384,6 +432,7 @@ async function main(): Promise<void> {
   const realm = realmName();
   const token = await waitForAdminToken(baseUrl);
 
+  await ensureRealmSettings(baseUrl, realm, token);
   await ensurePortalClient(baseUrl, realm, token);
 
   const seedUsers = resolveSeedUsers();

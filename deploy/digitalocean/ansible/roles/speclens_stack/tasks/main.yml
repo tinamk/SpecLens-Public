@@ -153,7 +153,7 @@
     dest: "{{ speclens_remote_env_archive_path }}"
     mode: "0600"
 
-- name: Start or update the compose stack
+- name: Start infrastructure services required before migrations
   ansible.builtin.command:
     argv:
       - docker
@@ -162,8 +162,60 @@
       - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
       - up
       - -d
-      - --build
+      - postgres
+      - minio
+      - minio-init
+      - keycloak
+  args:
+    chdir: "{{ speclens_remote_compose_dir }}"
+
+- name: Run database migrations from the prepared release
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
+      - run
+      - --rm
+      - --no-deps
+      - api
+      - npm
+      - run
+      - db:migrate:deploy:safe
+  args:
+    chdir: "{{ speclens_remote_compose_dir }}"
+
+- name: Build custom worker images from the current release tree
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
+      - build
+      - runner
+      - ai-worker
+  args:
+    chdir: "{{ speclens_remote_compose_dir }}"
+
+- name: Recreate long-running services from the prepared release
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ speclens_remote_compose_dir }}/docker-compose.single-node.yml"
+      - up
+      - -d
+      - --force-recreate
       - --remove-orphans
+      - caddy
+      - keycloak
+      - api
+      - web
+      - runner
+      - ai-worker
   args:
     chdir: "{{ speclens_remote_compose_dir }}"
 
@@ -177,9 +229,9 @@
       - exec
       - -T
       - -e
-      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID={{ speclens_keycloak_bootstrap_admin_client_id }}"
       - -e
-      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET={{ speclens_keycloak_bootstrap_admin_client_secret }}"
       - keycloak
       - sh
       - -lc
@@ -206,9 +258,9 @@
       - -e
       - "KEYCLOAK_ISSUER_URL=http://keycloak:8080/realms/speclens"
       - -e
-      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_ID={{ speclens_keycloak_bootstrap_admin_client_id }}"
       - -e
-      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET={{ lookup('ansible.builtin.ini', 'KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET type=properties file=' ~ speclens_env_file, errors='ignore') }}"
+      - "KEYCLOAK_BOOTSTRAP_ADMIN_CLIENT_SECRET={{ speclens_keycloak_bootstrap_admin_client_secret }}"
       - -e
       - "E2E_OWNER_USERNAME={{ speclens_e2e_owner_username }}"
       - -e

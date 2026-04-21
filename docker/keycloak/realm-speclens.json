@@ -1,6 +1,7 @@
 {
   "realm": "speclens",
   "enabled": true,
+  "sslRequired": "NONE",
   "displayName": "SpecLens Dev",
   "registrationAllowed": true,
   "loginWithEmailAllowed": true,
