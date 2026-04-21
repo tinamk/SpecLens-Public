@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
@@ -12,6 +13,7 @@ const SESSION_COOKIE = "speclens_portal_session";
 const STATE_COOKIE = "speclens_oidc_state";
 const ID_TOKEN_COOKIE = "speclens_portal_id_token";
 const CSRF_COOKIE = "speclens_csrf";
+const LOCAL_DEV_PORTAL_SECRET_NAMESPACE = "speclens-local-dev-portal-auth";
 
 function isTrustedLocalUrl(value: string | null | undefined, fallback: string): boolean {
   try {
@@ -28,6 +30,32 @@ function isSafeLocalDevAuthContext(): boolean {
   }
   return isTrustedLocalUrl(process.env.APP_URL ?? null, "http://localhost:3000")
     && isTrustedLocalUrl(process.env.INTERNAL_API_URL ?? process.env.API_URL ?? null, "http://localhost:4000");
+}
+
+function buildLocalDevFallbackSecret(kind: "session" | "csrf", env: NodeJS.ProcessEnv = process.env): string {
+  const seed = [
+    kind,
+    process.cwd(),
+    env.APP_URL ?? "",
+    env.INTERNAL_API_URL ?? env.API_URL ?? "",
+  ].join("|");
+  return crypto.createHash("sha256").update(`${LOCAL_DEV_PORTAL_SECRET_NAMESPACE}|${seed}`).digest("hex");
+}
+
+function resolvePortalAuthEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const portalSessionSecret = env.PORTAL_SESSION_SECRET?.trim();
+  const csrfSecret = env.CSRF_SECRET?.trim();
+  if (portalSessionSecret && csrfSecret) {
+    return env;
+  }
+  if (!isSafeLocalDevAuthContext()) {
+    return env;
+  }
+  return {
+    ...env,
+    PORTAL_SESSION_SECRET: portalSessionSecret || buildLocalDevFallbackSecret("session", env),
+    CSRF_SECRET: csrfSecret || buildLocalDevFallbackSecret("csrf", env),
+  };
 }
 
 function resolveAdminEmails(): string[] {
@@ -59,7 +87,7 @@ export function buildLocalDevSession(): string {
     subject: "local-dev-user",
     email: "demo@speclens.dev",
     displayName: "Local Dev User",
-  });
+  }, resolvePortalAuthEnv());
 }
 
 export function buildKeycloakSession(idToken: string): string {
@@ -69,7 +97,7 @@ export function buildKeycloakSession(idToken: string): string {
     subject: String(payload.sub ?? "unknown-user"),
     email: String(payload.email ?? "unknown@speclens.dev"),
     displayName: String(payload.name ?? payload.preferred_username ?? payload.email ?? "Keycloak User"),
-  });
+  }, resolvePortalAuthEnv());
 }
 
 export function sessionCookieName(): string {
@@ -89,7 +117,11 @@ export function csrfCookieName(): string {
 }
 
 export function buildCsrfToken(sessionValue: string): string {
-  return buildPortalCsrfToken(sessionValue);
+  return buildPortalCsrfToken(sessionValue, resolvePortalAuthEnv());
+}
+
+export function decodePortalSessionValue(sessionValue: string): PortalSession | null {
+  return decodePortalSessionToken(sessionValue, resolvePortalAuthEnv());
 }
 
 export function getKeycloakConfig() {
@@ -162,6 +194,26 @@ export function resolveSafeReturnTo(returnTo: string | null | undefined, appBase
   }
 }
 
+export function buildPortalReturnTo(
+  pathname: string,
+  searchParams: Record<string, string | string[] | undefined>,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (typeof value === "string") {
+      params.set(key, value);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        params.append(key, item);
+      }
+    }
+  }
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
 export async function exchangeCodeForToken(code: string, redirectUri: string): Promise<{ idToken: string | null }> {
   const config = getKeycloakConfig();
   if (!config.internalIssuer || !config.clientId) {
@@ -204,7 +256,7 @@ export async function requirePortalSession(returnTo: string): Promise<PortalSess
   if (!sessionValue) {
     redirect(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
-  const session = decodePortalSessionToken(sessionValue);
+  const session = decodePortalSessionValue(sessionValue);
   if (!session) {
     redirect(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
@@ -222,7 +274,7 @@ export async function requirePortalSession(returnTo: string): Promise<PortalSess
 export async function readPortalSession(): Promise<PortalSession | null> {
   const cookieStore = await cookies();
   const sessionValue = cookieStore.get(SESSION_COOKIE)?.value;
-  return sessionValue ? decodePortalSessionToken(sessionValue) : null;
+  return sessionValue ? decodePortalSessionValue(sessionValue) : null;
 }
 
 export function isPortalAdminSession(session: PortalSession): boolean {

@@ -24,6 +24,50 @@ test("web auth login route sets a local portal session cookie and preserves retu
   process.env = originalEnv;
 });
 
+test("web auth local-dev helpers fall back to deterministic local signing secrets when auth secrets are unset", async () => {
+  const originalEnv = { ...process.env };
+  clearKeycloakEnv();
+  delete process.env.CSRF_SECRET;
+  delete process.env.PORTAL_SESSION_SECRET;
+  delete process.env.APP_URL;
+  delete process.env.INTERNAL_API_URL;
+  delete process.env.API_URL;
+
+  const auth = await import("../apps/web/lib/auth");
+  const sessionValue = auth.buildLocalDevSession();
+  const session = auth.decodePortalSessionValue(sessionValue);
+  const csrfToken = auth.buildCsrfToken(sessionValue);
+
+  assert.deepEqual(session, {
+    provider: "local-dev",
+    subject: "local-dev-user",
+    email: "demo@speclens.dev",
+    displayName: "Local Dev User",
+  });
+  assert.equal(typeof csrfToken, "string");
+  assert.equal(csrfToken.length > 0, true);
+
+  process.env = originalEnv;
+});
+
+test("web auth return-to helper preserves query-driven portal state", async () => {
+  const auth = await import("../apps/web/lib/auth");
+  assert.equal(
+    auth.buildPortalReturnTo("/portal/workspaces/demo/code", {
+      sourceId: "source_demo",
+      ref: "speclens/job_123",
+      compare: "HEAD",
+      filter: ["open", "warnings"],
+    }),
+    "/portal/workspaces/demo/code?sourceId=source_demo&ref=speclens%2Fjob_123&compare=HEAD&filter=open&filter=warnings",
+  );
+});
+
+test("web auth return-to helper omits an empty query string cleanly", async () => {
+  const auth = await import("../apps/web/lib/auth");
+  assert.equal(auth.buildPortalReturnTo("/portal/workspaces", {}), "/portal/workspaces");
+});
+
 test("web auth login route rejects external returnTo targets", async () => {
   const originalEnv = { ...process.env };
   clearKeycloakEnv();
@@ -401,6 +445,65 @@ test("workspace report remediation code href helper omits diff parameters when n
   );
 });
 
+test("workspace report finding code href helper preserves remediation diff context", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.getWorkspaceReportFindingCodeHref({
+      workspaceId: "ws_demo",
+      sourceId: "source_demo",
+      reportId: "report_demo",
+      findingId: "finding_demo",
+      filePath: "src/fix.ts",
+      branchName: "autofix/report_demo",
+      baseRef: "main",
+    }),
+    "/portal/workspaces/ws_demo/code?sourceId=source_demo&path=src%2Ffix.ts&reportId=report_demo&findingId=finding_demo&ref=autofix%2Freport_demo&compare=main",
+  );
+});
+
+test("workspace report finding code href helper omits remediation diff context when no branch exists", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.getWorkspaceReportFindingCodeHref({
+      workspaceId: "ws_demo",
+      sourceId: "source_demo",
+      reportId: "report_demo",
+      findingId: "finding_demo",
+      filePath: null,
+      branchName: null,
+      baseRef: "main",
+    }),
+    "/portal/workspaces/ws_demo/code?sourceId=source_demo&reportId=report_demo&findingId=finding_demo",
+  );
+});
+
+test("changeset branch helper falls back to pull instructions when branchName is missing", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.getChangesetBranchName({
+      branchName: null,
+      pullInstructions: [
+        "git fetch <remote> speclens/job_123",
+        "git checkout speclens/job_123",
+      ],
+    }),
+    "speclens/job_123",
+  );
+});
+
+test("changeset branch helper prefers explicit branch names over pull instruction parsing", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.getChangesetBranchName({
+      branchName: "autofix/report_demo",
+      pullInstructions: [
+        "git fetch <remote> speclens/job_123",
+      ],
+    }),
+    "autofix/report_demo",
+  );
+});
+
 test("workspace-scoped report context helper accepts report and job payloads from the active workspace", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(
@@ -486,6 +589,18 @@ test("workspace-scoped job context helper accepts job and report payloads from t
       "ws_demo",
       { workspaceId: "ws_demo" },
       { workspaceId: "ws_demo" },
+    ),
+    true,
+  );
+});
+
+test("workspace-scoped job context helper accepts in-progress jobs before a report exists", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedJobContext(
+      "ws_demo",
+      { workspaceId: "ws_demo" },
+      null,
     ),
     true,
   );

@@ -920,6 +920,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const resolvedCompareRef = compareRef ?? pullRequestDetail?.baseRef ?? null;
     const resolvedRef = requestedRef ?? pullRequestDetail?.headRef ?? null;
     let review: Awaited<ReturnType<typeof readCodeReviewFromSource>>;
+    let usingUnavailableRequestedRefFallback = false;
     try {
       review = await readCodeReviewFromSource(source, getConfig(), {
         ref: resolvedRef,
@@ -933,11 +934,47 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         throw statusError(409, error.message);
       }
       if (error instanceof CodeReviewReferenceNotFoundError) {
-        throw statusError(404, error.message);
+        if (resolvedRef && resolvedCompareRef) {
+          try {
+            review = await readCodeReviewFromSource(source, getConfig(), {
+              ref: resolvedCompareRef,
+              path: requestedPath,
+              requireReadyCache: true,
+            });
+            usingUnavailableRequestedRefFallback = true;
+          } catch (fallbackError) {
+            if (fallbackError instanceof CodeReviewReferenceNotFoundError) {
+              throw statusError(404, error.message);
+            }
+            throw fallbackError;
+          }
+        } else {
+          throw statusError(404, error.message);
+        }
       } else {
         throw error;
       }
     }
+
+    const refs = usingUnavailableRequestedRefFallback && resolvedRef
+      ? [
+          ...review.refs,
+          ...(review.refs.some(ref => ref.name === resolvedRef)
+            ? []
+            : [{
+                name: resolvedRef,
+                target: null,
+                isHead: false,
+                isRemote: false,
+              }]),
+        ]
+      : review.refs;
+    const selectedRef = usingUnavailableRequestedRefFallback && resolvedRef
+      ? resolvedRef
+      : review.selectedRef;
+    const selectedCompareRef = usingUnavailableRequestedRefFallback
+      ? resolvedCompareRef
+      : review.compareRef;
 
     const changedPaths = new Set(changesets.flatMap(changeset => changeset.changedFiles));
     const activeFindings = (activeReport?.findings ?? []).filter(finding =>
@@ -973,10 +1010,10 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
           type: source.type,
           location: source.location,
         },
-        refs: review.refs,
-        selectedRef: review.selectedRef,
+        refs,
+        selectedRef,
         selectedPath: review.selectedPath,
-        compareRef: review.compareRef,
+        compareRef: selectedCompareRef,
         fileContent: review.fileContent,
         diff: review.diff,
         tree,

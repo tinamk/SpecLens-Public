@@ -1,55 +1,50 @@
 import Link from "next/link";
-import { SiteHeader } from "../../components/site-header";
+import { MarketingPageHero, MarketingRoutePanel, MarketingRouteSplit, MarketingShell } from "@speclens/ui";
 import { SiteFooter } from "../../components/site-footer";
+import { SiteHeader } from "../../components/site-header";
 
 export default function LicensePage() {
   return (
-    <div className="marketing-shell" data-testid="public-license-page">
+    <MarketingShell testId="public-license-page">
       <SiteHeader />
       <main className="legal-layout" data-testid="public-license-main">
-        <section className="legal-hero" data-testid="public-license-hero">
-          <p className="eyebrow">Dual licensing</p>
-          <h1>Hosted SpecLens plans and commercial codebase rights are separate decisions.</h1>
-          <p className="hero-lede">
-            Use Free or Pro when you want the managed SpecLens SaaS. Use the commercial path when your company needs rights to
-            self-host, modify, redistribute, or otherwise use the SpecLens codebase beyond the default non-commercial license.
-          </p>
-        </section>
+        <MarketingPageHero
+          eyebrow="Dual licensing"
+          title="Hosted SpecLens plans and commercial codebase rights are separate decisions."
+          description="Use Free or Pro when you want the managed SpecLens SaaS. Use the commercial path when your company needs rights to self-host, modify, redistribute, or otherwise use the SpecLens codebase beyond the default non-commercial license."
+          asideLabel="Quick rule"
+          asideValue="Buy hosted access on Pricing. Ask for codebase rights on Commercial."
+          asideDescription="This page is the routing guide for teams that need the distinction spelled out clearly."
+          testId="public-license-hero"
+        />
 
-        <section className="comparison-grid" data-testid="public-license-decision-banner">
-          <article className="panel">
-            <span className="tag tag--success">Hosted SaaS</span>
-            <h2>Choose Pricing if you only need the managed service.</h2>
-            <p>
-              Free and Pro cover hosted repo analysis, shared workspaces, and the self-serve SaaS workflow. You do not need a
-              separate commercial code license just to buy hosted access.
-            </p>
-            <div>
-              <Link className="button-secondary" data-testid="public-license-pricing-cta" href="/pricing">
-                View hosted plans
-              </Link>
-            </div>
-          </article>
-          <article className="panel">
-            <span className="tag tag--warning">Commercial rights</span>
-            <h2>Choose Commercial if you need codebase rights or self-hosting.</h2>
-            <p>
-              Commercial conversations cover company usage of the codebase, self-hosted deployment, redistribution questions,
-              procurement review, and tailored contract terms.
-            </p>
-            <div>
+        <MarketingRouteSplit testId="public-license-decision-banner">
+          <MarketingRoutePanel
+            badgeLabel="Hosted SaaS"
+            badgeClassName="tag tag--success"
+            description="Free and Pro cover hosted repo analysis, shared workspaces, and the self-serve SaaS workflow. You do not need a separate commercial code license just to buy hosted access."
+            title="Choose Pricing if you only need the managed service."
+            actions={<Link className="button-secondary" data-testid="public-license-pricing-cta" href="/pricing">View hosted plans</Link>}
+          />
+          <MarketingRoutePanel
+            badgeLabel="Commercial rights"
+            badgeClassName="tag tag--warning"
+            description="Commercial conversations cover company usage of the codebase, self-hosted deployment, redistribution questions, procurement review, and tailored contract terms."
+            title="Choose Commercial if you need codebase rights or self-hosting."
+            tone="commercial"
+            actions={
               <Link className="button-ghost" data-testid="public-license-commercial-cta" href="/commercial">
                 Talk commercial licensing
               </Link>
-            </div>
-          </article>
-        </section>
+            }
+          />
+        </MarketingRouteSplit>
 
         <p className="subtle-note" data-testid="public-license-rights-note">
           Hosted Free and Pro plans govern SaaS usage only. Commercial codebase rights and self-hosting stay on a separate path.
         </p>
 
-        <section className="legal-grid">
+        <section className="legal-grid legal-grid--balanced">
           <article className="legal-panel">
             <span className="tag tag--warning">Common scenarios</span>
             <h2>Use this page as the quick routing guide.</h2>
@@ -72,6 +67,6 @@ export default function LicensePage() {
         </section>
       </main>
       <SiteFooter />
-    </div>
+    </MarketingShell>
   );
 }

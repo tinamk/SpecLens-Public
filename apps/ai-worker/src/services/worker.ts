@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -518,12 +519,14 @@ function buildExecutionStep(step: Partial<AnalysisExecutionStep> & Pick<Analysis
 
 async function runProcess(command: string, args: string[], options: {
   env?: NodeJS.ProcessEnv | undefined;
+  cwd?: string | undefined;
 } = {}): Promise<void> {
   const env = {
     ...(options.env ?? process.env),
     PATH: options.env?.PATH ?? process.env.PATH ?? "/usr/bin:/bin",
   };
   const child = spawn(command, args, {
+    cwd: options.cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -573,7 +576,14 @@ function collapseSingleRoot(extractedDir: string): string {
 }
 
 async function cloneRepo(repoUrl: string, destination: string, env?: NodeJS.ProcessEnv): Promise<void> {
-  await runProcess("git", ["clone", "--depth=1", repoUrl, destination], { env });
+  const nextEnv = { ...(env ?? process.env) };
+  delete nextEnv.GIT_DIR;
+  delete nextEnv.GIT_WORK_TREE;
+  delete nextEnv.GIT_INDEX_FILE;
+  await runProcess("git", ["clone", "--depth=1", repoUrl, destination], {
+    cwd: os.tmpdir(),
+    env: nextEnv,
+  });
 }
 
 function stripGitMetadata(repoPath: string): string {

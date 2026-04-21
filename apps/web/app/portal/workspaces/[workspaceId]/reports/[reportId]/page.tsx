@@ -1,12 +1,15 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalShell } from "@speclens/ui";
+import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { ReportExportAction, ReportRemediationForm } from "../../../../../../components/portal-actions";
 import { ApiResponseError, getCurrentUser, getHostedJob, getHostedReport, getWorkspaceConsole } from "../../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../../lib/auth";
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
+  getReleaseGateTagClass,
+  getChangesetBranchName,
+  getWorkspaceReportFindingCodeHref,
   getWorkspaceReportFindingsEmptyState,
   getWorkspaceReportFindingsEmptyStateTagClass,
   getWorkspaceReportRemediationCodeHref,
@@ -87,7 +90,13 @@ export default async function WorkspaceReportPage({
       latestRemediationJobId: report.summary.latestRemediationJobId,
       latestRemediationJobStatus: latestRemediationJob?.job.status ?? null,
     });
+    const remediationBranchName = getChangesetBranchName({
+      branchName: report.summary.changeset?.branchName ?? null,
+      pullInstructions: report.summary.changeset?.pullInstructions ?? [],
+    });
     const analysisJobHref = getWorkspaceRunHref(workspaceId, report.jobId);
+    const gateStatus = report.summary.releaseGateDecision?.status ?? null;
+    const reportArtifactCount = report.artifacts.length + (latestRemediationJob?.artifacts.length ?? 0);
 
     return (
       <PortalShell
@@ -113,13 +122,51 @@ export default async function WorkspaceReportPage({
         </section>
 
         <div className="space-y-6">
+          <section className="portal-stat-grid">
+            <article className="portal-stat" data-testid="report-stat-gate">
+              <span className="portal-stat__label">Release gate</span>
+              <span className="portal-stat__value">{gateStatus ?? "n/a"}</span>
+              <p>{report.summary.releaseGateDecision?.reason ?? "No release-gate decision was recorded for this report."}</p>
+            </article>
+            <article className="portal-stat" data-testid="report-stat-sections">
+              <span className="portal-stat__label">Sections</span>
+              <span className="portal-stat__value">{report.sections.length}</span>
+              <p>Normalized sections rendered from the hosted report payload.</p>
+            </article>
+            <article className="portal-stat" data-testid="report-stat-artifacts">
+              <span className="portal-stat__label">Artifacts</span>
+              <span className="portal-stat__value">{reportArtifactCount}</span>
+              <p>Analysis plus remediation artifacts currently available for download.</p>
+            </article>
+            <article className="portal-stat" data-testid="report-stat-remediation">
+              <span className="portal-stat__label">Remediation</span>
+              <span className="portal-stat__value">{report.summary.remediationPacks.length}</span>
+              <p>{latestRemediationJob ? `Latest remediation run is ${latestRemediationJob.job.status}.` : "No remediation run has been launched from this report yet."}</p>
+            </article>
+          </section>
+
           <section className="portal-grid">
             <article className="portal-panel xl:col-span-2" data-testid="report-remediation-panel">
-              <span className="tag tag--warning">Remediation</span>
-              <h2>Fix readiness</h2>
-              <p><strong>Release gate:</strong> {report.summary.releaseGateDecision?.status ?? "n/a"}{report.summary.releaseGateDecision ? ` - ${report.summary.releaseGateDecision.reason}` : ""}</p>
-              <p><strong>Remediation packs:</strong> {report.summary.remediationPacks.length}</p>
-              <p><strong>Fix handoff entries:</strong> {report.summary.fixHandoff?.entries.length ?? 0}</p>
+              <PortalSectionHeader
+                badgeLabel="Remediation"
+                badgeClassName="tag tag--warning"
+                title="Fix readiness"
+                description="Launch remediation from the report once you have enough evidence to turn findings into a scoped code change."
+              />
+              <PortalMetaList
+                items={[
+                  {
+                    label: "Release gate",
+                    value: (
+                      <span className={getReleaseGateTagClass(gateStatus)}>
+                        {gateStatus ?? "n/a"}{report.summary.releaseGateDecision ? ` · ${report.summary.releaseGateDecision.reason}` : ""}
+                      </span>
+                    ),
+                  },
+                  { label: "Remediation packs", value: report.summary.remediationPacks.length },
+                  { label: "Fix handoff entries", value: report.summary.fixHandoff?.entries.length ?? 0 },
+                ]}
+              />
               <ReportRemediationForm
                 workspaceId={workspaceId}
                 reportId={report.id}
@@ -133,65 +180,98 @@ export default async function WorkspaceReportPage({
                 canMutate={canMutate}
               />
               {report.summary.changeset ? (
-                <div className="subtle-note" data-testid="report-remediation-changeset">
-                  <p><strong>Changeset branch:</strong> {report.summary.changeset.branchName ?? "not created"}</p>
-                  <p><strong>Source:</strong> {remediationSourceOption?.displayName ?? "unknown"}</p>
-                  <p><strong>Stop reason:</strong> {report.summary.changeset.stopReason}</p>
-                  <p><strong>Changed files:</strong> {report.summary.changeset.changedFiles.length}</p>
-                  <p><strong>Validation:</strong> {report.summary.changeset.validationPassed ? "passed" : "not green"}</p>
-                  {report.summary.changeset.validationCommands.length > 0 ? (
-                    <p><strong>Validation commands:</strong> {report.summary.changeset.validationCommands.join(", ")}</p>
-                  ) : null}
-                  {report.summary.changeset.pullInstructions.length > 0 ? (
-                    <div>
-                      <strong>Pull/apply instructions:</strong>
-                      <ul>
-                        {report.summary.changeset.pullInstructions.map(instruction => (
-                          <li key={instruction}>{instruction}</li>
-                        ))}
-                      </ul>
+                <article className="portal-record-card" data-testid="report-remediation-changeset">
+                  <div className="portal-record-card__header">
+                    <div className="portal-record-card__title">
+                      <strong>Latest remediation output</strong>
+                      <p>{remediationBranchName ?? "Branch not created yet"}</p>
+                    </div>
+                    <div className="portal-record-card__meta">
+                      <span className="tag tag--info">
+                        {report.summary.changeset.changedFiles.length} file{report.summary.changeset.changedFiles.length === 1 ? "" : "s"}
+                      </span>
+                      <span className={report.summary.changeset.validationPassed ? "tag tag--success" : "tag tag--warning"}>
+                        {report.summary.changeset.validationPassed ? "validation passed" : "validation not green"}
+                      </span>
+                    </div>
+                  </div>
+                  <PortalMetaList
+                    items={[
+                      { label: "Changeset branch", value: remediationBranchName ?? "not created" },
+                      { label: "Source", value: remediationSourceOption?.displayName ?? "unknown" },
+                      { label: "Stop reason", value: report.summary.changeset.stopReason },
+                      {
+                        label: "Validation commands",
+                        value: report.summary.changeset.validationCommands.length > 0
+                          ? report.summary.changeset.validationCommands.join(", ")
+                          : "No validation commands recorded",
+                      },
+                      {
+                        label: "Pull/apply instructions",
+                        value: report.summary.changeset.pullInstructions.length > 0
+                          ? report.summary.changeset.pullInstructions.join(" · ")
+                          : "No pull/apply instructions recorded",
+                      },
+                    ]}
+                  />
+                  {report.summary.latestRemediationJobId ? (
+                    <div className="portal-record-card__actions">
+                      <Link className="button-ghost" data-testid="report-open-remediation-job" href={`/portal/workspaces/${workspaceId}/runs/${report.summary.latestRemediationJobId}` as Route}>Open remediation run</Link>
                     </div>
                   ) : null}
-                  {report.summary.latestRemediationJobId ? (
-                    <p>
-                      <Link className="button-ghost" data-testid="report-open-remediation-job" href={`/portal/workspaces/${workspaceId}/runs/${report.summary.latestRemediationJobId}` as Route}>Open remediation run</Link>
-                    </p>
+                  {report.summary.changeset.changedFiles.length > 0 ? (
+                    <div className="portal-record-card__body">
+                      <PortalLinkGrid testId="report-remediation-code-grid">
+                        {report.summary.changeset.changedFiles.map(file => (
+                          <PortalLinkCard
+                            testId={`report-open-code-${file.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
+                            href={getWorkspaceReportRemediationCodeHref({
+                              workspaceId,
+                              sourceId: remediationSourceId,
+                              reportId: report.id,
+                              filePath: file,
+                              branchName: remediationBranchName,
+                              baseRef: report.summary.changeset?.baseRef ?? null,
+                            })}
+                            title={file}
+                            eyebrow="changed file"
+                            description="Open this remediation result directly in the code review surface."
+                            key={file}
+                            tone="info"
+                          />
+                        ))}
+                      </PortalLinkGrid>
+                    </div>
                   ) : null}
-                  <div className="stack-form">
-                    {report.summary.changeset.changedFiles.map(file => (
-                      <Link
-                        className="button-ghost"
-                        data-testid={`report-open-code-${file.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
-                        href={getWorkspaceReportRemediationCodeHref({
-                          workspaceId,
-                          sourceId: remediationSourceId,
-                          reportId: report.id,
-                          filePath: file,
-                          branchName: report.summary.changeset?.branchName ?? null,
-                          baseRef: report.summary.changeset?.baseRef ?? null,
-                        })}
-                        key={file}
-                      >
-                        Open {file}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
+                </article>
               ) : (
-                <div className="subtle-note" data-testid="report-remediation-changeset-empty">
-                  <p className={remediationSummary.tagClass}>Remediation status</p>
-                  <p><strong>{remediationSummary.title}</strong></p>
-                  <p>{remediationSummary.detail}</p>
+                <article className="portal-record-card" data-testid="report-remediation-changeset-empty">
+                  <div className="portal-record-card__header">
+                    <div className="portal-record-card__title">
+                      <strong>{remediationSummary.title}</strong>
+                      <p>{remediationSummary.detail}</p>
+                    </div>
+                    <div className="portal-record-card__meta">
+                      <span className={remediationSummary.tagClass}>Remediation status</span>
+                    </div>
+                  </div>
                   {remediationSummary.canOpenRun && report.summary.latestRemediationJobId ? (
-                    <p>
+                    <div className="portal-record-card__actions">
                       <Link className="button-ghost" data-testid="report-open-remediation-job" href={`/portal/workspaces/${workspaceId}/runs/${report.summary.latestRemediationJobId}` as Route}>Open remediation run</Link>
-                    </p>
+                    </div>
                   ) : null}
-                </div>
+                </article>
               )}
             </article>
           </section>
           <section className="portal-grid">
+            <article className="portal-panel xl:col-span-2">
+              <PortalSectionHeader
+                badgeLabel="Sections"
+                title="Normalized sections"
+                description="Review the structured section narrative before dropping into raw artifacts or code."
+              />
+            </article>
             {report.sections.length === 0 ? (
               <article className="portal-panel xl:col-span-2" data-testid="report-sections-empty-state">
                 <span className="tag tag--neutral">Sections</span>
@@ -210,6 +290,14 @@ export default async function WorkspaceReportPage({
             ))}
           </section>
           <section className="portal-grid">
+            <article className="portal-panel xl:col-span-2">
+              <PortalSectionHeader
+                badgeLabel="Findings"
+                badgeClassName={getWorkspaceReportFindingsEmptyStateTagClass(gateStatus)}
+                title="Findings and code follow-up"
+                description="Use report findings as the handoff point into code review and remediation."
+              />
+            </article>
             {report.findings.length === 0 ? (
               <article className="portal-panel xl:col-span-2" data-testid="report-findings-empty-state">
                 <span className={getWorkspaceReportFindingsEmptyStateTagClass(report.summary.releaseGateDecision?.status ?? null)}>Findings</span>
@@ -218,19 +306,38 @@ export default async function WorkspaceReportPage({
               </article>
             ) : null}
             {report.findings.map(finding => (
-              <article className="portal-panel" data-testid={`report-finding-${finding.id}`} key={finding.id}>
-                <p className={getTagTone(String(finding.severity).toLowerCase())}>{finding.severity.toUpperCase()}</p>
-                <h2>{finding.title}</h2>
-                <p><strong>Role:</strong> {roleLookup.get(finding.roleId) ?? finding.roleId}</p>
-                <p>{finding.message}</p>
-                <p><strong>Suggestion:</strong> {finding.suggestion}</p>
-                {finding.evidence.length > 0 ? <p><strong>Evidence:</strong> {finding.evidence.join(", ")}</p> : null}
-                <div className="list-row__actions">
+              <article className="portal-record-card" data-testid={`report-finding-${finding.id}`} key={finding.id}>
+                <div className="portal-record-card__header">
+                  <div className="portal-record-card__title">
+                    <strong>{finding.title}</strong>
+                    <p>{finding.message}</p>
+                  </div>
+                  <div className="portal-record-card__meta">
+                    <span className={getTagTone(String(finding.severity).toLowerCase())}>{finding.severity.toUpperCase()}</span>
+                    <span className="tag tag--neutral">{resolveFindingSources(finding.sourceIds).length || 0} source{resolveFindingSources(finding.sourceIds).length === 1 ? "" : "s"}</span>
+                  </div>
+                </div>
+                <PortalMetaList
+                  items={[
+                    { label: "Role", value: roleLookup.get(finding.roleId) ?? finding.roleId },
+                    { label: "Suggestion", value: finding.suggestion },
+                    { label: "Evidence", value: finding.evidence.length > 0 ? finding.evidence.join(", ") : "No explicit evidence links recorded" },
+                  ]}
+                />
+                <div className="portal-record-card__actions">
                   {resolveFindingSources(finding.sourceIds).length === 1 ? (
                     <Link
                       className="button-ghost"
                       data-testid={`report-open-code-finding-${finding.id}`}
-                      href={`/portal/workspaces/${workspaceId}/code?sourceId=${encodeURIComponent(resolveFindingSources(finding.sourceIds)[0]!.id)}&reportId=${encodeURIComponent(report.id)}&findingId=${encodeURIComponent(finding.id)}${resolveFindingPath(finding.paths) ? `&path=${encodeURIComponent(resolveFindingPath(finding.paths) ?? "")}` : ""}` as Route}
+                      href={getWorkspaceReportFindingCodeHref({
+                        workspaceId,
+                        sourceId: resolveFindingSources(finding.sourceIds)[0]!.id,
+                        reportId: report.id,
+                        findingId: finding.id,
+                        ...(resolveFindingPath(finding.paths) ? { filePath: resolveFindingPath(finding.paths) } : {}),
+                        branchName: remediationBranchName,
+                        baseRef: report.summary.changeset?.baseRef ?? null,
+                      })}
                     >
                       Open in code review
                     </Link>
@@ -238,7 +345,15 @@ export default async function WorkspaceReportPage({
                     <Link
                       className="button-ghost"
                       data-testid={`report-open-code-finding-${finding.id}-${source.id}`}
-                      href={`/portal/workspaces/${workspaceId}/code?sourceId=${encodeURIComponent(source.id)}&reportId=${encodeURIComponent(report.id)}&findingId=${encodeURIComponent(finding.id)}${resolveFindingPath(finding.paths) ? `&path=${encodeURIComponent(resolveFindingPath(finding.paths) ?? "")}` : ""}` as Route}
+                      href={getWorkspaceReportFindingCodeHref({
+                        workspaceId,
+                        sourceId: source.id,
+                        reportId: report.id,
+                        findingId: finding.id,
+                        ...(resolveFindingPath(finding.paths) ? { filePath: resolveFindingPath(finding.paths) } : {}),
+                        branchName: remediationBranchName,
+                        baseRef: report.summary.changeset?.baseRef ?? null,
+                      })}
                       key={source.id}
                     >
                       Open in {source.displayName}
@@ -254,61 +369,85 @@ export default async function WorkspaceReportPage({
           </section>
           <section className="portal-grid">
             <article className="portal-panel xl:col-span-2" data-testid="report-artifacts-panel">
-              <span className="tag tag--neutral">Artifacts</span>
-              <h2>Run artifacts</h2>
+              <PortalSectionHeader
+                badgeLabel="Artifacts"
+                title="Run artifacts"
+                description="Download the durable evidence bundle when you need the raw files behind the rendered report."
+              />
               <ReportExportAction reportId={report.id} />
               {report.artifacts.length === 0 ? <p>No artifacts registered for this run.</p> : null}
-              {report.artifacts.map((artifact, index) => (
-                <div className="list-row" data-testid={`report-artifact-${index}`} key={`${artifact.key}:${index}`}>
-                  <div>
-                    <strong>{artifact.key}</strong>
-                    <p>{artifact.mimeType} · {formatBytes(artifact.sizeBytes)}</p>
-                  </div>
-                  <div className="list-row__actions">
-                    <a
-                      className="button-ghost"
-                      data-testid={`report-download-artifact-${index}`}
-                      href={artifact.signedUrl ?? `/api/proxy/api/jobs/${report.jobId}/artifacts/${index}`}
-                    >
-                      Download
-                    </a>
-                  </div>
-                </div>
-              ))}
-              {latestRemediationJob ? (
-                <>
-                  <h3>Latest remediation artifacts</h3>
-                  {latestRemediationJob.artifacts.length === 0 ? <p>No remediation artifacts registered yet.</p> : null}
-                  {latestRemediationJob.artifacts.map((artifact, index) => (
-                    <div
-                      className="list-row"
-                      data-testid={`report-remediation-artifact-${index}`}
-                      key={`${artifact.key}:${index}`}
-                    >
-                      <div>
-                        <strong>{artifact.key}</strong>
-                        <p>{artifact.mimeType} · {formatBytes(artifact.sizeBytes)}</p>
+              {report.artifacts.length > 0 ? (
+                <div className="portal-record-grid">
+                  {report.artifacts.map((artifact, index) => (
+                    <article className="portal-record-card" data-testid={`report-artifact-${index}`} key={`${artifact.key}:${index}`}>
+                      <div className="portal-record-card__header">
+                        <div className="portal-record-card__title">
+                          <strong>{artifact.key}</strong>
+                          <p>{artifact.mimeType}</p>
+                        </div>
+                        <div className="portal-record-card__meta">
+                          <span className="tag tag--neutral">{formatBytes(artifact.sizeBytes)}</span>
+                        </div>
                       </div>
-                      <div className="list-row__actions">
+                      <div className="portal-record-card__actions">
                         <a
                           className="button-ghost"
-                          data-testid={`report-download-remediation-artifact-${index}`}
-                          href={artifact.signedUrl ?? `/api/proxy/api/jobs/${latestRemediationJob.job.id}/artifacts/${index}`}
+                          data-testid={`report-download-artifact-${index}`}
+                          href={artifact.signedUrl ?? `/api/proxy/api/jobs/${report.jobId}/artifacts/${index}`}
                         >
                           Download
                         </a>
                       </div>
-                    </div>
+                    </article>
                   ))}
+                </div>
+              ) : null}
+              {latestRemediationJob ? (
+                <>
+                  <h3>Latest remediation artifacts</h3>
+                  {latestRemediationJob.artifacts.length === 0 ? <p>No remediation artifacts registered yet.</p> : null}
+                  {latestRemediationJob.artifacts.length > 0 ? (
+                    <div className="portal-record-grid">
+                      {latestRemediationJob.artifacts.map((artifact, index) => (
+                        <article
+                          className="portal-record-card"
+                          data-testid={`report-remediation-artifact-${index}`}
+                          key={`${artifact.key}:${index}`}
+                        >
+                          <div className="portal-record-card__header">
+                            <div className="portal-record-card__title">
+                              <strong>{artifact.key}</strong>
+                              <p>{artifact.mimeType}</p>
+                            </div>
+                            <div className="portal-record-card__meta">
+                              <span className="tag tag--neutral">{formatBytes(artifact.sizeBytes)}</span>
+                            </div>
+                          </div>
+                          <div className="portal-record-card__actions">
+                            <a
+                              className="button-ghost"
+                              data-testid={`report-download-remediation-artifact-${index}`}
+                              href={artifact.signedUrl ?? `/api/proxy/api/jobs/${latestRemediationJob.job.id}/artifacts/${index}`}
+                            >
+                              Download
+                            </a>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </article>
           </section>
         </div>
 
-        <div className="list-row">
-          <div />
-          <div className="list-row__actions">
+        <div className="portal-action-bar">
+          <div className="portal-action-copy">
+            <strong>Keep the review thread moving</strong>
+            <p>Open the originating analysis run for logs and artifacts, or return to report history to compare adjacent runs in the same workspace.</p>
+          </div>
+          <div className="portal-inline-actions">
             {analysisJobHref ? (
               <Link className="button-secondary" data-testid="report-open-analysis-job" href={analysisJobHref}>Open analysis job</Link>
             ) : null}
@@ -327,8 +466,12 @@ export default async function WorkspaceReportPage({
           primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
           activePrimaryNavKey="workspaces"
         >
-          <p className="inline-error" data-testid="report-access-denied">You do not have access to this report.</p>
-          <Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/reports` as Route}>Back to reports</Link>
+          <PortalNoticePanel
+            actions={<Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/reports` as Route}>Back to reports</Link>}
+            description="You do not have access to this report."
+            descriptionTestId="report-access-denied"
+            title="This report is not available to your account"
+          />
         </PortalShell>
       );
     }

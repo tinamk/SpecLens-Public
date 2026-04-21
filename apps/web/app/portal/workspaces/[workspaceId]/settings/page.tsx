@@ -1,4 +1,5 @@
-import { PortalShell } from "@speclens/ui";
+import Link from "next/link";
+import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import {
   BillingPortalButton,
@@ -12,7 +13,7 @@ import {
   getGithubRepositoriesPage,
   getWorkspaceConsole,
 } from "../../../../../lib/api";
-import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
+import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
@@ -55,10 +56,10 @@ export default async function WorkspaceSettingsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { workspaceId } = await params;
-  const session = await requirePortalSession(`/portal/workspaces/${workspaceId}/settings`);
+  const query = await searchParams;
+  const session = await requirePortalSession(buildPortalReturnTo(`/portal/workspaces/${workspaceId}/settings`, query));
 
   try {
-    const query = await searchParams;
     const repositoryQuery = {
       installationId: typeof query.installationId === "string" ? query.installationId : "",
       q: typeof query.q === "string" ? query.q : "",
@@ -80,10 +81,18 @@ export default async function WorkspaceSettingsPage({
       || !isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations, githubRepositories)) {
       throw new ApiResponseError(404, `Workspace settings payload does not belong to workspace ${workspaceId}.`);
     }
-    const repositoriesByInstallation = workspaceConsole.installations.map(installation => ({
-      installation,
-      repositories: githubRepositories.filter(repository => repository.githubInstallationId === installation.githubInstallationId),
-    }));
+    const privateRepositories = githubRepositories.filter(repository => repository.private).length;
+    const repositoriesByInstallation = workspaceConsole.installations.map(installation => {
+      const repositories = githubRepositories.filter(
+        repository => repository.githubInstallationId === installation.githubInstallationId,
+      );
+      const privateRepositoryCountByInstallation = repositories.filter(repository => repository.private).length;
+      return {
+        installation,
+        repositories,
+        privateRepositoryCount: privateRepositoryCountByInstallation,
+      };
+    });
 
     return (
       <PortalShell
@@ -98,11 +107,43 @@ export default async function WorkspaceSettingsPage({
       >
         {renderWorkspaceBanner(typeof query.github === "string" ? query.github : null)}
         {renderBillingBanner(typeof query.billing === "string" ? query.billing : null)}
+        <section className="portal-stat-grid">
+          <article className="portal-stat" data-testid="workspace-settings-stat-entitlement">
+            <span className="portal-stat__label">Entitlement</span>
+            <span className="portal-stat__value">{workspaceConsole.workspace.entitlement}</span>
+            <p>Controls private repository access, billing entrypoints, and archive upload rights.</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-settings-stat-installations">
+            <span className="portal-stat__label">GitHub installs</span>
+            <span className="portal-stat__value">{workspaceConsole.installations.length}</span>
+            <p>Linked installations attached to this workspace.</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-settings-stat-repositories">
+            <span className="portal-stat__label">Visible repos</span>
+            <span className="portal-stat__value">{githubRepositories.length}</span>
+            <p>{privateRepositories} private repos currently available for source intake.</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-settings-stat-owner">
+            <span className="portal-stat__label">Controls</span>
+            <span className="portal-stat__value">{canManageWorkspace ? "Owner" : "Member"}</span>
+            <p>Only the workspace owner can change billing or link GitHub installs.</p>
+          </article>
+        </section>
+
         <section className="portal-grid">
           <article className="portal-panel" data-testid="workspace-settings-entitlement-panel">
-            <span className="tag tag--warning">Billing</span>
-            <h2>Entitlement and billing</h2>
-            <p data-testid="workspace-settings-entitlement"><strong>Current entitlement:</strong> {workspaceConsole.workspace.entitlement}</p>
+            <PortalSectionHeader
+              badgeLabel="Billing"
+              badgeClassName="tag tag--warning"
+              title="Entitlement and billing"
+              description="Workspace-owned billing lives here so plan changes stay tied to the right repository scope."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Current entitlement", value: <span data-testid="workspace-settings-entitlement">{workspaceConsole.workspace.entitlement}</span> },
+                { label: "Billing authority", value: canManageWorkspace ? "This account can manage billing" : "Workspace owner only" },
+              ]}
+            />
             {canManageWorkspace ? (
               <div className="stack-form">
                 <CheckoutButton
@@ -119,9 +160,18 @@ export default async function WorkspaceSettingsPage({
             )}
           </article>
           <article className="portal-panel" data-testid="workspace-settings-github-panel">
-            <span className="tag tag--info">GitHub</span>
-            <h2>GitHub App link</h2>
-            <p>Request the real install URL from SpecLens and attach or update the workspace installation from here.</p>
+            <PortalSectionHeader
+              badgeLabel="GitHub"
+              badgeClassName="tag tag--info"
+              title="GitHub App link"
+              description="Request the real install URL from SpecLens, then attach or refresh the workspace installation from this screen."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Linked installations", value: workspaceConsole.installations.length },
+                { label: "Visible repositories", value: githubRepositories.length },
+              ]}
+            />
             {canManageWorkspace ? (
               <GithubInstallButton
                 workspaceId={workspaceId}
@@ -135,87 +185,169 @@ export default async function WorkspaceSettingsPage({
             )}
           </article>
           <article className="portal-panel" data-testid="workspace-settings-guide-panel">
-            <span className="tag tag--neutral">Guide</span>
-            <h2>Private repo readiness</h2>
-            <p>After the installation is linked, the installation and repository lists below confirm what private repositories the workspace can add as sources.</p>
+            <PortalSectionHeader
+              badgeLabel="Readiness"
+              title="Private repo readiness"
+              description="Use the installation and repository lists below to confirm what the workspace can actually add as private sources."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Private repositories visible", value: privateRepositories },
+                { label: "Grouped by install", value: "Repository inventory stays partitioned by linked installation" },
+              ]}
+            />
+            <PortalLinkGrid>
+              <PortalLinkCard
+                href={`/portal/workspaces/${workspaceId}/sources`}
+                title="Source intake"
+                eyebrow="next step"
+                description="Open the sources route to add a verified public, private, or archive-backed repository."
+                tone="info"
+              />
+              <PortalLinkCard
+                href={`/portal/workspaces/${workspaceId}/access`}
+                title="Access controls"
+                eyebrow="collaboration"
+                description="Review who can see the private repositories and reports attached to this workspace."
+              />
+              <PortalLinkCard
+                href="/portal/settings"
+                title="Portal settings"
+                eyebrow="global context"
+                description="Move back to account-level settings when you need portal-wide context."
+                tone="warning"
+              />
+            </PortalLinkGrid>
           </article>
         </section>
 
         <section className="portal-grid">
           <article className="portal-panel" data-testid="workspace-settings-installations">
-            <span className="tag tag--warning">Installations</span>
-            <h2>GitHub installations</h2>
+            <PortalSectionHeader
+              badgeLabel="Installations"
+              badgeClassName="tag tag--warning"
+              title="GitHub installations"
+              description="Each linked installation remains workspace-owned and can be detached here."
+            />
             {workspaceConsole.installations.length === 0 ? <p className="subtle-note">No installations registered yet.</p> : null}
-            {workspaceConsole.installations.map(installation => (
-              <div className="list-row" data-testid={`workspace-settings-installation-${installation.id}`} key={installation.id}>
-                <div>
-                  <strong>{installation.githubAccountLogin}</strong>
-                  <p>Installation {installation.githubInstallationId}</p>
-                </div>
-                {canManageWorkspace ? (
-                  <div className="list-row__actions">
-                    <GithubInstallationUnlinkButton
-                      workspaceId={workspaceId}
-                      installationId={installation.id}
-                      accountLogin={installation.githubAccountLogin}
-                      testId={`workspace-settings-github-unlink-${installation.id}`}
+            {workspaceConsole.installations.length > 0 ? (
+              <div className="portal-record-grid">
+                {repositoriesByInstallation.map(({ installation, repositories, privateRepositoryCount }) => (
+                  <article className="portal-record-card" data-testid={`workspace-settings-installation-${installation.id}`} key={installation.id}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{installation.githubAccountLogin}</strong>
+                        <p>Workspace-owned GitHub App installation ready for private source intake.</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className="tag tag--success">linked</span>
+                        <span className="tag tag--neutral">{repositories.length} repos</span>
+                      </div>
+                    </div>
+                    <PortalMetaList
+                      items={[
+                        { label: "Installation id", value: installation.githubInstallationId },
+                        { label: "Visible repos", value: repositories.length },
+                        { label: "Private repos", value: privateRepositoryCount },
+                      ]}
                     />
-                  </div>
-                ) : null}
+                    {canManageWorkspace ? (
+                      <div className="portal-record-card__actions">
+                        <GithubInstallationUnlinkButton
+                          workspaceId={workspaceId}
+                          installationId={installation.id}
+                          accountLogin={installation.githubAccountLogin}
+                          testId={`workspace-settings-github-unlink-${installation.id}`}
+                        />
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
               </div>
-            ))}
+            ) : null}
           </article>
           <article className="portal-panel xl:col-span-2" data-testid="workspace-settings-github-repositories">
-            <span className="tag tag--success">Repositories</span>
-            <h2>Available GitHub repositories</h2>
-            <form className="stack-form" method="GET">
-              <label className="field">
-                <span>Search repositories</span>
-                <input
-                  data-testid="workspace-settings-github-search-input"
-                  defaultValue={repositoryQuery.q}
-                  name="q"
-                  placeholder="Filter by repository name, account, or clone URL"
-                />
-              </label>
-              <label className="field">
-                <span>Installation</span>
-                <select
-                  data-testid="workspace-settings-github-installation-filter"
-                  defaultValue={repositoryQuery.installationId}
-                  name="installationId"
-                >
-                  <option value="">All linked installations</option>
-                  {workspaceConsole.installations.map(installation => (
-                    <option key={installation.id} value={installation.githubInstallationId}>
-                      {installation.githubAccountLogin}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <PortalSectionHeader
+              badgeLabel="Repositories"
+              badgeClassName="tag tag--success"
+              title="Available GitHub repositories"
+              description="Filter repository visibility by linked installation before adding a private source."
+            />
+            <form className="stack-form form-shell" method="GET">
+              <div className="form-grid">
+                <label className="field">
+                  <span>Search repositories</span>
+                  <input
+                    autoComplete="off"
+                    data-testid="workspace-settings-github-search-input"
+                    defaultValue={repositoryQuery.q}
+                    name="q"
+                    placeholder="Filter by repository name, account, or clone URL…"
+                  />
+                </label>
+                <label className="field">
+                  <span>Installation</span>
+                  <select
+                    data-testid="workspace-settings-github-installation-filter"
+                    defaultValue={repositoryQuery.installationId}
+                    name="installationId"
+                  >
+                    <option value="">All linked installations</option>
+                    {workspaceConsole.installations.map(installation => (
+                      <option key={installation.id} value={installation.githubInstallationId}>
+                        {installation.githubAccountLogin}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <button className="button-ghost" data-testid="workspace-settings-github-search-submit" type="submit">Apply repository filter</button>
             </form>
             {githubRepositories.length === 0 ? <p className="subtle-note">No installation repositories available yet.</p> : null}
-            {repositoriesByInstallation.map(({ installation, repositories }) => (
-              <div className="stack-form" key={installation.id}>
-                <div>
-                  <strong>{installation.githubAccountLogin}</strong>
-                  <p className="subtle-note">Installation {installation.githubInstallationId} · {repositories.length} repositories</p>
-                </div>
-                {repositories.length === 0 ? <p className="subtle-note">No repositories visible for this installation yet.</p> : null}
-                {repositories.map(repository => (
-                  <div
-                    className="list-row"
-                    data-testid={`workspace-settings-repository-${installation.githubInstallationId}-${repository.id}`}
-                    key={`${installation.githubInstallationId}:${repository.id}`}
-                  >
-                    <div>
-                      <strong>{repository.fullName}</strong>
-                      <p>{repository.private ? "private" : "public"} · default branch {repository.defaultBranch}</p>
-                      <p>{repository.cloneUrl}</p>
+            {repositoriesByInstallation.map(({ installation, repositories, privateRepositoryCount }) => (
+              <div className="portal-record-stack" key={installation.id}>
+                <div className="portal-record-card">
+                  <div className="portal-record-card__header">
+                    <div className="portal-record-card__title">
+                      <strong>{installation.githubAccountLogin}</strong>
+                      <p>Repository inventory available through installation {installation.githubInstallationId}.</p>
+                    </div>
+                    <div className="portal-record-card__meta">
+                      <span className="tag tag--neutral">{repositories.length} visible</span>
+                      <span className="tag tag--warning">{privateRepositoryCount} private</span>
                     </div>
                   </div>
-                ))}
+                </div>
+                {repositories.length === 0 ? <p className="subtle-note">No repositories visible for this installation yet.</p> : null}
+                {repositories.length > 0 ? (
+                  <div className="portal-record-grid">
+                    {repositories.map(repository => (
+                      <article
+                        className="portal-record-card"
+                        data-testid={`workspace-settings-repository-${installation.githubInstallationId}-${repository.id}`}
+                        key={`${installation.githubInstallationId}:${repository.id}`}
+                      >
+                        <div className="portal-record-card__header">
+                          <div className="portal-record-card__title">
+                            <strong>{repository.fullName}</strong>
+                            <p>{repository.cloneUrl}</p>
+                          </div>
+                          <div className="portal-record-card__meta">
+                            <span className={repository.private ? "tag tag--warning" : "tag tag--neutral"}>{repository.private ? "private" : "public"}</span>
+                            <span className="tag tag--info">default {repository.defaultBranch}</span>
+                          </div>
+                        </div>
+                        <div className="portal-record-card__body">
+                          <p>
+                            {repository.private
+                              ? "Available for private-source intake through this linked workspace installation."
+                              : "Public repository visible through the linked GitHub App installation."}
+                          </p>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ))}
             <PaginationLinks
@@ -227,8 +359,8 @@ export default async function WorkspaceSettingsPage({
           </article>
         </section>
       </PortalShell>
-    );
-  } catch (error) {
+      );
+    } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
       return (
         <PortalShell
@@ -238,7 +370,12 @@ export default async function WorkspaceSettingsPage({
           primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
           activePrimaryNavKey="workspaces"
         >
-          <p className="inline-error" data-testid="workspace-settings-access-denied">You do not have access to this workspace.</p>
+          <PortalNoticePanel
+            actions={<Link className="button-secondary" href="/portal/workspaces">Back to workspaces</Link>}
+            description="You do not have access to this workspace."
+            descriptionTestId="workspace-settings-access-denied"
+            title="This settings surface is not available to your account"
+          />
         </PortalShell>
       );
     }

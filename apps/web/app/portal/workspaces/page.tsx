@@ -1,10 +1,10 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalShell } from "@speclens/ui";
+import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { CreateWorkspaceForm } from "../../../components/portal-actions";
 import { PaginationLinks } from "../../../components/portal-pagination";
 import { getPortalWorkspacesPage } from "../../../lib/api";
-import { requirePortalSession, isPortalAdminSession } from "../../../lib/auth";
+import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../lib/auth";
 import { buildPortalPrimaryNav, getEntitlementTagClass } from "../../../lib/portal";
 
 function renderBanner(params: Record<string, string | string[] | undefined>) {
@@ -33,8 +33,8 @@ export default async function WorkspacesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const session = await requirePortalSession("/portal/workspaces");
   const params = await searchParams;
+  const session = await requirePortalSession(buildPortalReturnTo("/portal/workspaces", params));
   const workspaceQuery = {
     q: typeof params.q === "string" ? params.q : "",
     page: typeof params.page === "string" ? Number.parseInt(params.page, 10) || 1 : 1,
@@ -85,68 +85,125 @@ export default async function WorkspacesPage({
 
       <section className="portal-grid">
         <article className="portal-panel xl:col-span-2" data-testid="workspace-index-create-panel">
-          <span className="tag tag--success">Create</span>
-          <h2>Create a workspace</h2>
-          <p>New workspaces start with an overview page and dedicated areas for sources, runs, reports, access, and settings.</p>
+          <PortalSectionHeader
+            badgeLabel="Create"
+            badgeClassName="tag tag--success"
+            title="Create a workspace"
+            description="New workspaces start with an overview page and dedicated areas for sources, runs, reports, access, and settings."
+          />
+          <ul className="bullet-list">
+            <li>Keep source intake in the sources route so repository scope stays explicit.</li>
+            <li>Queue analysis and remediation in runs, not in a mixed overview surface.</li>
+            <li>Keep billing and GitHub installation state in workspace-owned settings.</li>
+          </ul>
           <CreateWorkspaceForm />
         </article>
-        <article className="portal-panel" data-testid="workspace-index-account-panel">
-          <span className="tag tag--neutral">Account</span>
-          <h2>Global settings</h2>
-          <p>Session details, environment information, and pricing links live in the shared settings area.</p>
-          <Link className="button-secondary" data-testid="workspace-index-open-settings" href={"/portal/settings" as Route}>Open settings</Link>
-          {isAdmin ? (
-            <Link className="button-ghost" data-testid="workspace-index-open-admin" href={"/portal/admin/ai/auth" as Route}>Open admin</Link>
-          ) : null}
+        <article className="portal-panel portal-panel--accent" data-testid="workspace-index-account-panel">
+          <PortalSectionHeader
+            badgeLabel="Account"
+            title="Global settings"
+            description="Session details, environment information, and pricing links live in the shared settings area."
+          />
+          <PortalMetaList
+            items={[
+              { label: "Portal admin", value: isAdmin ? "Enabled for this session" : "Not granted for this session" },
+              { label: "Workspace focus", value: "Global settings stay separate from workspace-owned billing and GitHub state" },
+            ]}
+          />
+          <PortalLinkGrid testId="workspace-index-account-grid">
+            <PortalLinkCard
+              description="Open the account-level settings surface for session context, pricing entrypoints, and portal-wide navigation."
+              eyebrow="Account"
+              href="/portal/settings"
+              testId="workspace-index-open-settings"
+              title="Open settings"
+              tone="success"
+            />
+            <PortalLinkCard
+              description="Review hosted plan boundaries before changing workspace-owned billing or source scope."
+              eyebrow="Plans"
+              href="/pricing"
+              title="Open pricing"
+              tone="warning"
+            />
+            {isAdmin ? (
+              <PortalLinkCard
+                description="Jump into the admin AI surfaces for auth, skills, roles, and agent execution."
+                eyebrow="Admin"
+                href="/portal/admin/ai/auth"
+                testId="workspace-index-open-admin"
+                title="Open admin"
+                tone="info"
+              />
+            ) : null}
+          </PortalLinkGrid>
         </article>
       </section>
 
-      <section className="portal-panel" data-testid="workspace-index-list">
-        <div className="auth-status">
-          <div>
-            <span className="tag tag--info">Directory</span>
-            <h2>Your workspaces</h2>
-          </div>
+      <section className="portal-panel portal-directory-shell" data-testid="workspace-index-list">
+        <div className="portal-directory-toolbar">
+          <PortalSectionHeader
+            badgeLabel="Directory"
+            badgeClassName="tag tag--info"
+            title="Your workspaces"
+            description="Scan workspace health, then jump straight into the exact operating surface you need."
+          />
+          <form className="portal-search-form" method="GET">
+            <label className="field">
+              <span>Search workspaces</span>
+              <input
+                autoComplete="off"
+                data-testid="workspace-index-search-input"
+                defaultValue={workspaceQuery.q}
+                name="q"
+                placeholder="Filter by workspace, member, or source…"
+              />
+            </label>
+            <button className="button-ghost" data-testid="workspace-index-search-submit" type="submit">Apply workspace filter</button>
+          </form>
         </div>
-        <form className="stack-form" method="GET">
-          <label className="field">
-            <span>Search workspaces</span>
-            <input
-              data-testid="workspace-index-search-input"
-              defaultValue={workspaceQuery.q}
-              name="q"
-              placeholder="Filter by workspace, member, or source"
-            />
-          </label>
-          <button className="button-ghost" data-testid="workspace-index-search-submit" type="submit">Apply workspace filter</button>
-        </form>
         {workspaces.length === 0 ? <p className="subtle-note">No workspaces yet. Create one to start adding sources and queueing runs.</p> : null}
-        {workspaces.map(({ workspace, sources, members }) => (
-          <div className="list-row" data-testid={`workspace-index-row-${workspace.id}`} key={workspace.id}>
-            <div>
-              <span className={getEntitlementTagClass(workspace.entitlement)}>{workspace.entitlement}</span>
-              <h3 className="mt-3 text-xl font-semibold text-slate-950">{workspace.name}</h3>
-              <p>{workspace.description ?? "No description yet."}</p>
-              <p className="subtle-note">Members: {members.length} · Sources: {sources.length}</p>
-            </div>
-            <div className="list-row__actions">
-              <Link
-                className="button-secondary"
-                data-testid={`workspace-index-open-${workspace.id}`}
-                href={`/portal/workspaces/${workspace.id}` as Route}
-              >
-                Open workspace
-              </Link>
-              <Link
-                className="button-ghost"
-                data-testid={`workspace-index-open-runs-${workspace.id}`}
-                href={`/portal/workspaces/${workspace.id}/runs` as Route}
-              >
-                View runs
-              </Link>
-            </div>
+        {workspaces.length > 0 ? (
+          <div className="portal-record-grid">
+            {workspaces.map(({ workspace, sources, members }) => (
+              <article className="portal-record-card" data-testid={`workspace-index-row-${workspace.id}`} key={workspace.id}>
+                <div className="portal-record-card__header">
+                  <div className="portal-record-card__title">
+                    <strong>{workspace.name}</strong>
+                    <p>{workspace.description ?? "No description yet."}</p>
+                  </div>
+                  <div className="portal-record-card__meta">
+                    <span className={getEntitlementTagClass(workspace.entitlement)}>{workspace.entitlement}</span>
+                    <span className="tag tag--info">{members.length} member{members.length === 1 ? "" : "s"}</span>
+                    <span className="tag tag--neutral">{sources.length} source{sources.length === 1 ? "" : "s"}</span>
+                  </div>
+                </div>
+                <PortalMetaList
+                  items={[
+                    { label: "Workspace ID", value: workspace.id.slice(0, 8) },
+                    { label: "Operating model", value: "Overview plus dedicated sources, runs, reports, access, and settings routes" },
+                  ]}
+                />
+                <div className="portal-record-card__actions">
+                  <Link
+                    className="button-secondary"
+                    data-testid={`workspace-index-open-${workspace.id}`}
+                    href={`/portal/workspaces/${workspace.id}` as Route}
+                  >
+                    Open workspace
+                  </Link>
+                  <Link
+                    className="button-ghost"
+                    data-testid={`workspace-index-open-runs-${workspace.id}`}
+                    href={`/portal/workspaces/${workspace.id}/runs` as Route}
+                  >
+                    View runs
+                  </Link>
+                </div>
+              </article>
+            ))}
           </div>
-        ))}
+        ) : null}
         <PaginationLinks
           pathname="/portal/workspaces"
           searchParams={params}

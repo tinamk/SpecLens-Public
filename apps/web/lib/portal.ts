@@ -22,9 +22,58 @@ type WorkspaceConsoleContextLike = {
   jobs?: WorkspaceScopedJobEnvelopeLike[] | null;
 };
 
+function isWorkspaceScopedEntityLike(
+  workspaceId: string,
+  entity: WorkspaceScopedEntityLike,
+): boolean {
+  return entity == null || entity.workspaceId === workspaceId;
+}
+
+function normalizeNonEmptyString(value?: string | null): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function extractBranchNameFromPullInstruction(instruction: string): string | null {
+  const trimmed = instruction.trim();
+  const fetchMatch = /^git fetch \S+ (\S+)$/.exec(trimmed);
+  if (fetchMatch?.[1]) {
+    return fetchMatch[1];
+  }
+  const checkoutMatch = /^git checkout (\S+)$/.exec(trimmed);
+  if (checkoutMatch?.[1]) {
+    return checkoutMatch[1];
+  }
+  return null;
+}
+
 export function getEntitlementTagClass(entitlement: string): string {
   if (entitlement === "commercial") return "tag tag--warning";
   if (entitlement === "pro") return "tag tag--success";
+  return "tag tag--neutral";
+}
+
+export function getSourceVerificationTagClass(status?: string | null): string {
+  if (status === "failed") return "tag tag--danger";
+  if (status === "pending") return "tag tag--warning";
+  return "tag tag--success";
+}
+
+export function getJobStatusTagClass(status?: JobStatus | string | null): string {
+  if (status === "failed" || status === "cancelled") return "tag tag--danger";
+  if (status === "running") return "tag tag--info";
+  if (status === "pending" || status === "queued") return "tag tag--warning";
+  if (status === "succeeded") return "tag tag--success";
+  return "tag tag--neutral";
+}
+
+export function getReleaseGateTagClass(status?: string | null): string {
+  if (status === "fail") return "tag tag--danger";
+  if (status === "warn") return "tag tag--warning";
+  if (status === "pass") return "tag tag--success";
   return "tag tag--neutral";
 }
 
@@ -134,6 +183,49 @@ export function getWorkspaceReportFindingsEmptyState(input: {
   };
 }
 
+function buildWorkspaceReportCodeHref(input: {
+  workspaceId: string;
+  sourceId: string;
+  reportId: string;
+  filePath?: string | null;
+  findingId?: string | null;
+  branchName?: string | null;
+  baseRef?: string | null;
+}): Route {
+  const params = new URLSearchParams();
+  params.set("sourceId", input.sourceId);
+  if (input.filePath) {
+    params.set("path", input.filePath);
+  }
+  params.set("reportId", input.reportId);
+  if (input.findingId) {
+    params.set("findingId", input.findingId);
+  }
+  const branchName = normalizeNonEmptyString(input.branchName);
+  if (branchName) {
+    params.set("ref", branchName);
+    params.set("compare", input.baseRef && input.baseRef.trim().length > 0 ? input.baseRef : "HEAD");
+  }
+  return `/portal/workspaces/${input.workspaceId}/code?${params.toString()}` as Route;
+}
+
+export function getChangesetBranchName(input: {
+  branchName?: string | null;
+  pullInstructions?: string[] | null;
+}): string | null {
+  const explicit = normalizeNonEmptyString(input.branchName);
+  if (explicit) {
+    return explicit;
+  }
+  for (const instruction of input.pullInstructions ?? []) {
+    const parsed = extractBranchNameFromPullInstruction(instruction);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
 export function getWorkspaceReportRemediationCodeHref(input: {
   workspaceId: string;
   sourceId: string;
@@ -142,16 +234,19 @@ export function getWorkspaceReportRemediationCodeHref(input: {
   branchName?: string | null;
   baseRef?: string | null;
 }): Route {
-  const params = new URLSearchParams({
-    sourceId: input.sourceId,
-    path: input.filePath,
-    reportId: input.reportId,
-  });
-  if (input.branchName) {
-    params.set("ref", input.branchName);
-    params.set("compare", input.baseRef && input.baseRef.trim().length > 0 ? input.baseRef : "HEAD");
-  }
-  return `/portal/workspaces/${input.workspaceId}/code?${params.toString()}` as Route;
+  return buildWorkspaceReportCodeHref(input);
+}
+
+export function getWorkspaceReportFindingCodeHref(input: {
+  workspaceId: string;
+  sourceId: string;
+  reportId: string;
+  findingId: string;
+  filePath?: string | null;
+  branchName?: string | null;
+  baseRef?: string | null;
+}): Route {
+  return buildWorkspaceReportCodeHref(input);
 }
 
 export function getWorkspaceReportRemediationSummary(input: {
@@ -221,14 +316,14 @@ export function isWorkspaceScopedReportContext(
   workspaceId: string,
   ...scopedEntities: WorkspaceScopedEntityLike[]
 ): boolean {
-  return scopedEntities.every(entity => entity?.workspaceId === workspaceId);
+  return scopedEntities.every(entity => isWorkspaceScopedEntityLike(workspaceId, entity));
 }
 
 export function isWorkspaceScopedJobContext(
   workspaceId: string,
   ...scopedEntities: WorkspaceScopedEntityLike[]
 ): boolean {
-  return scopedEntities.every(entity => entity?.workspaceId === workspaceId);
+  return scopedEntities.every(entity => isWorkspaceScopedEntityLike(workspaceId, entity));
 }
 
 export function isWorkspaceScopedCodeReviewContext(
@@ -279,7 +374,7 @@ export function isWorkspaceScopedEntityPage(
   workspaceId: string,
   entities: WorkspaceScopedEntityLike[],
 ): boolean {
-  return entities.every(entity => entity?.workspaceId === workspaceId);
+  return entities.every(entity => isWorkspaceScopedEntityLike(workspaceId, entity));
 }
 
 export function isWorkspaceScopedJobsPage(
@@ -298,7 +393,13 @@ export function isWorkspaceScopedGithubRepositoriesPage(
       .map(installation => installation?.githubInstallationId)
       .filter((installationId): installationId is string => Boolean(installationId)),
   );
-  return repositories.every(repository => Boolean(repository?.githubInstallationId) && installationIds.has(repository.githubInstallationId));
+  return repositories.every(repository => {
+    const installationId = repository?.githubInstallationId;
+    if (!installationId) {
+      return false;
+    }
+    return installationIds.has(installationId);
+  });
 }
 
 export function isWorkspaceScopedSourcesPageContext(

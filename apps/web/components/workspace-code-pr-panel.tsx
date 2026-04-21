@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
+import { PortalMetaList, PortalSectionHeader } from "@speclens/ui";
 import type { GitPullRequestSummary } from "@speclens/contracts";
 
 function buildCodeHref(workspaceId: string, query: {
@@ -75,8 +76,12 @@ export function WorkspaceCodePrPanel(props: {
 
   return (
     <article className="portal-panel" data-testid="workspace-code-pr-panel">
-      <span className="tag tag--info">Pull requests</span>
-      <h2>GitHub review</h2>
+      <PortalSectionHeader
+        badgeLabel="Pull requests"
+        badgeClassName="tag tag--info"
+        title="GitHub review"
+        description="Load hosted PR metadata when the selected source is backed by a linked GitHub installation."
+      />
       {props.prSupport === "unavailable" ? <p className="subtle-note">PR metadata is only available for GitHub-backed sources.</p> : null}
       {props.prSupport === "available" && !loadRequested ? (
         <p>
@@ -90,31 +95,50 @@ export function WorkspaceCodePrPanel(props: {
       {!loading && !error && loadRequested && pullRequests.length === 0 && props.prSupport === "available" ? (
         <p className="subtle-note">No pull requests are available for this source.</p>
       ) : null}
-      {pullRequests.map(prItem => (
-        <div className="list-row" data-testid={`workspace-code-pr-${prItem.number}`} key={prItem.number}>
-          <div>
-            <strong>#{prItem.number} {prItem.title}</strong>
-            <p>{prItem.state} · {prItem.headRef} {"->"} {prItem.baseRef}</p>
-            {prItem.changedFiles !== null ? <p>{prItem.changedFiles} changed file(s)</p> : null}
-            {String(prItem.number) === props.selectedPr ? <p className="subtle-note">Focused PR</p> : null}
-          </div>
-          <div className="list-row__actions">
-            <Link
-              className="button-secondary"
-              href={buildCodeHref(props.workspaceId, {
-                sourceId: props.sourceId,
-                ref: prItem.headRef,
-                compare: prItem.baseRef,
-                reportId: props.activeReportId,
-                pr: String(prItem.number),
-              }) as Route}
-            >
-              Compare
-            </Link>
-            <a className="button-ghost" href={prItem.url} target="_blank" rel="noreferrer">Open PR</a>
-          </div>
+      {pullRequests.length > 0 ? (
+        <div className="portal-record-grid">
+          {pullRequests.map(prItem => (
+            <article className="portal-record-card" data-testid={`workspace-code-pr-${prItem.number}`} key={prItem.number}>
+              <div className="portal-record-card__header">
+                <div className="portal-record-card__title">
+                  <strong>#{prItem.number} {prItem.title}</strong>
+                  <p>Pull the review context directly into the code route without losing the active workspace source.</p>
+                </div>
+                <div className="portal-record-card__meta">
+                  <span className={prItem.state === "open" ? "tag tag--success" : "tag tag--neutral"}>{prItem.state}</span>
+                  <span className="tag tag--info">{prItem.headRef} {"->"} {prItem.baseRef}</span>
+                  {String(prItem.number) === props.selectedPr ? <span className="tag tag--warning">focused</span> : null}
+                </div>
+              </div>
+              <PortalMetaList
+                items={[
+                  {
+                    label: "Changed files",
+                    value: prItem.changedFiles !== null ? `${prItem.changedFiles} file(s)` : "GitHub did not return a changed-file count",
+                  },
+                  { label: "Head ref", value: prItem.headRef },
+                  { label: "Base ref", value: prItem.baseRef },
+                ]}
+              />
+              <div className="portal-record-card__actions">
+                <Link
+                  className="button-secondary"
+                  href={buildCodeHref(props.workspaceId, {
+                    sourceId: props.sourceId,
+                    ref: prItem.headRef,
+                    compare: prItem.baseRef,
+                    reportId: props.activeReportId,
+                    pr: String(prItem.number),
+                  }) as Route}
+                >
+                  Compare
+                </Link>
+                <a className="button-ghost" href={prItem.url} target="_blank" rel="noreferrer">Open PR</a>
+              </div>
+            </article>
+          ))}
         </div>
-      ))}
+      ) : null}
     </article>
   );
 }

@@ -3,6 +3,7 @@ import type { User } from "@speclens/contracts";
 import { decodePortalSessionToken } from "@speclens/core";
 import { statusError, upsertUserIdentity as upsertDbUserIdentity } from "@speclens/db";
 import { loadApiConfig } from "./config";
+import { resolvePortalAuthEnv } from "./portal-auth-env";
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -38,7 +39,7 @@ function decodePortalSession(cookieHeader: string | null | undefined): {
   if (!token) {
     return null;
   }
-  return decodePortalSessionToken(token);
+  return decodePortalSessionToken(token, resolvePortalAuthEnv());
 }
 
 async function verifyKeycloakToken(token: string): Promise<{

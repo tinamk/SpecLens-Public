@@ -12,6 +12,7 @@ import {
   type WorkspaceMemberSummary,
   type WorkspaceSecret,
 } from "@speclens/contracts";
+import { PortalMetaList } from "@speclens/ui";
 import type { PortalAnalysisTask } from "../lib/api";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
@@ -183,7 +184,7 @@ export function CreateWorkspaceForm() {
 
   return (
     <form
-      className="stack-form"
+      className="stack-form form-shell"
       data-testid="workspace-index-create-form"
       onSubmit={event => {
         event.preventDefault();
@@ -206,21 +207,24 @@ export function CreateWorkspaceForm() {
         });
       }}
     >
-      <label className="field">
-        <span>Workspace name</span>
-        <input data-testid="workspace-index-name-input" name="name" placeholder="Platform Team" required />
-      </label>
-      <label className="field">
-        <span>Description</span>
-        <textarea
-          data-testid="workspace-index-description-input"
-          name="description"
-          placeholder="Shared workspace for repo analysis and reports."
-          rows={3}
-        />
-      </label>
+      <div className="form-grid">
+        <label className="field">
+          <span>Workspace name</span>
+          <input autoComplete="organization" data-testid="workspace-index-name-input" name="name" placeholder="Platform Team…" required />
+        </label>
+        <label className="field field--full">
+          <span>Description</span>
+          <textarea
+            data-testid="workspace-index-description-input"
+            name="description"
+            placeholder="Shared workspace for repo analysis and reports."
+            rows={3}
+          />
+        </label>
+      </div>
+      <p className="subtle-note">New workspaces start with dedicated sources, runs, reports, access, and settings routes instead of one mixed dashboard.</p>
       <button className="button" data-testid="workspace-index-submit" type="submit" disabled={pending}>
-        {pending ? "Creating..." : "Create workspace"}
+        {pending ? "Creating…" : "Create workspace"}
       </button>
       {error ? <p className="inline-error" data-testid="workspace-index-error" role="alert">{error}</p> : null}
     </form>
@@ -279,7 +283,7 @@ export function CreateSourceForm({
 
   return (
     <form
-      className="stack-form"
+      className="stack-form form-shell"
       data-testid={scopedTestId(testIdPrefix, "create-form")}
       onSubmit={event => {
         event.preventDefault();
@@ -326,30 +330,43 @@ export function CreateSourceForm({
         });
       }}
     >
-      <label className="field">
-        <span>Source type</span>
-        <select
-          data-testid={scopedTestId(testIdPrefix, "type-select")}
-          name="type"
-          value={type}
-          onChange={event => setType(event.target.value as typeof type)}
-        >
-          <option value="upload-archive" disabled={entitlement === "free"}>Git repo archive upload</option>
-              <option value="git-public">Public Git repo (approved host)</option>
-          <option value="github-private" disabled={entitlement === "free"}>Private GitHub repo</option>
-        </select>
-      </label>
-      {entitlement === "free" ? (
-        <p className="subtle-note">Free workspaces can add public Git repositories. Git repo archive upload and private GitHub repos unlock on Pro.</p>
-      ) : null}
+      <div className="form-summary">
+        <PortalMetaList
+          items={[
+            { label: "Workspace tier", value: entitlement },
+            { label: "Current source mode", value: type === "upload-archive" ? "git repo archive upload" : type === "github-private" ? "private GitHub repo" : "public Git repo" },
+            { label: "Connected GitHub repos", value: githubRepositories.length },
+          ]}
+        />
+      </div>
+      <div className="form-grid">
+        <label className="field">
+          <span>Source type</span>
+          <select
+            data-testid={scopedTestId(testIdPrefix, "type-select")}
+            name="type"
+            value={type}
+            onChange={event => setType(event.target.value as typeof type)}
+          >
+            <option value="upload-archive" disabled={entitlement === "free"}>Git repo archive upload</option>
+            <option value="git-public">Public Git repo (approved host)</option>
+            <option value="github-private" disabled={entitlement === "free"}>Private GitHub repo</option>
+          </select>
+        </label>
+        {entitlement === "free" ? (
+          <p className="subtle-note field--full">Free workspaces can add public Git repositories. Git repo archive upload and private GitHub repos unlock on Pro.</p>
+        ) : null}
+      </div>
 
       {requiresArchiveUpload ? (
-        <label className="field">
-          <span>Git repo archive file</span>
-          <input data-testid={scopedTestId(testIdPrefix, "archive-input")} name="archive" type="file" accept=".zip,.tar,.tgz,.tar.gz" required />
-        </label>
+        <div className="form-grid">
+          <label className="field field--full">
+            <span>Git repo archive file</span>
+            <input data-testid={scopedTestId(testIdPrefix, "archive-input")} name="archive" type="file" accept=".zip,.tar,.tgz,.tar.gz" required />
+          </label>
+        </div>
       ) : (
-        <>
+        <div className="form-grid">
           <label className="field">
             <span>Display name</span>
             <input data-testid={scopedTestId(testIdPrefix, "display-name-input")} name="displayName" placeholder="SpecLens repo" required />
@@ -380,13 +397,13 @@ export function CreateSourceForm({
                 </select>
               </label>
               {githubRepositoryGroups.length > 1 ? (
-                <p className="subtle-note">
+                <p className="subtle-note field--full">
                   Repositories are grouped by installation so the selected private source keeps the correct GitHub App binding.
                 </p>
               ) : null}
             </>
           ) : (
-            <label className="field">
+            <label className="field field--full">
               <span>Repository URL</span>
               <input
                 data-testid={scopedTestId(testIdPrefix, "location-input")}
@@ -396,7 +413,7 @@ export function CreateSourceForm({
               />
             </label>
           )}
-        </>
+        </div>
       )}
       {type === "git-public" ? (
         <p className="subtle-note">Paste a supported public HTTPS Git URL from GitHub, GitLab, Bitbucket, or Codeberg.</p>
@@ -506,6 +523,10 @@ export function QueueAnalysisForm({
     () => tasks.find(task => task.agentId === selectedTaskId) ?? tasks[0] ?? null,
     [tasks, selectedTaskId],
   );
+  const verifiedSourceCount = useMemo(
+    () => sources.filter(isVerifiedSource).length,
+    [sources],
+  );
 
   useEffect(() => {
     const nextReadySource = sources.find(isVerifiedSource) ?? null;
@@ -532,7 +553,7 @@ export function QueueAnalysisForm({
 
   return (
     <form
-      className="stack-form"
+      className="stack-form form-shell"
       data-testid={scopedTestId(testIdPrefix, "queue-form")}
       onSubmit={event => {
         event.preventDefault();
@@ -563,101 +584,115 @@ export function QueueAnalysisForm({
         });
       }}
     >
-      <label className="field">
-        <span>Source</span>
-        <select
-          data-testid={scopedTestId(testIdPrefix, "source-select")}
-          name="sourceId"
-          required
-          value={selectedSourceId}
-          onChange={event => setSelectedSourceId(event.target.value)}
-        >
-          {sources.length === 0 ? <option value="">Add a source first</option> : null}
-          {sources.length > 0 && !sources.some(isVerifiedSource) ? <option value="">No verified sources available yet</option> : null}
-          {sources.map(source => (
-            <option disabled={!isVerifiedSource(source)} key={source.id} value={source.id}>
-              {source.displayName} ({formatSourceTypeLabel(source.type)} · {source.visibility} · {formatSourceVerification(source)})
+      <div className="form-summary">
+        <PortalMetaList
+          items={[
+            { label: "Verified sources", value: verifiedSourceCount },
+            { label: "Available AI tasks", value: tasks.length },
+            { label: "Secrets", value: canUseSecrets ? `${secrets.length} selectable` : "owner-only attachment" },
+          ]}
+        />
+      </div>
+      <div className="form-grid">
+        <label className="field">
+          <span>Source</span>
+          <select
+            data-testid={scopedTestId(testIdPrefix, "source-select")}
+            name="sourceId"
+            required
+            value={selectedSourceId}
+            onChange={event => setSelectedSourceId(event.target.value)}
+          >
+            {sources.length === 0 ? <option value="">Add a source first</option> : null}
+            {sources.length > 0 && !sources.some(isVerifiedSource) ? <option value="">No verified sources available yet</option> : null}
+            {sources.map(source => (
+              <option disabled={!isVerifiedSource(source)} key={source.id} value={source.id}>
+                {source.displayName} ({formatSourceTypeLabel(source.type)} · {source.visibility} · {formatSourceVerification(source)})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Companion source</span>
+          <select
+            data-testid={scopedTestId(testIdPrefix, "companion-source-select")}
+            name="companionSourceId"
+            value={selectedCompanionSourceId}
+            onChange={event => setSelectedCompanionSourceId(event.target.value)}
+          >
+            <option value="">None</option>
+            {availableCompanionSources.map(source => (
+              <option key={source.id} value={source.id}>
+                {source.displayName} ({formatSourceTypeLabel(source.type)} · {source.visibility} · {formatSourceVerification(source)})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>AI task</span>
+          <select
+            data-testid={scopedTestId(testIdPrefix, "task-select")}
+            name="agentId"
+            value={selectedTaskId}
+            onChange={event => setSelectedTaskId(event.target.value)}
+            required
+          >
+            {tasks.length === 0 ? <option value="">Create an AI agent task first</option> : null}
+            {tasks.map(task => (
+              <option key={task.id} value={task.agentId}>{task.title}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Runtime mode</span>
+          <select
+            data-testid={scopedTestId(testIdPrefix, "runtime-mode-select")}
+            name="runtimeMode"
+            value={selectedRuntimeMode}
+            onChange={event => setSelectedRuntimeMode(event.target.value as "static" | "browser")}
+          >
+            <option value="static">Static</option>
+            <option value="browser" disabled={!taskSupportsBrowserRuntime(selectedTask)}>
+              Browser
             </option>
-          ))}
-        </select>
-      </label>
+          </select>
+        </label>
+      </div>
       {sources.length > 0 ? (
         <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "source-detail")}>
           Selected source details are shown in the workspace source list below. Use Git-backed source types only: `public git`,
           `private GitHub`, or `git repo archive upload`.
         </p>
       ) : null}
-      <label className="field">
-        <span>Companion source</span>
-        <select
-          data-testid={scopedTestId(testIdPrefix, "companion-source-select")}
-          name="companionSourceId"
-          value={selectedCompanionSourceId}
-          onChange={event => setSelectedCompanionSourceId(event.target.value)}
-        >
-          <option value="">None</option>
-          {availableCompanionSources.map(source => (
-            <option key={source.id} value={source.id}>
-              {source.displayName} ({formatSourceTypeLabel(source.type)} · {source.visibility} · {formatSourceVerification(source)})
-            </option>
-          ))}
-        </select>
-      </label>
       {sources.length > 1 ? (
         <p className="subtle-note">
           Pair a deployed site with a code source to analyze both together in one run. The primary source becomes `primary/`,
           and the companion source becomes `companion/` inside the runtime bundle.
         </p>
       ) : null}
-      <label className="field">
-        <span>AI task</span>
-        <select
-          data-testid={scopedTestId(testIdPrefix, "task-select")}
-          name="agentId"
-          value={selectedTaskId}
-          onChange={event => setSelectedTaskId(event.target.value)}
-          required
-        >
-          {tasks.length === 0 ? <option value="">Create an AI agent task first</option> : null}
-          {tasks.map(task => (
-            <option key={task.id} value={task.agentId}>{task.title}</option>
-          ))}
-        </select>
-      </label>
       {selectedTask ? (
-        <div className="subtle-note" data-testid={scopedTestId(testIdPrefix, "task-description")}>
-          <p><strong>{selectedTask.title}</strong> · {selectedTask.description ?? "AI-defined analysis task."}</p>
-          <p>Roles: {selectedTask.roleCount} · Skills: {selectedTask.skillNames.join(", ") || "None listed"}</p>
-          <p>Tool grants: {selectedTask.toolCapabilities.join(", ") || "repo-read"}</p>
+        <div className="form-summary" data-testid={scopedTestId(testIdPrefix, "task-description")}>
+          <PortalMetaList
+            items={[
+              { label: "Selected task", value: selectedTask.title },
+              { label: "Description", value: selectedTask.description ?? "AI-defined analysis task." },
+              { label: "Roles", value: selectedTask.roleCount },
+              { label: "Skills", value: selectedTask.skillNames.join(", ") || "None listed" },
+              { label: "Tool grants", value: selectedTask.toolCapabilities.join(", ") || "repo-read" },
+            ]}
+          />
         </div>
       ) : null}
-      <label className="field">
-        <span>Runtime mode</span>
-        <select
-          data-testid={scopedTestId(testIdPrefix, "runtime-mode-select")}
-          name="runtimeMode"
-          value={selectedRuntimeMode}
-          onChange={event => setSelectedRuntimeMode(event.target.value as "static" | "browser")}
-        >
-          <option value="static">Static</option>
-          <option value="browser" disabled={!taskSupportsBrowserRuntime(selectedTask)}>
-            Browser
-          </option>
-        </select>
-      </label>
       <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "runtime-mode-detail")}>
         {taskSupportsBrowserRuntime(selectedTask)
           ? "Browser mode asks the selected task to gather runtime and route-level evidence when the repo can boot safely."
           : "This task is currently static-only, so the run will collect repository and report evidence without runtime execution."}
       </p>
       {secrets.length > 0 && canUseSecrets ? (
-        <fieldset className="field" data-testid={scopedTestId(testIdPrefix, "secrets-fieldset")}>
+        <fieldset className="field selection-list" data-testid={scopedTestId(testIdPrefix, "secrets-fieldset")}>
           <span>Workspace secrets</span>
           {secrets.map(secret => (
-            <label
-              key={secret.id}
-              style={{ flexDirection: "row", alignItems: "center", gap: "0.75rem" }}
-            >
+            <label className="selection-item" key={secret.id}>
               <input
                 data-testid={scopedTestId(testIdPrefix, `secret-${secret.id}`)}
                 name="secretRefs"
@@ -697,7 +732,7 @@ export function CreateWorkspaceSecretForm({
 
   return (
     <form
-      className="stack-form"
+      className="stack-form form-shell"
       data-testid={scopedTestId(testIdPrefix, "create-form")}
       onSubmit={event => {
         event.preventDefault();
@@ -725,28 +760,30 @@ export function CreateWorkspaceSecretForm({
         });
       }}
     >
-      <label className="field">
-        <span>Name</span>
-        <input data-testid={scopedTestId(testIdPrefix, "name-input")} name="name" placeholder="Preview login" required />
-      </label>
-      <label className="field">
-        <span>Secret kind</span>
-        <select data-testid={scopedTestId(testIdPrefix, "kind-select")} name="kind" defaultValue="credential-pair">
-          <option value="credential-pair">Credential pair</option>
-          <option value="session-state">Session state</option>
-          <option value="api-token">API token</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>Secret value</span>
-        <textarea
-          data-testid={scopedTestId(testIdPrefix, "value-input")}
-          name="value"
-          placeholder='{"username":"demo","password":"secret"}'
-          rows={4}
-          required
-        />
-      </label>
+      <div className="form-grid">
+        <label className="field">
+          <span>Name</span>
+          <input data-testid={scopedTestId(testIdPrefix, "name-input")} name="name" placeholder="Preview login" required />
+        </label>
+        <label className="field">
+          <span>Secret kind</span>
+          <select data-testid={scopedTestId(testIdPrefix, "kind-select")} name="kind" defaultValue="credential-pair">
+            <option value="credential-pair">Credential pair</option>
+            <option value="session-state">Session state</option>
+            <option value="api-token">API token</option>
+          </select>
+        </label>
+        <label className="field field--full">
+          <span>Secret value</span>
+          <textarea
+            data-testid={scopedTestId(testIdPrefix, "value-input")}
+            name="value"
+            placeholder='{"username":"demo","password":"secret"}'
+            rows={4}
+            required
+          />
+        </label>
+      </div>
       <p className="subtle-note">Secret values are stored write-only. You will only see metadata and a safe preview after saving.</p>
       <button className="button-secondary" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending}>
         {pending ? "Saving..." : "Save secret"}
@@ -788,7 +825,7 @@ export function UpdateWorkspaceSecretForm({
       </button>
       {open ? (
         <form
-          className="stack-form"
+          className="stack-form form-shell"
           data-testid={scopedTestId(testIdPrefix, `update-form-${secret.id}`)}
           onSubmit={event => {
             event.preventDefault();
@@ -814,37 +851,39 @@ export function UpdateWorkspaceSecretForm({
             });
           }}
         >
-          <label className="field">
-            <span>Name</span>
-            <input
-              data-testid={scopedTestId(testIdPrefix, `update-name-${secret.id}`)}
-              defaultValue={secret.name}
-              name="name"
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Secret kind</span>
-            <select
-              data-testid={scopedTestId(testIdPrefix, `update-kind-${secret.id}`)}
-              defaultValue={secret.kind}
-              name="kind"
-            >
-              <option value="credential-pair">Credential pair</option>
-              <option value="session-state">Session state</option>
-              <option value="api-token">API token</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Replacement value</span>
-            <textarea
-              data-testid={scopedTestId(testIdPrefix, `update-value-${secret.id}`)}
-              name="value"
-              placeholder='{"username":"demo","password":"next-secret"}'
-              rows={4}
-              required
-            />
-          </label>
+          <div className="form-grid">
+            <label className="field">
+              <span>Name</span>
+              <input
+                data-testid={scopedTestId(testIdPrefix, `update-name-${secret.id}`)}
+                defaultValue={secret.name}
+                name="name"
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Secret kind</span>
+              <select
+                data-testid={scopedTestId(testIdPrefix, `update-kind-${secret.id}`)}
+                defaultValue={secret.kind}
+                name="kind"
+              >
+                <option value="credential-pair">Credential pair</option>
+                <option value="session-state">Session state</option>
+                <option value="api-token">API token</option>
+              </select>
+            </label>
+            <label className="field field--full">
+              <span>Replacement value</span>
+              <textarea
+                data-testid={scopedTestId(testIdPrefix, `update-value-${secret.id}`)}
+                name="value"
+                placeholder='{"username":"demo","password":"next-secret"}'
+                rows={4}
+                required
+              />
+            </label>
+          </div>
           <button
             className="button-secondary"
             data-testid={scopedTestId(testIdPrefix, `update-submit-${secret.id}`)}
@@ -919,7 +958,7 @@ export function AddWorkspaceMemberForm({
 
   return (
     <form
-      className="stack-form"
+      className="stack-form form-shell"
       data-testid={scopedTestId(testIdPrefix, "form")}
       onSubmit={event => {
         event.preventDefault();
@@ -943,19 +982,23 @@ export function AddWorkspaceMemberForm({
         });
       }}
     >
-      <label className="field">
-        <span>Member email</span>
-        <input
-          data-testid={scopedTestId(testIdPrefix, "email-input")}
-          name="email"
-          placeholder="teammate@example.com"
-          type="email"
-          required
-        />
-      </label>
+      <div className="form-grid">
+        <label className="field field--full">
+          <span>Member email</span>
+          <input
+            autoComplete="email"
+            data-testid={scopedTestId(testIdPrefix, "email-input")}
+            name="email"
+            placeholder="teammate@example.com…"
+            spellCheck={false}
+            type="email"
+            required
+          />
+        </label>
+      </div>
       <p className="subtle-note">The target user must have already signed in to SpecLens. Pending invites are not used here.</p>
       <button className="button-secondary" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending}>
-        {pending ? "Adding..." : "Add member"}
+        {pending ? "Adding…" : "Add member"}
       </button>
       {success ? <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "success")}>{success}</p> : null}
       {error ? <p className="inline-error" data-testid={scopedTestId(testIdPrefix, "error")} role="alert">{error}</p> : null}
@@ -1032,7 +1075,7 @@ export function ManageSourceActions({
           onChange={event => setDisplayName(event.target.value)}
         />
       </label>
-      <div className="list-row__actions">
+      <div className="portal-inline-actions">
         <button
           className="button-secondary"
           data-testid={scopedTestId(testIdPrefix, `rename-submit-${source.id}`)}
@@ -1115,7 +1158,7 @@ export function JobLifecycleActions({
 
   return (
     <div className="stack-form">
-      <div className="list-row__actions">
+      <div className="portal-inline-actions">
         {canCancel ? (
           <button
             className="button-secondary"
@@ -1498,57 +1541,65 @@ export function JobLogConsole({
 
   return (
     <>
-      <div className="auth-status">
+      <div className="console-toolbar">
         <p data-testid={scopedTestId(testIdPrefix, "status")}><strong>Status:</strong> {status}</p>
         <span className={getJobStatusTone(status)}>{status}</span>
       </div>
-      <div className="list-row" data-testid={scopedTestId(testIdPrefix, "execution-overview")}>
-        <div>
-          <strong>Execution steps</strong>
-          <p className="subtle-note">
-            {activeStep
-              ? `${activeStep.agentName ?? activeStep.agentId ?? "Agent"} is running ${activeStep.roleName ?? activeStep.title}.`
-              : "Showing the latest persisted agent step timeline."}
-          </p>
-        </div>
-        <div className="list-row__actions">
-          <span className="subtle-note" data-testid={scopedTestId(testIdPrefix, "timing-elapsed")}>Elapsed {Math.round((timing.elapsedMs ?? 0) / 1000)}s</span>
-          {timing.estimatedRemainingMs !== null ? (
-            <span className="subtle-note" data-testid={scopedTestId(testIdPrefix, "timing-remaining")}>Remaining ~{Math.round(timing.estimatedRemainingMs / 1000)}s</span>
-          ) : null}
-        </div>
+      <div className="form-summary" data-testid={scopedTestId(testIdPrefix, "execution-overview")}>
+        <PortalMetaList
+          items={[
+            {
+              label: "Execution steps",
+              value: activeStep
+                ? `${activeStep.agentName ?? activeStep.agentId ?? "Agent"} is running ${activeStep.roleName ?? activeStep.title}.`
+                : "Showing the latest persisted agent step timeline.",
+            },
+            {
+              label: "Elapsed",
+              value: <span data-testid={scopedTestId(testIdPrefix, "timing-elapsed")}>{Math.round((timing.elapsedMs ?? 0) / 1000)}s</span>,
+            },
+            ...(timing.estimatedRemainingMs !== null
+              ? [{
+                  label: "Remaining",
+                  value: <span data-testid={scopedTestId(testIdPrefix, "timing-remaining")}>~{Math.round(timing.estimatedRemainingMs / 1000)}s</span>,
+                }]
+              : []),
+          ]}
+        />
       </div>
-      <section className="stack-form" data-testid={scopedTestId(testIdPrefix, "execution-steps")}>
+      <section className="step-list" data-testid={scopedTestId(testIdPrefix, "execution-steps")}>
         {executionSteps.length === 0 ? <p className="subtle-note">No execution steps recorded yet.</p> : null}
         {executionSteps.map(step => (
-          <div className="list-row" key={step.id} data-testid={scopedTestId(testIdPrefix, `step-${step.id.replace(/[^a-z0-9_-]+/gi, "-")}`)}>
-            <div>
-              <strong>{step.title}</strong>
-              <p className="subtle-note">
-                {(step.agentName ?? step.agentId ?? "agent")}
-                {step.roleName ? ` · ${step.roleName}` : ""}
-                {step.executorKind ? ` · ${step.executorKind}` : ""}
-                {step.nativeExecutorId ? `:${step.nativeExecutorId}` : ""}
-              </p>
-              {step.detail ? <p>{step.detail}</p> : null}
+          <div className="step-card" key={step.id} data-testid={scopedTestId(testIdPrefix, `step-${step.id.replace(/[^a-z0-9_-]+/gi, "-")}`)}>
+            <div className="step-card__header">
+              <div>
+                <strong>{step.title}</strong>
+                <p className="subtle-note">
+                  {(step.agentName ?? step.agentId ?? "agent")}
+                  {step.roleName ? ` · ${step.roleName}` : ""}
+                  {step.executorKind ? ` · ${step.executorKind}` : ""}
+                  {step.nativeExecutorId ? `:${step.nativeExecutorId}` : ""}
+                </p>
+              </div>
+              <div className="portal-inline-actions">
+                <span className={getJobStatusTone(step.status)}>{step.status}</span>
+                <span className="subtle-note">{formatStepDuration(step)}</span>
+              </div>
             </div>
-            <div className="list-row__actions">
-              <span className={getJobStatusTone(step.status)}>{step.status}</span>
-              <span className="subtle-note">{formatStepDuration(step)}</span>
-            </div>
+            {step.detail ? <p>{step.detail}</p> : null}
           </div>
         ))}
       </section>
-      <div className="list-row">
-        <div>
+      <div className="portal-action-bar">
+        <div className="portal-action-copy">
           <strong>Console mode</strong>
-          <p className="subtle-note">
+          <p>
             {verbosity === "default"
               ? "Showing role progress, summaries, findings, blockers, and learnables activity."
               : "Showing the full verbose trace, including raw Codex and shell output."}
           </p>
         </div>
-        <div className="list-row__actions">
+        <div className="portal-inline-actions">
           <button
             className={verbosity === "default" ? "button-secondary" : "button-ghost"}
             type="button"
@@ -1629,7 +1680,7 @@ export function ReportRemediationForm({
 
   return (
     <form
-      className="stack-form"
+      className="stack-form form-shell"
       data-testid={scopedTestId(testIdPrefix, "form")}
       onSubmit={event => {
         event.preventDefault();
@@ -1672,25 +1723,36 @@ export function ReportRemediationForm({
         });
       }}
     >
-      <label className="field">
-        <span>Source</span>
-        <select data-testid={scopedTestId(testIdPrefix, "source-select")} name="sourceId" defaultValue={defaultSourceId}>
-          {sourceOptions.map(source => (
-            <option key={source.id} value={source.id}>{source.displayName} ({source.type})</option>
-          ))}
-        </select>
-      </label>
-      <label className="field">
-        <span>Finding selection</span>
-        <select data-testid={scopedTestId(testIdPrefix, "selection-mode-select")} name="selectionMode" defaultValue="auto-priority">
-          <option value="auto-priority">Auto-priority</option>
-          <option value="selected-findings">Selected findings</option>
-        </select>
-      </label>
-      <fieldset className="field">
+      <div className="form-summary">
+        <PortalMetaList
+          items={[
+            { label: "Source options", value: sourceOptions.length },
+            { label: "Findings available", value: findingOptions.length },
+            { label: "Default source", value: sourceOptions.find(source => source.id === defaultSourceId)?.displayName ?? defaultSourceId },
+          ]}
+        />
+      </div>
+      <div className="form-grid">
+        <label className="field">
+          <span>Source</span>
+          <select data-testid={scopedTestId(testIdPrefix, "source-select")} name="sourceId" defaultValue={defaultSourceId}>
+            {sourceOptions.map(source => (
+              <option key={source.id} value={source.id}>{source.displayName} ({source.type})</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Finding selection</span>
+          <select data-testid={scopedTestId(testIdPrefix, "selection-mode-select")} name="selectionMode" defaultValue="auto-priority">
+            <option value="auto-priority">Auto-priority</option>
+            <option value="selected-findings">Selected findings</option>
+          </select>
+        </label>
+      </div>
+      <fieldset className="field selection-list">
         <span>Selected findings</span>
         {findingOptions.map(finding => (
-          <label key={finding.id} style={{ flexDirection: "row", alignItems: "center", gap: "0.75rem" }}>
+          <label className="selection-item" key={finding.id}>
             <input
               data-testid={scopedTestId(testIdPrefix, `finding-${finding.id}`)}
               name="selectedFindingIds"
@@ -1702,25 +1764,27 @@ export function ReportRemediationForm({
         ))}
         {findingOptions.length === 0 ? <p className="subtle-note">No findings available for targeted remediation on this report.</p> : null}
       </fieldset>
-      <label className="field">
-        <span>Base ref</span>
-        <input data-testid={scopedTestId(testIdPrefix, "base-ref-input")} name="baseRef" defaultValue="HEAD" />
-      </label>
-      <label className="field">
-        <span>Iteration budget</span>
-        <select data-testid={scopedTestId(testIdPrefix, "iterations-select")} name="maxIterations" defaultValue="2">
-          <option value="1">1 pass</option>
-          <option value="2">2 passes</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>Output mode</span>
-        <select data-testid={scopedTestId(testIdPrefix, "output-mode-select")} name="outputMode" defaultValue="changeset">
-          <option value="changeset">Local changeset</option>
-          <option value="remote-pr">Remote PR</option>
-        </select>
-      </label>
-      <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: "0.75rem" }}>
+      <div className="form-grid">
+        <label className="field">
+          <span>Base ref</span>
+          <input data-testid={scopedTestId(testIdPrefix, "base-ref-input")} name="baseRef" defaultValue="HEAD" />
+        </label>
+        <label className="field">
+          <span>Iteration budget</span>
+          <select data-testid={scopedTestId(testIdPrefix, "iterations-select")} name="maxIterations" defaultValue="2">
+            <option value="1">1 pass</option>
+            <option value="2">2 passes</option>
+          </select>
+        </label>
+        <label className="field field--full">
+          <span>Output mode</span>
+          <select data-testid={scopedTestId(testIdPrefix, "output-mode-select")} name="outputMode" defaultValue="changeset">
+            <option value="changeset">Local changeset</option>
+            <option value="remote-pr">Remote PR</option>
+          </select>
+        </label>
+      </div>
+      <label className="field field--inline">
         <input data-testid={scopedTestId(testIdPrefix, "publish-remote-toggle")} name="publishRemote" type="checkbox" />
         <span>Publish remote if configured</span>
       </label>

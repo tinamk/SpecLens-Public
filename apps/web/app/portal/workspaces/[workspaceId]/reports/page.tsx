@@ -1,14 +1,15 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalShell } from "@speclens/ui";
+import { PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import { ApiResponseError, getPortalAnalysisTasks, getWorkspaceConsole, getWorkspaceJobsPage } from "../../../../../lib/api";
-import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
+import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
 import {
   buildPortalPrimaryNav,
   getWorkspaceRunHref,
   buildWorkspaceNav,
   formatJobLabel,
+  getJobStatusTagClass,
   getWorkspaceReportHref,
   getWorkspaceReportsEmptyState,
   isWorkspaceScopedJobsPage,
@@ -23,10 +24,10 @@ export default async function WorkspaceReportsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { workspaceId } = await params;
-  const session = await requirePortalSession(`/portal/workspaces/${workspaceId}/reports`);
+  const query = await searchParams;
+  const session = await requirePortalSession(buildPortalReturnTo(`/portal/workspaces/${workspaceId}/reports`, query));
 
   try {
-    const query = await searchParams;
     const reportQuery = {
       q: typeof query.q === "string" ? query.q : "",
       page: typeof query.page === "string" ? Number.parseInt(query.page, 10) || 1 : 1,
@@ -49,6 +50,9 @@ export default async function WorkspaceReportsPage({
       || !isWorkspaceScopedJobsPage(workspaceId, jobsWithReports)) {
       throw new ApiResponseError(404, `Workspace reports payload does not belong to workspace ${workspaceId}.`);
     }
+    const totalReports = workspaceConsole.jobs.filter(entry => entry.report != null).length;
+    const uniqueSourcesWithReports = new Set(workspaceConsole.jobs.filter(entry => entry.report != null).map(entry => entry.job.sourceId)).size;
+    const inFlightRuns = workspaceConsole.jobs.filter(entry => ["pending", "queued", "running"].includes(entry.job.status)).length;
 
     return (
       <PortalShell
@@ -61,23 +65,49 @@ export default async function WorkspaceReportsPage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="reports"
       >
+        <section className="portal-stat-grid">
+          <article className="portal-stat" data-testid="workspace-reports-stat-total">
+            <span className="portal-stat__label">Report-backed runs</span>
+            <span className="portal-stat__value">{totalReports}</span>
+            <p>Completed jobs with durable report output across the workspace.</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-reports-stat-sources">
+            <span className="portal-stat__label">Sources covered</span>
+            <span className="portal-stat__value">{uniqueSourcesWithReports}</span>
+            <p>Distinct sources that already have report history.</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-reports-stat-visible">
+            <span className="portal-stat__label">Visible now</span>
+            <span className="portal-stat__value">{jobsWithReports.length}</span>
+            <p>Reports on the current page after the active filter is applied.</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-reports-stat-in-flight">
+            <span className="portal-stat__label">Still running</span>
+            <span className="portal-stat__value">{inFlightRuns}</span>
+            <p>Open the runs view when you need logs before the report exists.</p>
+          </article>
+        </section>
+
         <section className="portal-panel" data-testid="workspace-reports-list">
-          <div className="auth-status">
-            <div>
-              <span className="tag tag--success">Reports</span>
-              <h2>Available reports</h2>
+          <PortalSectionHeader
+            badgeLabel="Reports"
+            badgeClassName="tag tag--success"
+            title="Available reports"
+            description="Use the reports route for review and the runs route for execution-state troubleshooting."
+          />
+          <form className="stack-form form-shell" method="GET">
+            <div className="form-grid">
+              <label className="field field--full">
+                <span>Search reports</span>
+                <input
+                  autoComplete="off"
+                  data-testid="workspace-reports-search-input"
+                  defaultValue={reportQuery.q}
+                  name="q"
+                  placeholder="Filter by report title, source, or job status…"
+                />
+              </label>
             </div>
-          </div>
-          <form className="stack-form" method="GET">
-            <label className="field">
-              <span>Search reports</span>
-              <input
-                data-testid="workspace-reports-search-input"
-                defaultValue={reportQuery.q}
-                name="q"
-                placeholder="Filter by report title, source, or job status"
-              />
-            </label>
             <button className="button-ghost" data-testid="workspace-reports-search-submit" type="submit">Apply report filter</button>
           </form>
           {jobsWithReports.length === 0 ? (
@@ -86,42 +116,58 @@ export default async function WorkspaceReportsPage({
               <p>{emptyState.detail}</p>
             </div>
           ) : null}
-          {jobsWithReports.map(job => {
-            const reportHref = getWorkspaceReportHref(workspaceId, job.report?.id);
-            const jobHref = getWorkspaceRunHref(workspaceId, job.job.id);
-            return (
-              <div className="list-row" data-testid={`workspace-reports-row-${job.report?.id ?? job.job.id}`} key={job.job.id}>
-                <div>
-                  <strong>{job.report?.title ?? "Generated report"}</strong>
-                  <p>{formatJobLabel(job.job, tasks)} · {job.job.status}</p>
-                  <p>{job.job.sourceLocation}</p>
-                  {reportHref ? null : (
-                    <p className="subtle-note" data-testid={`workspace-reports-missing-report-${job.job.id}`}>
-                      Report details are temporarily unavailable. Open the job to review logs and artifacts.
-                    </p>
-                  )}
-                </div>
-                <div className="list-row__actions">
-                  {reportHref ? (
-                    <Link
-                      className="button-secondary"
-                      data-testid={`workspace-reports-open-${job.report?.id}`}
-                      href={reportHref}
-                    >
-                      Open report
-                    </Link>
-                  ) : null}
-                  <Link
-                    className="button-ghost"
-                    data-testid={`workspace-reports-open-job-${job.job.id}`}
-                    href={jobHref ?? (`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route)}
-                  >
-                    Open job
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
+          {jobsWithReports.length > 0 ? (
+            <div className="portal-record-grid">
+              {jobsWithReports.map(job => {
+                const reportHref = getWorkspaceReportHref(workspaceId, job.report?.id);
+                const jobHref = getWorkspaceRunHref(workspaceId, job.job.id);
+                return (
+                  <article className="portal-record-card" data-testid={`workspace-reports-row-${job.report?.id ?? job.job.id}`} key={job.job.id}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{job.report?.title ?? "Generated report"}</strong>
+                        <p>{job.job.sourceLocation}</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className={getJobStatusTagClass(job.job.status)}>{job.job.status}</span>
+                        <span className="tag tag--neutral">{formatJobLabel(job.job, tasks)}</span>
+                      </div>
+                    </div>
+                    <PortalMetaList
+                      items={[
+                        { label: "Runtime mode", value: job.job.runtimeMode },
+                        { label: "Source", value: job.job.sourceLocation },
+                        { label: "Review handoff", value: reportHref ? "Report detail is ready" : "Open the job for logs and artifacts" },
+                      ]}
+                    />
+                    {!reportHref ? (
+                      <p className="subtle-note" data-testid={`workspace-reports-missing-report-${job.job.id}`}>
+                        Report details are temporarily unavailable. Open the job to review logs and artifacts.
+                      </p>
+                    ) : null}
+                    <div className="portal-record-card__actions">
+                      {reportHref ? (
+                        <Link
+                          className="button-secondary"
+                          data-testid={`workspace-reports-open-${job.report?.id}`}
+                          href={reportHref}
+                        >
+                          Open report
+                        </Link>
+                      ) : null}
+                      <Link
+                        className="button-ghost"
+                        data-testid={`workspace-reports-open-job-${job.job.id}`}
+                        href={jobHref ?? (`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route)}
+                      >
+                        Open job
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
           <PaginationLinks
             pathname={`/portal/workspaces/${workspaceId}/reports`}
             searchParams={query}
@@ -141,7 +187,12 @@ export default async function WorkspaceReportsPage({
           primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
           activePrimaryNavKey="workspaces"
         >
-          <p className="inline-error" data-testid="workspace-reports-access-denied">You do not have access to this workspace.</p>
+          <PortalNoticePanel
+            actions={<Link className="button-secondary" href={`/portal/workspaces/${workspaceId}` as Route}>Back to workspace</Link>}
+            description="You do not have access to this workspace."
+            descriptionTestId="workspace-reports-access-denied"
+            title="This report surface is not available to your account"
+          />
         </PortalShell>
       );
     }

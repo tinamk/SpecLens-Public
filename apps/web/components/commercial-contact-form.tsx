@@ -19,7 +19,7 @@ export default function CommercialContactForm() {
 
   return (
     <form
-      className="stack-form"
+      className="stack-form form-shell"
       onSubmit={event => {
         event.preventDefault();
         const formData = new FormData(event.currentTarget);
@@ -49,24 +49,27 @@ export default function CommercialContactForm() {
         });
       }}
     >
-      <label className="field">
-        <span>Name</span>
-        <input name="name" required placeholder="Your name" />
-      </label>
-      <label className="field">
-        <span>Work email</span>
-        <input name="email" required type="email" placeholder="you@company.com" />
-      </label>
-      <label className="field">
-        <span>Company</span>
-        <input name="company" placeholder="Company name (optional)" />
-      </label>
-      <label className="field">
-        <span>How can we help?</span>
-        <textarea name="message" rows={4} required placeholder="Describe your licensing or self-hosting needs." />
-      </label>
+      <div className="form-grid">
+        <label className="field">
+          <span>Name</span>
+          <input autoComplete="name" name="name" required placeholder="Your name…" />
+        </label>
+        <label className="field">
+          <span>Work email</span>
+          <input autoComplete="email" name="email" required spellCheck={false} type="email" placeholder="you@company.com…" />
+        </label>
+        <label className="field">
+          <span>Company</span>
+          <input autoComplete="organization" name="company" placeholder="Company name…" />
+        </label>
+        <label className="field field--full">
+          <span>How can we help?</span>
+          <textarea name="message" rows={4} required placeholder="Describe your licensing or self-hosting needs…" />
+        </label>
+      </div>
+      <p className="subtle-note">Useful details: deployment model, procurement constraints, timeline, and whether you need code rights or only hosted access.</p>
       <button className="button" type="submit" disabled={pending}>
-        {pending ? "Sending..." : "Send request"}
+        {pending ? "Sending…" : "Send request"}
       </button>
       {error ? <p className="inline-error" role="alert">{error}</p> : null}
     </form>

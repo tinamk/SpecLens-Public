@@ -1,19 +1,27 @@
+import Link from "next/link";
+import { MarketingPageHero, MarketingShell } from "@speclens/ui";
 import { SiteFooter } from "../../components/site-footer";
 import { SiteHeader } from "../../components/site-header";
 
 export default function PrivacyPage() {
   return (
-    <div className="marketing-shell" data-testid="public-privacy-page">
+    <MarketingShell testId="public-privacy-page">
       <SiteHeader />
       <main className="legal-layout" data-testid="public-privacy-main">
-        <section className="legal-hero" data-testid="public-privacy-hero">
-          <p className="eyebrow">Privacy</p>
-          <h1>SpecLens stores only the hosted data needed to operate workspaces, runs, and reports.</h1>
-          <p className="hero-lede">
-            The hosted platform keeps metadata, logs, and artifacts required for the service experience while relying on
-            configured third-party processors for payments, identity, and source access.
-          </p>
-        </section>
+        <MarketingPageHero
+          eyebrow="Privacy"
+          title="SpecLens stores the hosted data needed to run workspaces, jobs, and reports - not more than that."
+          description="The hosted platform keeps the metadata, logs, and artifacts required for the service while relying on configured third-party processors for payments, identity, and source access."
+          asideLabel="Practical summary"
+          asideValue="Store what keeps the product usable. Protect secrets. Retain artifacts by policy."
+          actions={
+            <>
+              <Link className="button-secondary" href="/terms">Review terms</Link>
+              <Link className="button-ghost" href="/commercial">Commercial questions</Link>
+            </>
+          }
+          testId="public-privacy-hero"
+        />
 
         <section className="legal-grid">
           <article className="legal-panel">
@@ -38,6 +46,6 @@ export default function PrivacyPage() {
         </section>
       </main>
       <SiteFooter />
-    </div>
+    </MarketingShell>
   );
 }

@@ -122,6 +122,9 @@ try {
   await runCommand("npm", ["run", "seed:keycloak-users"], {
     env: {
       ...composeEnv,
+      APP_URL: appUrl,
+      PLAYWRIGHT_BASE_URL: appUrl,
+      KEYCLOAK_BASE_URL: keycloakPublicBaseUrl,
       KEYCLOAK_ADMIN_URL: keycloakAdminUrl,
       KEYCLOAK_ISSUER_URL: keycloakIssuerUrl,
       KEYCLOAK_ADMIN: process.env.KEYCLOAK_ADMIN ?? "admin",
@@ -143,6 +146,14 @@ try {
       RUNNER_URL: runnerUrl,
       AI_WORKER_URL: aiWorkerUrl,
       KEYCLOAK_ISSUER_URL: keycloakIssuerUrl,
+      DATABASE_URL: process.env.DATABASE_URL ?? `postgresql://postgres:postgres@localhost:${composeEnv.POSTGRES_PORT}/speclens`,
+      OBJECT_STORAGE_PROVIDER: process.env.OBJECT_STORAGE_PROVIDER ?? "s3-compatible",
+      OBJECT_STORAGE_BUCKET: process.env.OBJECT_STORAGE_BUCKET ?? "speclens-artifacts",
+      OBJECT_STORAGE_ENDPOINT: process.env.OBJECT_STORAGE_ENDPOINT ?? `http://localhost:${composeEnv.MINIO_PORT}`,
+      OBJECT_STORAGE_REGION: process.env.OBJECT_STORAGE_REGION ?? "us-east-1",
+      OBJECT_STORAGE_FORCE_PATH_STYLE: process.env.OBJECT_STORAGE_FORCE_PATH_STYLE ?? "true",
+      OBJECT_STORAGE_ACCESS_KEY_ID: process.env.OBJECT_STORAGE_ACCESS_KEY_ID ?? "minioadmin",
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: process.env.OBJECT_STORAGE_SECRET_ACCESS_KEY ?? "minioadmin",
     },
   });
 

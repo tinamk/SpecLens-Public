@@ -1,6 +1,6 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalShell } from "@speclens/ui";
+import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { ApiResponseError } from "../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../lib/auth";
 import {
@@ -9,6 +9,8 @@ import {
   formatJobLabel,
   formatSourceType,
   getEntitlementTagClass,
+  getJobStatusTagClass,
+  getSourceVerificationTagClass,
   getWorkspacePageData,
   isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../lib/portal";
@@ -64,109 +66,176 @@ export default async function WorkspaceOverviewPage({
 
         <section className="portal-grid">
           <article className="portal-panel xl:col-span-2" data-testid="workspace-overview-next-panel">
-            <span className={getEntitlementTagClass(workspaceConsole.workspace.entitlement)}>{workspaceConsole.workspace.entitlement}</span>
-            <h2>Next actions</h2>
-            <p>Open the focused workspace areas instead of working from one mixed dashboard.</p>
-            <div className="list-row">
-              <div>
-                <strong>Sources</strong>
-                <p>Add public Git repos, Git repo archives, or GitHub-backed sources from the dedicated intake area.</p>
-              </div>
-              <div className="list-row__actions">
-                <Link className="button-secondary" data-testid="workspace-overview-open-sources" href={`/portal/workspaces/${workspaceId}/sources` as Route}>Open sources</Link>
-              </div>
-            </div>
-            <div className="list-row">
-              <div>
-                <strong>Code</strong>
-                <p>Inspect the Git tree, open files, compare refs, and review PR and changeset metadata.</p>
-              </div>
-              <div className="list-row__actions">
-                <Link className="button-secondary" data-testid="workspace-overview-open-code" href={`/portal/workspaces/${workspaceId}/code` as Route}>Open code</Link>
-              </div>
-            </div>
-            <div className="list-row">
-              <div>
-                <strong>Runs</strong>
-                <p>Queue AI tasks, pair companion sources, and review job state from the run area.</p>
-              </div>
-              <div className="list-row__actions">
-                <Link className="button-secondary" data-testid="workspace-overview-open-runs" href={`/portal/workspaces/${workspaceId}/runs` as Route}>Open runs</Link>
-              </div>
-            </div>
-            <div className="list-row">
-              <div>
-                <strong>Settings</strong>
-                <p>Billing and GitHub installation state are now workspace-owned settings, not overview content.</p>
-              </div>
-              <div className="list-row__actions">
-                <Link className="button-secondary" data-testid="workspace-overview-open-settings" href={`/portal/workspaces/${workspaceId}/settings` as Route}>Open settings</Link>
-              </div>
-            </div>
+            <PortalSectionHeader
+              badgeLabel={workspaceConsole.workspace.entitlement}
+              badgeClassName={getEntitlementTagClass(workspaceConsole.workspace.entitlement)}
+              title="Choose the area you need"
+              description="Open the focused workspace areas instead of working from one mixed dashboard."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Owner model", value: "Workspace-owned settings keep billing and GitHub installation state in one place" },
+                { label: "Review flow", value: "Runs, reports, and code stay separated so operational state is easier to understand" },
+              ]}
+            />
+            <PortalLinkGrid testId="workspace-overview-route-grid">
+              <PortalLinkCard
+                description="Add public Git repos, Git repo archives, or GitHub-backed sources from the dedicated intake area."
+                eyebrow="Intake"
+                href={`/portal/workspaces/${workspaceId}/sources`}
+                testId="workspace-overview-open-sources"
+                title="Sources"
+                tone="info"
+              />
+              <PortalLinkCard
+                description="Inspect the Git tree, open files, compare refs, and review PR and changeset metadata."
+                eyebrow="Review"
+                href={`/portal/workspaces/${workspaceId}/code`}
+                testId="workspace-overview-open-code"
+                title="Code"
+              />
+              <PortalLinkCard
+                description="Queue AI tasks, pair companion sources, and review job state from the run area."
+                eyebrow="Execution"
+                href={`/portal/workspaces/${workspaceId}/runs`}
+                testId="workspace-overview-open-runs"
+                title="Runs"
+                tone="success"
+              />
+              <PortalLinkCard
+                description="Review findings, release-gate state, artifacts, and remediation history from the report area."
+                eyebrow="Decisions"
+                href={`/portal/workspaces/${workspaceId}/reports`}
+                testId="workspace-overview-open-reports"
+                title="Reports"
+                tone="warning"
+              />
+              <PortalLinkCard
+                description="Review members and authorization in the dedicated access surface."
+                eyebrow="Collaboration"
+                href={`/portal/workspaces/${workspaceId}/access`}
+                testId="workspace-overview-open-access"
+                title="Access"
+              />
+              <PortalLinkCard
+                description="Billing and GitHub installation state are now workspace-owned settings, not overview content."
+                eyebrow="Ownership"
+                href={`/portal/workspaces/${workspaceId}/settings`}
+                testId="workspace-overview-open-settings"
+                title="Settings"
+                tone="info"
+              />
+            </PortalLinkGrid>
           </article>
 
           <article className="portal-panel" data-testid="workspace-overview-recent-sources">
-            <span className="tag tag--neutral">Recent sources</span>
-            <h2>Latest inputs</h2>
+            <PortalSectionHeader
+              badgeLabel="Recent sources"
+              title="Latest inputs"
+              description="Use source state here as a quick checkpoint before queueing more work."
+            />
             {workspaceConsole.sources.length === 0 ? <p className="subtle-note">No sources yet.</p> : null}
-            {workspaceConsole.sources.slice(0, 3).map(source => (
-              <div className="list-row" key={source.id}>
-                <div>
-                  <strong>{source.displayName}</strong>
-                  <p>{formatSourceType(source.type)} · {source.visibility}</p>
-                </div>
+            {workspaceConsole.sources.length > 0 ? (
+              <div className="portal-record-stack">
+                {workspaceConsole.sources.slice(0, 3).map(source => (
+                  <article className="portal-record-card" key={source.id}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{source.displayName}</strong>
+                        <p>{source.location}</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className={getSourceVerificationTagClass(source.verificationStatus)}>{source.verificationStatus}</span>
+                        <span className="tag tag--neutral">{formatSourceType(source.type)}</span>
+                        <span className="tag tag--info">{source.visibility}</span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
               </div>
-            ))}
+            ) : null}
           </article>
         </section>
 
         <section className="portal-grid">
           <article className="portal-panel xl:col-span-2" data-testid="workspace-overview-recent-runs">
-            <span className="tag tag--info">Recent runs</span>
-            <h2>Latest jobs</h2>
+            <PortalSectionHeader
+              badgeLabel="Recent runs"
+              badgeClassName="tag tag--info"
+              title="Latest jobs"
+              description="Jump into the run or the generated report depending on whether you need execution state or review output."
+            />
             {workspaceConsole.jobs.length === 0 ? <p className="subtle-note">No jobs queued yet.</p> : null}
-            {workspaceConsole.jobs.slice(0, 5).map(job => (
-              <div className="list-row" data-testid={`workspace-overview-job-${job.job.id}`} key={job.job.id}>
-                <div>
-                  <strong>{formatJobLabel(job.job, tasks)}</strong>
-                  <p>{job.job.status} · {job.job.runtimeMode}</p>
-                </div>
-                <div className="list-row__actions">
-                  <Link
-                    className="button-ghost"
-                    data-testid={`workspace-overview-open-job-${job.job.id}`}
-                    href={`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route}
-                  >
-                    Open job
-                  </Link>
-                  {job.report ? (
-                    <Link
-                      className="button-secondary"
-                      data-testid={`workspace-overview-open-report-${job.report.id}`}
-                      href={`/portal/workspaces/${workspaceId}/reports/${job.report.id}` as Route}
-                    >
-                      Open report
-                    </Link>
-                  ) : null}
-                </div>
+            {workspaceConsole.jobs.length > 0 ? (
+              <div className="portal-record-grid">
+                {workspaceConsole.jobs.slice(0, 5).map(job => (
+                  <article className="portal-record-card" data-testid={`workspace-overview-job-${job.job.id}`} key={job.job.id}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{formatJobLabel(job.job, tasks)}</strong>
+                        <p>{job.job.sourceLocation}</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className={getJobStatusTagClass(job.job.status)}>{job.job.status}</span>
+                        <span className="tag tag--info">{job.job.runtimeMode}</span>
+                      </div>
+                    </div>
+                    <PortalMetaList
+                      items={[
+                        { label: "Execution path", value: job.job.executionPath ?? "Hosted agent runtime" },
+                        { label: "Report", value: job.report ? "Report ready" : "Open the job for logs and artifacts" },
+                      ]}
+                    />
+                    <div className="portal-record-card__actions">
+                      <Link
+                        className="button-ghost"
+                        data-testid={`workspace-overview-open-job-${job.job.id}`}
+                        href={`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route}
+                      >
+                        Open job
+                      </Link>
+                      {job.report ? (
+                        <Link
+                          className="button-secondary"
+                          data-testid={`workspace-overview-open-report-${job.report.id}`}
+                          href={`/portal/workspaces/${workspaceId}/reports/${job.report.id}` as Route}
+                        >
+                          Open report
+                        </Link>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
               </div>
-            ))}
+            ) : null}
           </article>
 
           <article className="portal-panel" data-testid="workspace-overview-access-summary">
-            <span className="tag tag--success">Access</span>
-            <h2>Members</h2>
+            <PortalSectionHeader
+              badgeLabel="Access"
+              badgeClassName="tag tag--success"
+              title="Members"
+              description="Shared access is visible here without collapsing membership into the run or billing surfaces."
+            />
             {workspaceConsole.members.length === 0 ? <p className="subtle-note">No members yet.</p> : null}
-            {workspaceConsole.members.slice(0, 4).map(member => (
-              <div className="list-row" key={member.id}>
-                <div>
-                  <strong>{member.displayName}</strong>
-                  <p>{member.email}</p>
-                  <p className="subtle-note">{member.role}</p>
-                </div>
+            {workspaceConsole.members.length > 0 ? (
+              <div className="portal-record-stack">
+                {workspaceConsole.members.slice(0, 4).map(member => (
+                  <article className="portal-record-card" key={member.id}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{member.displayName}</strong>
+                        <p>{member.email}</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className={member.role === "owner" ? "tag tag--success" : "tag tag--neutral"}>{member.role}</span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
               </div>
-            ))}
-            <Link className="button-ghost" data-testid="workspace-overview-open-access" href={`/portal/workspaces/${workspaceId}/access` as Route}>Open access</Link>
+            ) : null}
+            <Link className="button-ghost" data-testid="workspace-overview-open-access-summary" href={`/portal/workspaces/${workspaceId}/access` as Route}>Open access</Link>
           </article>
         </section>
       </PortalShell>
@@ -181,8 +250,12 @@ export default async function WorkspaceOverviewPage({
           primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
           activePrimaryNavKey="workspaces"
         >
-          <p className="inline-error" data-testid="workspace-overview-access-denied">You do not have access to this workspace.</p>
-          <Link className="button-secondary" href={"/portal/workspaces" as Route}>Back to workspaces</Link>
+          <PortalNoticePanel
+            actions={<Link className="button-secondary" href={"/portal/workspaces" as Route}>Back to workspaces</Link>}
+            description="You do not have access to this workspace."
+            descriptionTestId="workspace-overview-access-denied"
+            title="This workspace is not available to your account"
+          />
         </PortalShell>
       );
     }

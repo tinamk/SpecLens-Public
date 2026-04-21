@@ -1,19 +1,27 @@
+import Link from "next/link";
+import { MarketingPageHero, MarketingShell } from "@speclens/ui";
 import { SiteFooter } from "../../components/site-footer";
 import { SiteHeader } from "../../components/site-header";
 
 export default function TermsPage() {
   return (
-    <div className="marketing-shell" data-testid="public-terms-page">
+    <MarketingShell testId="public-terms-page">
       <SiteHeader />
       <main className="legal-layout" data-testid="public-terms-main">
-        <section className="legal-hero" data-testid="public-terms-hero">
-          <p className="eyebrow">Terms</p>
-          <h1>Hosted terms focus on safe usage of the managed service and its artifacts.</h1>
-          <p className="hero-lede">
-            Hosted Free and Pro plans apply to the managed SpecLens SaaS. Commercial licensing for the codebase is handled
-            separately.
-          </p>
-        </section>
+        <MarketingPageHero
+          eyebrow="Terms"
+          title="Hosted terms focus on safe usage of the managed service and the evidence it produces."
+          description="Hosted Free and Pro plans apply to the managed SpecLens SaaS. Commercial licensing for the codebase is handled separately."
+          asideLabel="Plain-language rule"
+          asideValue="Use the service responsibly, respect access controls, and expect hosted artifacts to follow retention policy."
+          actions={
+            <>
+              <Link className="button-secondary" href="/pricing">View hosted plans</Link>
+              <Link className="button-ghost" href="/privacy">Privacy details</Link>
+            </>
+          }
+          testId="public-terms-hero"
+        />
 
         <section className="legal-grid">
           <article className="legal-panel">
@@ -37,6 +45,6 @@ export default function TermsPage() {
         </section>
       </main>
       <SiteFooter />
-    </div>
+    </MarketingShell>
   );
 }

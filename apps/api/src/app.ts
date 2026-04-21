@@ -22,6 +22,7 @@ import { ZodError } from "zod";
 import { registerRoutes } from "./routes";
 import { loadApiConfig } from "./services/config";
 import { getMetricsContentType, getMetricsSnapshot, recordHttpRequest, setQueueDepth } from "./services/metrics";
+import { resolvePortalAuthEnv } from "./services/portal-auth-env";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -52,7 +53,7 @@ function readCookie(cookieHeader: string | string[] | undefined, name: string): 
 }
 
 function computeCsrfToken(sessionValue: string): string {
-  return buildPortalCsrfToken(sessionValue);
+  return buildPortalCsrfToken(sessionValue, resolvePortalAuthEnv());
 }
 
 function normalizeOrigin(value: string): string | null {

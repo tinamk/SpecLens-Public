@@ -1,175 +1,168 @@
 import Link from "next/link";
-import { PricingCard } from "@speclens/ui";
-import { SiteHeader } from "../components/site-header";
+import {
+  MarketingRoutePanel,
+  MarketingRouteSplit,
+  MarketingSectionHeading,
+  MarketingShell,
+  PricingCard,
+} from "@speclens/ui";
 import { SiteFooter } from "../components/site-footer";
+import { SiteHeader } from "../components/site-header";
 
 export default function HomePage() {
   return (
-    <div className="marketing-shell" data-testid="public-home-page">
+    <MarketingShell testId="public-home-page">
       <SiteHeader />
       <main data-testid="public-home-main">
         <section className="hero" data-testid="public-home-hero">
-          <div className="hero-card">
-            <div className="hero-grid">
-              <div className="hero-copy">
-                <p className="eyebrow">Spec-driven repository intelligence</p>
-                <h1 className="text-balance">Understand a repo&apos;s risks, behavior, and next moves before you inherit the work.</h1>
-                <p className="hero-lede">
-                  SpecLens turns source trees, runtime signals, and hosted job output into reviewable narratives with live
-                  logs, structured findings, and portal-ready artifacts for teams inheriting unfamiliar repositories.
-                </p>
-                <div className="hero-decision-banner" data-testid="public-home-decision-banner">
-                  <article className="hero-decision-card hero-decision-card--hosted">
-                    <span className="tag tag--success">Hosted SaaS</span>
-                    <h2>Choose hosted SaaS for the managed product.</h2>
-                    <p>
-                      Free covers public GitHub repos. Pro adds private repositories, archive uploads, and shared workspace
-                      access inside SpecLens Cloud.
-                    </p>
-                    <div className="hero-decision-card__actions">
-                      <Link className="button" data-testid="public-home-start-hosted" href="/api/auth/login">Try hosted SaaS</Link>
-                      <Link className="button-ghost" data-testid="public-home-view-pricing" href="/pricing">See hosted pricing</Link>
-                    </div>
-                  </article>
-                  <article className="hero-decision-card hero-decision-card--commercial">
-                    <span className="tag tag--warning">Commercial licensing</span>
-                    <h2>Choose commercial licensing for company rights.</h2>
-                    <p>
-                      Contact us if you need company usage rights for the codebase, self-hosting, procurement review, or a
-                      licensing path beyond the managed SaaS plans.
-                    </p>
-                    <div className="hero-decision-card__actions">
-                      <Link className="button-secondary" data-testid="public-home-contact-commercial" href="/commercial">Talk commercial licensing</Link>
-                    </div>
-                  </article>
-                </div>
+          <div className="hero-grid">
+            <div className="hero-copy">
+              <p className="eyebrow">Hosted repo analysis</p>
+              <p className="hero__brand">SpecLens</p>
+              <h1 className="text-balance">See what a repository does before your team inherits it.</h1>
+              <p className="hero-lede">
+                SpecLens turns source access, queued runs, live logs, and reports into one reviewable workspace so teams can
+                understand unfamiliar code without guessing.
+              </p>
+              <div className="hero__actions">
+                <Link className="button" data-testid="public-home-start-hosted" href="/api/auth/login">Try hosted SaaS</Link>
+                <Link className="button-ghost" data-testid="public-home-view-pricing" href="/pricing">See hosted pricing</Link>
               </div>
+              <p className="hero-proofline">
+                Public GitHub, private GitHub, Git repo uploads, report exports, and remediation runs in one hosted flow.
+              </p>
+            </div>
 
-              <div className="hero-stage">
-                <div className="hero-stage__panel">
-                  <span className="tag tag--neutral">Hosted flow</span>
-                  <div className="hero-stage__steps">
-                    <article className="hero-stage__step">
-                      <span className="hero-stage__step-label">01 Queue a source</span>
-                      <p>Connect a public Git repo, a private GitHub installation, or a Git repo archive upload.</p>
-                    </article>
-                    <article className="hero-stage__step">
-                      <span className="hero-stage__step-label">02 Watch the run</span>
-                      <p>Follow durable job logs from isolated Docker sandboxes while the analysis progresses.</p>
-                    </article>
-                    <article className="hero-stage__step">
-                      <span className="hero-stage__step-label">03 Review the report</span>
-                      <p>Share normalized parity sections, findings, and export-ready artifacts with the team.</p>
-                    </article>
+            <div className="hero-stage">
+              <div className="hero-atlas" aria-hidden="true">
+                <div className="hero-atlas__eyebrow">Review route</div>
+                <div className="hero-atlas__line" />
+                <div className="hero-atlas__row">
+                  <div className="hero-atlas__node">
+                    <span className="hero-atlas__node-index">01</span>
+                    <strong>Bring in a repo</strong>
+                    <p>Connect public Git, private GitHub, or a clean archive upload.</p>
+                  </div>
+                  <div className="hero-atlas__node hero-atlas__node--accent">
+                    <span className="hero-atlas__node-index">02</span>
+                    <strong>Watch the run</strong>
+                    <p>Track durable logs from isolated workers while the analysis executes.</p>
                   </div>
                 </div>
-                <div className="hero-metrics">
-                  <article className="hero-metric">
-                    <span className="hero-metric__eyebrow">Hosted plans</span>
-                    <span className="hero-metric__value">Free + Pro</span>
-                    <span className="hero-metric__label">Managed SaaS access for public, private, and uploaded Git repos</span>
-                  </article>
-                  <article className="hero-metric hero-metric--commercial">
-                    <span className="hero-metric__eyebrow">Commercial path</span>
-                    <span className="hero-metric__value">Company rights</span>
-                    <span className="hero-metric__label">Codebase rights, self-hosting, and procurement-friendly licensing</span>
-                  </article>
+                <div className="hero-atlas__row">
+                  <div className="hero-atlas__metric">
+                    <span>Surface</span>
+                    <strong>Portal + reports</strong>
+                  </div>
+                  <div className="hero-atlas__metric">
+                    <span>Decision model</span>
+                    <strong>Hosted vs commercial</strong>
+                  </div>
+                </div>
+                <div className="hero-atlas__result">
+                  <span className="hero-atlas__result-label">03 Read the output</span>
+                  <p>Open normalized findings, release-gate state, and exportable artifacts without leaving the review flow.</p>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
+        <MarketingRouteSplit testId="public-home-decision-banner">
+          <MarketingRoutePanel
+            badgeLabel="Hosted SaaS"
+            badgeClassName="tag tag--success"
+            description="Free covers public GitHub repos. Pro adds private repositories, Git repo uploads, and shared workspace access inside SpecLens Cloud."
+            title="Choose hosted SaaS for the managed product."
+            actions={
+              <>
+              <Link className="button" data-testid="public-home-start-hosted-secondary" href="/api/auth/login">Start hosted</Link>
+              <Link className="button-ghost" href="/pricing">Compare plans</Link>
+              </>
+            }
+          />
+          <MarketingRoutePanel
+            badgeLabel="Commercial licensing"
+            badgeClassName="tag tag--warning"
+            description="Contact us if you need self-hosting, codebase rights, procurement review, or a licensing path beyond the managed service."
+            title="Choose commercial licensing for company rights."
+            tone="commercial"
+            actions={
+              <>
+              <Link className="button-secondary" data-testid="public-home-contact-commercial" href="/commercial">
+                Talk commercial licensing
+              </Link>
+              </>
+            }
+          />
+        </MarketingRouteSplit>
+
         <section className="section">
-          <div className="section-heading">
-            <div>
-              <p className="section-kicker">Why teams use SpecLens</p>
-              <h2 className="text-balance">A hosted analysis surface designed for reviewability, not just raw output.</h2>
-            </div>
-            <p className="section-copy">
-              The current product path in `docs/` centers on hosted workspaces, queued execution, parity-oriented reports,
-              and a cleaner separation between SaaS access and codebase licensing.
-            </p>
-          </div>
+          <MarketingSectionHeading
+            kicker="Why teams use SpecLens"
+            title="A clearer path from source intake to a usable review."
+            copy="The product is built for teams inheriting real repositories, not for generic code summaries. Every major step stays visible and reviewable."
+          />
           <div className="feature-grid">
             <article className="panel">
-              <span className="tag tag--neutral">Review clarity</span>
-              <h3>See the repository before you touch it</h3>
-              <p>
-                SpecLens turns source trees, manifests, runtime behavior, and job output into a structured story your team
-                can act on.
-              </p>
+              <span className="tag tag--neutral">Source clarity</span>
+              <h3>Know what you are analyzing</h3>
+              <p>Public Git, private GitHub installs, and Git repo uploads stay explicit so reviews stay source-correct.</p>
             </article>
             <article className="panel">
-              <span className="tag tag--success">Hosted access</span>
-              <h3>Private repos without local setup debt</h3>
-              <p>
-                Pro users connect private GitHub repositories through the GitHub App path and run analysis inside hosted
-                sandbox workers.
-              </p>
+              <span className="tag tag--info">Run visibility</span>
+              <h3>Watch progress instead of waiting blind</h3>
+              <p>Queued execution, live logs, and artifacts make the run behavior legible while work is still in motion.</p>
             </article>
             <article className="panel">
-              <span className="tag tag--warning">Licensing clarity</span>
-              <h3>Commercial rights are explicit</h3>
-              <p>
-                Free and Pro define service usage. Commercial agreements handle company rights for the codebase and
-                self-hosted deployments.
-              </p>
+              <span className="tag tag--success">Report structure</span>
+              <h3>Read findings in a stable frame</h3>
+              <p>Sections, findings, release gates, and remediation state are organized for handoff, not just inspection.</p>
             </article>
           </div>
         </section>
 
         <section className="section">
-          <div className="section-heading">
-            <div>
-              <p className="section-kicker">What the experience feels like</p>
-              <h2 className="text-balance">One product language from landing page to queue, logs, and report.</h2>
-            </div>
-            <p className="section-copy">
-              The hosted surface covers the full journey: workspace setup, source intake, durable job execution, live log
-              review, and report interpretation.
-            </p>
-          </div>
+          <MarketingSectionHeading
+            kicker="How the hosted flow works"
+            title="One path, three review moments, no hidden jumps."
+            copy="The experience is intentionally linear: define the source, inspect the run, then review the evidence and next steps."
+          />
           <div className="feature-grid">
             <article className="timeline-card">
-              <span className="tag tag--info">Portal</span>
-              <h3>Shared workspaces</h3>
-              <p>Organize repositories, team members, and billing state in one control surface.</p>
+              <span className="tag tag--neutral">01 Intake</span>
+              <h3>Connect the right repository</h3>
+              <p>Bring in the exact Git-backed source you want to analyze and keep companion-source context explicit.</p>
             </article>
             <article className="timeline-card">
-              <span className="tag tag--neutral">Runner plane</span>
-              <h3>Live sandbox logs</h3>
-              <p>Follow queued jobs in terminal-style views instead of waiting for a black-box result.</p>
+              <span className="tag tag--warning">02 Execution</span>
+              <h3>Follow the run live</h3>
+              <p>Use durable logs and terminal-style views to understand what the hosted worker is actually doing.</p>
             </article>
             <article className="timeline-card">
-              <span className="tag tag--success">Report view</span>
-              <h3>Normalized findings</h3>
-              <p>Review parity sections, severity-tagged findings, and downloadable artifacts without context switching.</p>
+              <span className="tag tag--success">03 Review</span>
+              <h3>Open findings and remediation</h3>
+              <p>Move from report sections to code review and queued remediation without rebuilding the context by hand.</p>
             </article>
           </div>
         </section>
 
         <section className="section">
-          <div className="section-heading">
-            <div>
-              <p className="section-kicker">Plans</p>
-              <h2>Hosted SaaS plans and commercial licensing</h2>
-            </div>
-            <p className="section-copy">
-              The managed SaaS is self-serve for individuals and teams. Commercial code licensing is a separate, direct
-              path for organizations that need broader rights.
-            </p>
-          </div>
+          <MarketingSectionHeading
+            kicker="Plans"
+            title="Hosted SaaS plans and commercial licensing"
+            copy="Hosted access and codebase rights are different decisions. The product keeps that split visible on purpose."
+          />
           <div className="pricing-grid">
             <PricingCard
               name="Free"
               price="$0"
-              description="For public GitHub repositories and early exploration."
+              description="For public GitHub repositories and early evaluation."
               bullets={[
-                "Analyze public GitHub repos only",
-                "Shared workspace portal",
-                "Hosted log stream and report view",
-                "No private repos or Git repo archive uploads",
+                "Analyze public GitHub repos",
+                "Create shared workspaces",
+                "Read hosted logs and reports",
+                "No private repos or uploads",
               ]}
               cta={<Link className="button-ghost" href="/api/auth/login">Start free</Link>}
             />
@@ -177,25 +170,25 @@ export default function HomePage() {
               <PricingCard
                 name="Pro"
                 price="$19.99 / ~200 NOK"
-                description="For private repositories, Git repo archive uploads, and continuous hosted use."
+                description="For private repositories, Git repo uploads, and ongoing hosted use."
                 bullets={[
                   "Everything in Free",
-                  "Private GitHub repos through GitHub App access",
-                  "ZIP/TAR Git repository uploads",
-                  "Shared workspaces with owner/member access",
+                  "Private GitHub repos",
+                  "ZIP/TAR Git repo uploads",
+                  "Shared owner and member access",
                 ]}
-                cta={<Link className="button" href="/pricing">Subscribe to Pro</Link>}
+                cta={<Link className="button" href="/pricing">See Pro details</Link>}
               />
             </div>
             <PricingCard
               name="Commercial"
               price="Contact us"
-              description="For companies that need commercial licensing or self-hosted rights."
+              description="For companies that need codebase rights or self-hosted discussions."
               bullets={[
-                "Commercial rights for company usage of the codebase",
-                "Separate self-hosted and licensing discussions",
-                "Procurement-friendly commercial agreement path",
-                "Direct contact for tailored terms",
+                "Commercial rights for company usage",
+                "Self-hosting and procurement review",
+                "Tailored contract path",
+                "Direct contact for next steps",
               ]}
               cta={<Link className="button-secondary" href="/commercial">Talk commercial licensing</Link>}
             />
@@ -203,6 +196,6 @@ export default function HomePage() {
         </section>
       </main>
       <SiteFooter />
-    </div>
+    </MarketingShell>
   );
 }

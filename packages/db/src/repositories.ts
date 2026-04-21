@@ -1,5 +1,6 @@
 import crypto, { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -150,8 +151,14 @@ async function verifyHostedGithubPrivateLocation(location: string, installationI
 }
 
 async function runGitCommand(args: string[]): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
   return await new Promise((resolve, reject) => {
     const child = spawn("git", args, {
+      cwd: os.tmpdir(),
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout: Buffer[] = [];

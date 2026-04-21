@@ -28,9 +28,16 @@ cp .env.example .env
 npm run dev:compose
 ```
 
+If you keep multiple SpecLens checkouts on the same machine, let Docker Compose scope the stack by directory name, or set an explicit project name:
+
+```bash
+COMPOSE_PROJECT_NAME=speclens-redesign npm run dev:compose
+```
+
 Notes:
 
 - The Compose stack uses a public Keycloak issuer URL for browser redirects and an internal issuer URL for server-to-server token exchange.
+- The local dev stack intentionally avoids fixed Docker container names so separate checkouts can run side by side without name collisions.
 - The Compose stack uses MinIO as a self-hosted S3-compatible backend by default. To use an external S3-compatible provider, update the `OBJECT_STORAGE_*` variables in `.env` (bucket, endpoint, region, access keys).
 - To mirror uploads/artifacts to a second provider in parallel, set `OBJECT_STORAGE_MIRROR_*`. Downloads race both providers and take the first success. Optionally require the mirror with `OBJECT_STORAGE_MIRROR_REQUIRED=true`.
 - The hosted API now persists jobs in PostgreSQL, publishes them through `pg-boss`, and the runner claims them from the queue.

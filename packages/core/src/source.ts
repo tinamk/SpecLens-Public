@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { Source } from "@speclens/contracts";
@@ -20,8 +21,13 @@ export interface AcquiredSource {
 }
 
 async function runGit(args: string[], cwd?: string): Promise<void> {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
   const child = spawn("git", args, {
-    cwd,
+    cwd: cwd ?? os.tmpdir(),
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   const stdout: Buffer[] = [];

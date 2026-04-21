@@ -1,4 +1,5 @@
-import { PortalShell } from "@speclens/ui";
+import Link from "next/link";
+import { PortalNoticePanel, PortalShell } from "@speclens/ui";
 import { AdminAiPanel } from "../../../../../components/admin-ai-actions";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
 import { loadAdminAiPageData } from "../../../../../lib/admin-ai";
@@ -11,7 +12,13 @@ export default async function AdminAiRolesPage() {
   if (!isAdmin) {
     return (
       <PortalShell eyebrow="Admin" title="Access denied" pageTestId="admin-ai-access-denied-page" primaryNav={buildPortalPrimaryNav(false)}>
-        <p className="inline-error" data-testid="admin-ai-access-denied">Administrator access is required.</p>
+        <PortalNoticePanel
+          actions={<Link className="button-secondary" href="/portal/workspaces">Open workspaces</Link>}
+          badgeLabel="Admin only"
+          description="Administrator access is required."
+          descriptionTestId="admin-ai-access-denied"
+          title="This area is reserved for portal administrators"
+        />
       </PortalShell>
     );
   }

@@ -13,17 +13,13 @@ module.exports = {
       },
       fontFamily: {
         sans: [
+          "var(--font-body)",
           "\"Avenir Next\"",
           "\"Segoe UI\"",
-          "\"Helvetica Neue\"",
-          "Helvetica",
           "sans-serif",
         ],
         display: [
-          "\"Iowan Old Style\"",
-          "\"Palatino Linotype\"",
-          "\"Book Antiqua\"",
-          "\"URW Palladio L\"",
+          "var(--font-display)",
           "Georgia",
           "serif",
         ],

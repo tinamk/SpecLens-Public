@@ -1,13 +1,14 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalShell } from "@speclens/ui";
+import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { WorkspaceCodePrPanel } from "../../../../../components/workspace-code-pr-panel";
 import { ApiResponseError, getCurrentUser, getWorkspaceCodeReview, getWorkspaceConsole } from "../../../../../lib/api";
-import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
+import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
   formatSourceType,
+  getChangesetBranchName,
   isWorkspaceScopedCodePageContext,
   isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
@@ -41,7 +42,7 @@ export default async function WorkspaceCodePage({
 }) {
   const { workspaceId } = await params;
   const query = await searchParams;
-  const session = await requirePortalSession(`/portal/workspaces/${workspaceId}/code`);
+  const session = await requirePortalSession(buildPortalReturnTo(`/portal/workspaces/${workspaceId}/code`, query));
 
   try {
     const [workspaceConsole, user] = await Promise.all([
@@ -60,6 +61,8 @@ export default async function WorkspaceCodePage({
     }
     const canMutate = user.id === workspaceConsole.workspace.ownerUserId || isPortalAdminSession(session);
     if (!sourceId && workspaceConsole.sources.length > 1) {
+      const privateSources = workspaceConsole.sources.filter(source => source.type === "github-private").length;
+      const archiveSources = workspaceConsole.sources.filter(source => source.type === "upload-archive").length;
       return (
         <PortalShell
           eyebrow="Workspace code"
@@ -71,27 +74,59 @@ export default async function WorkspaceCodePage({
           secondaryNav={buildWorkspaceNav(workspaceId)}
           activeSecondaryNavKey="code"
         >
+          <section className="portal-stat-grid">
+            <article className="portal-stat" data-testid="workspace-code-stat-sources">
+              <span className="portal-stat__label">Sources</span>
+              <span className="portal-stat__value">{workspaceConsole.sources.length}</span>
+              <p>Choose one source before loading code review state.</p>
+            </article>
+            <article className="portal-stat" data-testid="workspace-code-stat-private-sources">
+              <span className="portal-stat__label">GitHub-backed</span>
+              <span className="portal-stat__value">{privateSources}</span>
+              <p>Sources that can expose GitHub PR metadata inside this route.</p>
+            </article>
+            <article className="portal-stat" data-testid="workspace-code-stat-archives">
+              <span className="portal-stat__label">Archives</span>
+              <span className="portal-stat__value">{archiveSources}</span>
+              <p>Uploaded Git repository archives retained for review.</p>
+            </article>
+          </section>
+
           <section className="portal-grid">
             <article className="portal-panel" data-testid="workspace-code-source-panel">
-              <span className="tag tag--info">Source</span>
-              <h2>Select a repository</h2>
-              <div className="stack-form">
+              <PortalSectionHeader
+                badgeLabel="Source"
+                badgeClassName="tag tag--info"
+                title="Select a repository"
+                description="Pick the exact Git source you want to inspect before branches, diffs, or PR metadata load."
+              />
+              <PortalLinkGrid>
                 {workspaceConsole.sources.map(source => (
-                  <Link
+                  <PortalLinkCard
                     key={source.id}
-                    className="button"
-                    data-testid={`workspace-code-source-${source.id}`}
                     href={buildCodeHref(workspaceId, { sourceId: source.id }) as Route}
-                  >
-                    {source.displayName}
-                  </Link>
+                    title={source.displayName}
+                    eyebrow={formatSourceType(source.type)}
+                    description={source.location}
+                    testId={`workspace-code-source-${source.id}`}
+                    tone="info"
+                  />
                 ))}
-              </div>
+              </PortalLinkGrid>
             </article>
             <article className="portal-panel" data-testid="workspace-code-permissions">
-              <span className="tag tag--warning">Permissions</span>
-              <h2>Mutation policy</h2>
-              <p>{canMutate ? "This account can launch remediation and remote publish workflows." : "This account is read-only for code review and remediation."}</p>
+              <PortalSectionHeader
+                badgeLabel="Permissions"
+                badgeClassName="tag tag--warning"
+                title="Mutation policy"
+                description="Code review stays readable for all members, but mutation controls remain intentionally restricted."
+              />
+              <PortalMetaList
+                items={[
+                  { label: "Current mode", value: canMutate ? "Can launch remediation and remote publish flows" : "read-only for code review and remediation" },
+                  { label: "Why this route exists", value: "Keep tree browsing, diffs, and remediation context separate from queueing and reports" },
+                ]}
+              />
             </article>
           </section>
         </PortalShell>
@@ -124,6 +159,7 @@ export default async function WorkspaceCodePage({
         ]
       : review.findings;
     const unattributedFindings = review.unattributedFindings;
+    const totalFindings = findings.length + unattributedFindings.length;
 
     return (
       <PortalShell
@@ -136,33 +172,76 @@ export default async function WorkspaceCodePage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="code"
       >
+        <section className="portal-stat-grid">
+          <article className="portal-stat" data-testid="workspace-code-stat-refs">
+            <span className="portal-stat__label">Refs</span>
+            <span className="portal-stat__value">{review.refs.length}</span>
+            <p>{review.compareRef ? `Comparing ${review.compareRef} against ${review.selectedRef}.` : `Currently inspecting ${review.selectedRef}.`}</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-code-stat-tree">
+            <span className="portal-stat__label">Tree entries</span>
+            <span className="portal-stat__value">{review.tree.length}</span>
+            <p>Available files and directories for the selected ref and source.</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-code-stat-findings">
+            <span className="portal-stat__label">Findings</span>
+            <span className="portal-stat__value">{totalFindings}</span>
+            <p>{review.activeReportId ? "Report-linked findings and fix guidance are available below." : "Open a report-linked view for focused fix context."}</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-code-stat-changesets">
+            <span className="portal-stat__label">Changesets</span>
+            <span className="portal-stat__value">{review.changesets.length}</span>
+            <p>{review.prSupport === "available" ? "GitHub PR metadata is available for this source." : "This source does not expose GitHub PR metadata."}</p>
+          </article>
+        </section>
+
         <section className="portal-grid">
           <article className="portal-panel" data-testid="workspace-code-source-panel">
-            <span className="tag tag--info">Source</span>
-            <h2>{review.source.displayName}</h2>
-            <p>{formatSourceType(review.source.type)} · {review.source.location}</p>
-            <div className="stack-form">
+            <PortalSectionHeader
+              badgeLabel="Source"
+              badgeClassName="tag tag--info"
+              title={review.source.displayName}
+              description="Switch between workspace sources without leaving the code review surface."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Source type", value: formatSourceType(review.source.type) },
+                { label: "Location", value: review.source.location },
+                { label: "PR metadata", value: review.prSupport === "available" ? "Available for this source" : "Unavailable for this source" },
+              ]}
+            />
+            <PortalLinkGrid>
               {workspaceConsole.sources.map(source => (
-                <Link
+                <PortalLinkCard
                   key={source.id}
-                  className={source.id === review.source.id ? "button" : "button-ghost"}
-                  data-testid={`workspace-code-source-${source.id}`}
                   href={buildCodeHref(workspaceId, { sourceId: source.id }) as Route}
-                >
-                  {source.displayName}
-                </Link>
+                  title={source.displayName}
+                  eyebrow={formatSourceType(source.type)}
+                  description={source.location}
+                  active={source.id === review.source.id}
+                  testId={`workspace-code-source-${source.id}`}
+                  tone="info"
+                />
               ))}
-            </div>
+            </PortalLinkGrid>
           </article>
           <article className="portal-panel" data-testid="workspace-code-ref-panel">
-            <span className="tag tag--neutral">Ref</span>
-            <h2>Branches and refs</h2>
-            <div className="stack-form">
+            <PortalSectionHeader
+              badgeLabel="Ref"
+              title="Branches and refs"
+              description="Move between branches or compare against another ref without leaving the current workspace source."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Selected ref", value: review.selectedRef },
+                { label: "Diff base", value: review.compareRef ?? "No comparison loaded" },
+                { label: "Report context", value: review.activeReportId ?? "No report-linked focus" },
+              ]}
+            />
+            <PortalLinkGrid>
               {review.refs.map(gitRef => (
-                <Link
+                <PortalLinkCard
                   key={gitRef.name}
-                  className={gitRef.name === review.selectedRef ? "button" : "button-ghost"}
-                  data-testid={`workspace-code-ref-${gitRef.name.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
                   href={buildCodeHref(workspaceId, {
                     sourceId: review.source.id,
                     ref: gitRef.name,
@@ -170,29 +249,43 @@ export default async function WorkspaceCodePage({
                     reportId: review.activeReportId,
                     findingId: review.activeFindingId,
                   }) as Route}
-                >
-                  {gitRef.name}{gitRef.isHead ? " (HEAD)" : ""}
-                </Link>
+                  title={gitRef.name}
+                  eyebrow={gitRef.isHead ? "head ref" : "available ref"}
+                  description={review.compareRef === gitRef.name ? "Current diff base" : "Open this ref in the code review surface"}
+                  active={gitRef.name === review.selectedRef}
+                  testId={`workspace-code-ref-${gitRef.name.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
+                  tone={gitRef.name === review.selectedRef ? "success" : "neutral"}
+                />
               ))}
-            </div>
+            </PortalLinkGrid>
           </article>
           <article className="portal-panel" data-testid="workspace-code-permissions">
-            <span className="tag tag--warning">Permissions</span>
-            <h2>Mutation policy</h2>
-            <p>{canMutate ? "This account can launch remediation and remote publish workflows." : "This account is read-only for code review and remediation."}</p>
+            <PortalSectionHeader
+              badgeLabel="Permissions"
+              badgeClassName="tag tag--warning"
+              title="Mutation policy"
+              description="Review stays visible here even when mutation controls are intentionally restricted."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Current mode", value: canMutate ? "Can launch remediation and remote publish workflows" : "read-only for code review and remediation" },
+                { label: "Selected path", value: review.selectedPath ?? "No file selected yet" },
+              ]}
+            />
           </article>
         </section>
 
         <section className="portal-grid">
           <article className="portal-panel" data-testid="workspace-code-tree-panel">
-            <span className="tag tag--neutral">Tree</span>
-            <h2>Repository tree</h2>
-            <div className="stack-form">
+            <PortalSectionHeader
+              badgeLabel="Tree"
+              title="Repository tree"
+              description="Use the tree to pivot quickly into changed files or finding-linked paths."
+            />
+            <PortalLinkGrid>
               {review.tree.map(entry => (
-                <Link
+                <PortalLinkCard
                   key={entry.path}
-                  className="button-ghost"
-                  data-testid={`workspace-code-tree-entry-${entry.path.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
                   href={buildCodeHref(workspaceId, {
                     sourceId: review.source.id,
                     ref: review.selectedRef,
@@ -201,17 +294,31 @@ export default async function WorkspaceCodePage({
                     reportId: review.activeReportId,
                     findingId: review.activeFindingId,
                   }) as Route}
-                >
-                  {entry.kind === "directory" ? "Dir" : "File"} · {entry.path}{entry.changed ? " · changed" : ""}{entry.hasFindings ? " · findings" : ""}
-                </Link>
+                  title={entry.path}
+                  eyebrow={entry.kind === "directory" ? "directory" : "file"}
+                  description={entry.changed && entry.hasFindings
+                    ? "Changed in the current comparison and referenced by findings"
+                    : entry.changed
+                      ? "Changed in the current comparison"
+                      : entry.hasFindings
+                        ? "Referenced by report findings"
+                        : "Open in the current source and ref"}
+                  active={entry.path === review.selectedPath}
+                  testId={`workspace-code-tree-entry-${entry.path.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
+                  tone={entry.hasFindings ? "warning" : entry.changed ? "info" : "neutral"}
+                />
               ))}
               {review.tree.length === 0 ? <p className="subtle-note">No entries found for this ref/path.</p> : null}
-            </div>
+            </PortalLinkGrid>
           </article>
 
           <article className="portal-panel xl:col-span-2" data-testid="workspace-code-viewer-panel">
-            <span className="tag tag--success">Viewer</span>
-            <h2>{review.selectedPath ?? "Select a file to inspect"}</h2>
+            <PortalSectionHeader
+              badgeLabel="Viewer"
+              badgeClassName="tag tag--success"
+              title={review.selectedPath ?? "Select a file to inspect"}
+              description={review.compareRef ? `Diffing ${review.compareRef} against ${review.selectedRef}.` : `Inspecting ${review.selectedRef} in the selected source.`}
+            />
             {review.compareRef ? <p data-testid="workspace-code-diff-header"><strong>Diff:</strong> {review.compareRef} {"->"} {review.selectedRef}</p> : null}
             {review.diff ? <pre className="data-preview" data-testid="workspace-code-diff">{review.diff}</pre> : null}
             {!review.diff && review.fileContent ? <pre className="data-preview" data-testid="workspace-code-file">{review.fileContent}</pre> : null}
@@ -230,76 +337,90 @@ export default async function WorkspaceCodePage({
           />
 
           <article className="portal-panel" data-testid="workspace-code-changeset-panel">
-            <span className="tag tag--warning">Changesets</span>
-            <h2>Latest remediation jobs</h2>
+            <PortalSectionHeader
+              badgeLabel="Changesets"
+              badgeClassName="tag tag--warning"
+              title="Latest remediation jobs"
+              description="Review the latest generated branches, validation state, and publish handoff here."
+            />
             {review.changesets.length === 0 ? <p className="subtle-note">No remediation changesets are available for this source yet.</p> : null}
-            {review.changesets.map(changeset => (
-              <div className="list-row" data-testid={`workspace-code-changeset-${changeset.jobId}`} key={changeset.jobId}>
-                <div>
-                  <strong>{changeset.branchName ?? "No branch created"}</strong>
-                  <p>{changeset.changedFiles.length} changed file(s) · {changeset.stopReason}</p>
-                  <p>{changeset.validationPassed ? "Validation passed" : "Validation not green"}</p>
-                  {changeset.validationCommands.length > 0 ? (
-                    <p>Validation commands: {changeset.validationCommands.join(", ")}</p>
-                  ) : null}
-                  {changeset.pullInstructions.length > 0 ? (
-                    <p>Pull/apply: {changeset.pullInstructions.join(" | ")}</p>
-                  ) : null}
-                </div>
-                <div className="list-row__actions">
-                  <Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/runs/${changeset.jobId}` as Route}>Open run</Link>
-                  {changeset.prUrl ? <a className="button-ghost" href={changeset.prUrl} target="_blank" rel="noreferrer">Open PR</a> : null}
-                </div>
+            {review.changesets.length > 0 ? (
+              <div className="portal-record-grid">
+                {review.changesets.map(changeset => (
+                  <article className="portal-record-card" data-testid={`workspace-code-changeset-${changeset.jobId}`} key={changeset.jobId}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{getChangesetBranchName({
+                          branchName: changeset.branchName,
+                          pullInstructions: changeset.pullInstructions,
+                        }) ?? "No branch created"}</strong>
+                        <p>Remediation run {changeset.jobId.slice(0, 8)} generated this candidate handoff.</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className={changeset.validationPassed ? "tag tag--success" : "tag tag--warning"}>
+                          {changeset.validationPassed ? "validation passed" : "validation not green"}
+                        </span>
+                        <span className="tag tag--neutral">{changeset.stopReason}</span>
+                      </div>
+                    </div>
+                    <PortalMetaList
+                      items={[
+                        { label: "Changed files", value: changeset.changedFiles.length },
+                        {
+                          label: "Validation",
+                          value: changeset.validationCommands.length > 0
+                            ? changeset.validationCommands.join(", ")
+                            : "No validation commands captured",
+                        },
+                        {
+                          label: "Pull/apply",
+                          value: changeset.pullInstructions.length > 0
+                            ? changeset.pullInstructions.join(" | ")
+                            : "No pull instructions recorded",
+                        },
+                      ]}
+                    />
+                    <div className="portal-record-card__actions">
+                      <Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/runs/${changeset.jobId}` as Route}>Open run</Link>
+                      {changeset.prUrl ? <a className="button-ghost" href={changeset.prUrl} target="_blank" rel="noreferrer">Open PR</a> : null}
+                    </div>
+                  </article>
+                ))}
               </div>
-            ))}
+            ) : null}
           </article>
 
           <article className="portal-panel xl:col-span-2" data-testid="workspace-code-findings-panel">
-            <span className="tag tag--neutral">Audit context</span>
-            <h2>Findings and fix guidance</h2>
-            <p><strong>Active report:</strong> {review.activeReportId ?? "none selected"}</p>
-            <p><strong>Remediation packs:</strong> {review.remediationPacks.length}</p>
-            <p><strong>Fix handoff entries:</strong> {review.fixHandoff?.entries.length ?? 0}</p>
-            {findings.map(finding => (
-              <div className="list-row" data-testid={`workspace-code-finding-${finding.id}`} key={finding.id}>
-                <div>
-                  <strong>{finding.title}</strong>
-                  <p>{finding.severity} · {finding.message}</p>
-                  {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
-                </div>
-                <div className="list-row__actions">
-                  <Link
-                    className="button-ghost"
-                    href={buildCodeHref(workspaceId, {
-                      sourceId: review.source.id,
-                      ref: review.selectedRef,
-                      ...(finding.paths.length === 1
-                        ? { path: finding.paths[0] }
-                        : review.selectedPath
-                          ? { path: review.selectedPath }
-                          : {}),
-                      reportId: review.activeReportId,
-                      findingId: finding.id,
-                    }) as Route}
-                  >
-                    Focus finding
-                  </Link>
-                </div>
-              </div>
-            ))}
-            {findings.length === 0 ? <p className="subtle-note">No findings are mapped to this source yet.</p> : null}
-            {unattributedFindings.length > 0 ? (
-              <>
-                <p><strong>Unattributed findings:</strong> {unattributedFindings.length}</p>
-                {unattributedFindings.map(finding => (
-                  <div className="list-row" data-testid={`workspace-code-unattributed-finding-${finding.id}`} key={finding.id}>
-                    <div>
-                      <strong>{finding.title}</strong>
-                      <p>{finding.severity} · {finding.message}</p>
-                      {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
-                      <p className="subtle-note">This finding is not mapped to a specific source yet.</p>
+            <PortalSectionHeader
+              badgeLabel="Audit context"
+              title="Findings and fix guidance"
+              description="Keep report-linked findings, remediation packs, and fix handoff context visible while you inspect code."
+            />
+            <PortalMetaList
+              items={[
+                { label: "Active report", value: review.activeReportId ?? "none selected" },
+                { label: "Remediation packs", value: review.remediationPacks.length },
+                { label: "Fix handoff entries", value: review.fixHandoff?.entries.length ?? 0 },
+              ]}
+            />
+            {findings.length > 0 ? (
+              <div className="portal-record-grid">
+                {findings.map(finding => (
+                  <article className="portal-record-card" data-testid={`workspace-code-finding-${finding.id}`} key={finding.id}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{finding.title}</strong>
+                        <p>{finding.message}</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className={finding.severity === "high" ? "tag tag--danger" : finding.severity === "medium" ? "tag tag--warning" : "tag tag--success"}>
+                          {finding.severity}
+                        </span>
+                        <span className="tag tag--neutral">{finding.paths.length} path{finding.paths.length === 1 ? "" : "s"}</span>
+                      </div>
                     </div>
-                    <div className="list-row__actions">
+                    {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
+                    <div className="portal-record-card__actions">
                       <Link
                         className="button-ghost"
                         href={buildCodeHref(workspaceId, {
@@ -317,8 +438,52 @@ export default async function WorkspaceCodePage({
                         Focus finding
                       </Link>
                     </div>
-                  </div>
+                  </article>
                 ))}
+              </div>
+            ) : null}
+            {findings.length === 0 ? <p className="subtle-note">No findings are mapped to this source yet.</p> : null}
+            {unattributedFindings.length > 0 ? (
+              <>
+                <p><strong>Unattributed findings:</strong> {unattributedFindings.length}</p>
+                <div className="portal-record-grid">
+                  {unattributedFindings.map(finding => (
+                    <article className="portal-record-card" data-testid={`workspace-code-unattributed-finding-${finding.id}`} key={finding.id}>
+                      <div className="portal-record-card__header">
+                        <div className="portal-record-card__title">
+                          <strong>{finding.title}</strong>
+                          <p>{finding.message}</p>
+                        </div>
+                        <div className="portal-record-card__meta">
+                          <span className={finding.severity === "high" ? "tag tag--danger" : finding.severity === "medium" ? "tag tag--warning" : "tag tag--success"}>
+                            {finding.severity}
+                          </span>
+                          <span className="tag tag--neutral">source attribution pending</span>
+                        </div>
+                      </div>
+                      {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
+                      <p className="subtle-note">This finding is not mapped to a specific source yet.</p>
+                      <div className="portal-record-card__actions">
+                        <Link
+                          className="button-ghost"
+                          href={buildCodeHref(workspaceId, {
+                            sourceId: review.source.id,
+                            ref: review.selectedRef,
+                            ...(finding.paths.length === 1
+                              ? { path: finding.paths[0] }
+                              : review.selectedPath
+                                ? { path: review.selectedPath }
+                                : {}),
+                            reportId: review.activeReportId,
+                            findingId: finding.id,
+                          }) as Route}
+                        >
+                          Focus finding
+                        </Link>
+                      </div>
+                    </article>
+                  ))}
+                </div>
               </>
             ) : null}
           </article>
@@ -358,19 +523,39 @@ export default async function WorkspaceCodePage({
           primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
           activePrimaryNavKey="workspaces"
         >
-          <p className="inline-error" data-testid="workspace-code-access-denied">
-            {error.status === 409
-              ? error.message
-              : error.status === 400
-              ? error.message
-              : error.status === 404
-                ? "The requested source, report, or finding is not available for this code review surface."
-                : "You do not have access to this workspace code review surface."}
-          </p>
-          {error.status === 409 ? (
-            <Link className="button-secondary" href={retryHref as Route}>Retry code review</Link>
-          ) : null}
-          <Link className="button-secondary" href={`/portal/workspaces/${workspaceId}` as Route}>Back to workspace</Link>
+          <PortalNoticePanel
+            actions={(
+              <>
+                {error.status === 409 ? (
+                  <Link className="button-secondary" href={retryHref as Route}>Retry code review</Link>
+                ) : null}
+                <Link className={error.status === 409 ? "button-ghost" : "button-secondary"} href={`/portal/workspaces/${workspaceId}` as Route}>
+                  Back to workspace
+                </Link>
+              </>
+            )}
+            badgeClassName={error.status === 409 ? "tag tag--info" : error.status === 400 || error.status === 404 ? "tag tag--warning" : "tag tag--warning"}
+            badgeLabel={error.status === 409 ? "Warming" : error.status === 400 || error.status === 404 ? "Unavailable" : "Restricted"}
+            description={
+              error.status === 409
+                ? error.message
+                : error.status === 400
+                ? error.message
+                : error.status === 404
+                  ? "The requested source, report, or finding is not available for this code review surface."
+                  : "You do not have access to this workspace code review surface."
+            }
+            descriptionTestId="workspace-code-access-denied"
+            title={
+              error.status === 409
+                ? "Refresh the code review surface"
+                : error.status === 400
+                  ? "This code review route cannot open the requested target"
+                  : error.status === 404
+                    ? "The requested review target is no longer available"
+                    : "This workspace code review surface is restricted"
+            }
+          />
         </PortalShell>
       );
     }

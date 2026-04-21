@@ -49,7 +49,7 @@ export function PaginationLinks({
   }
 
   return (
-    <div className="list-row__actions" data-testid={`${testIdPrefix}-pagination`}>
+    <div className="portal-inline-actions" data-testid={`${testIdPrefix}-pagination`}>
       <span className="subtle-note">
         Page {pageInfo.page} of {pageInfo.totalPages} · {pageInfo.total} total
       </span>
