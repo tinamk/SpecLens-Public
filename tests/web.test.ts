@@ -217,6 +217,44 @@ test("web request-origin honors forwarded host headers behind trusted local prox
   assert.equal(origin, "https://app.speclens.example");
 });
 
+test("web request-origin rejects mismatched forwarded hosts when a public base URL is configured", async () => {
+  const module = await import("../apps/web/lib/request-origin");
+  const origin = module.resolvePublicRequestOrigin({
+    requestUrl: "http://web:3000/api/auth/login",
+    forwardedProto: "https",
+    forwardedHost: "attacker.example",
+    configuredBaseUrl: "https://app.speclens.example",
+  });
+
+  assert.equal(origin, "https://app.speclens.example");
+});
+
+test("web auth login route keeps Keycloak callback origins pinned to the configured app URL behind trusted proxies", async () => {
+  const originalEnv = { ...process.env };
+  clearKeycloakEnv();
+  ensureTestAuthSecrets();
+  process.env.APP_URL = "https://app.speclens.example";
+  process.env.KEYCLOAK_ISSUER_URL = "https://sso.speclens.example/realms/speclens";
+  process.env.KEYCLOAK_CLIENT_ID = "speclens-web";
+
+  const route = await import("../apps/web/app/api/auth/login/route");
+  const response = await route.GET(new Request("http://web:3000/api/auth/login?returnTo=/portal", {
+    headers: {
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "attacker.example",
+    },
+  }));
+
+  assert.equal(response.status, 307);
+  const location = new URL(response.headers.get("location") ?? "");
+  const redirectUri = new URL(location.searchParams.get("redirect_uri") ?? "https://app.speclens.example/api/auth/callback");
+  assert.equal(redirectUri.origin, "https://app.speclens.example");
+  assert.equal(redirectUri.pathname, "/api/auth/callback");
+  assert.equal(redirectUri.searchParams.get("returnTo"), "/portal");
+
+  process.env = originalEnv;
+});
+
 test("workspace report href helper suppresses broken report links when the report payload is missing", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(module.getWorkspaceReportHref("ws_demo", null), null);
