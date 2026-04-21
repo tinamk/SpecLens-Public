@@ -862,9 +862,10 @@ test("workspace-scoped sources page context helper rejects repositories from for
   );
 });
 
-test("workspace job lifecycle helper keeps remediation retries owner-only while leaving audit runs shared", async () => {
+test("workspace job lifecycle helper keeps all job retries and cancellation owner-only", async () => {
   const module = await import("../apps/web/lib/portal");
-  assert.equal(module.canManageWorkspaceJobLifecycle("audit", false), true);
+  assert.equal(module.canManageWorkspaceJobLifecycle("audit", false), false);
+  assert.equal(module.canManageWorkspaceJobLifecycle("audit", true), true);
   assert.equal(module.canManageWorkspaceJobLifecycle("remediation", false), false);
   assert.equal(module.canManageWorkspaceJobLifecycle("remediation", true), true);
 });

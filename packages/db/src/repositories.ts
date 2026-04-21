@@ -1172,9 +1172,6 @@ async function requireJobAccess(jobId: string, userId: string): Promise<JobWithR
 
 async function requireJobLifecycleMutationAccess(jobId: string, userId: string): Promise<JobWithRelations> {
   const job = await requireJobAccess(jobId, userId);
-  if (job.jobKind !== "remediation") {
-    return job;
-  }
   await requireWorkspaceRole(job.workspaceId, userId, "owner");
   return job;
 }

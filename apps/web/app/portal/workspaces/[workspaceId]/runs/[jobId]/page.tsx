@@ -50,8 +50,8 @@ export default async function WorkspaceJobPage({
     if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)) {
       throw new ApiResponseError(404, `Workspace run payload does not belong to workspace ${workspaceId}.`);
     }
-    const canMutateWorkspace = isPortalAdminSession(session) || currentUser.id === workspaceConsole.workspace.ownerUserId;
-    const canManageLifecycle = canManageWorkspaceJobLifecycle(envelope.job.jobKind, canMutateWorkspace);
+    const isWorkspaceOwner = currentUser.id === workspaceConsole.workspace.ownerUserId;
+    const canManageLifecycle = canManageWorkspaceJobLifecycle(envelope.job.jobKind, isWorkspaceOwner);
     const sourceLearnables = await getSourceLearnables(envelope.job.workspaceId, envelope.job.sourceId);
     const executionLabel = formatJobLabel(envelope.job, tasks);
     const changesetBranchName = envelope.job.changeset ? getChangesetBranchName({
@@ -154,7 +154,7 @@ export default async function WorkspaceJobPage({
             />
             {!canManageLifecycle ? (
               <p className="subtle-note" data-testid="workspace-runs-job-lifecycle-read-only">
-                This account can review remediation logs and artifacts, but only the workspace owner can cancel or retry remediation runs.
+                This account can review run logs and artifacts, but only the workspace owner can cancel or retry jobs.
               </p>
             ) : null}
             <JobLifecycleActions

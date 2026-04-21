@@ -395,10 +395,7 @@ export function isWorkspaceScopedGithubRepositoriesPage(
   );
   return repositories.every(repository => {
     const installationId = repository?.githubInstallationId;
-    if (!installationId) {
-      return false;
-    }
-    return installationIds.has(installationId);
+    return typeof installationId === "string" && installationIds.has(installationId);
   });
 }
 
@@ -415,9 +412,9 @@ export function isWorkspaceScopedSourcesPageContext(
 
 export function canManageWorkspaceJobLifecycle(
   jobKind: string,
-  canMutateWorkspace: boolean,
+  isWorkspaceOwner: boolean,
 ): boolean {
-  return jobKind !== "remediation" || canMutateWorkspace;
+  return isWorkspaceOwner;
 }
 
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
