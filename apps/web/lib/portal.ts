@@ -262,7 +262,7 @@ export function isWorkspaceScopedWorkspaceConsoleContext(
     ...(workspaceConsole.members ?? []),
     ...(workspaceConsole.sources ?? []),
     ...(workspaceConsole.installations ?? []),
-    ...((workspaceConsole.jobs ?? []).flatMap(envelope => [envelope?.job, envelope?.report])),
+    ...((workspaceConsole.jobs ?? []).flatMap(envelope => [envelope?.job, envelope?.report].filter(Boolean))),
   ].every(entity => entity?.workspaceId === workspaceId);
 }
 
@@ -310,6 +310,13 @@ export function isWorkspaceScopedSourcesPageContext(
   return isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
     && isWorkspaceScopedEntityPage(workspaceId, sources)
     && isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations ?? [], githubRepositories);
+}
+
+export function canManageWorkspaceJobLifecycle(
+  jobKind: string,
+  canMutateWorkspace: boolean,
+): boolean {
+  return jobKind !== "remediation" || canMutateWorkspace;
 }
 
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {

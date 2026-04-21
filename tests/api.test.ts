@@ -1136,6 +1136,173 @@ test("hosted API can generate a bounded remediation changeset from a completed r
   assert.deepEqual(refreshedReportPayload.report.summary.changeset?.changedFiles, ["SPECLENS_REMEDIATION.md"]);
 });
 
+test("hosted API keeps remediation job lifecycle owner-only after queueing", async t => {
+  const instance = await createApiAppInstance();
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const workspaceResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: "/api/workspaces",
+    payload: {
+      name: "Remediation Lifecycle Workspace",
+      description: "Verifies remediation retry and cancellation stay owner-only.",
+    },
+  });
+  assert.equal(workspaceResponse.statusCode, 200);
+  const workspacePayload = workspaceResponse.json() as { workspace: { id: string } };
+
+  const owner = await ensureAuthenticatedPortalUser();
+  const member = await ensureAuthenticatedPortalUser({ cookie: workspaceMemberCookie });
+  const membershipResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/workspaces/${workspacePayload.workspace.id}/members`,
+    payload: {
+      email: member.email,
+    },
+  });
+  assert.equal(membershipResponse.statusCode, 200);
+
+  const sourceRecord = await createSourceForUserForTests(workspacePayload.workspace.id, owner.id, {
+    type: "git-public",
+    displayName: "Lifecycle fixture",
+    location: fixtureUrl,
+  });
+  const analysisJob = await createAgentJobForUser(workspacePayload.workspace.id, owner.id, "agent-universal-standard", {
+    sourceId: sourceRecord.id,
+  });
+  const prisma = getPrismaClient();
+  await prisma.analysisJob.update({
+    where: { id: analysisJob.job.id },
+    data: {
+      status: "succeeded",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    },
+  });
+  const report = await prisma.analysisReport.create({
+    data: {
+      workspaceId: workspacePayload.workspace.id,
+      jobId: analysisJob.job.id,
+      status: "succeeded",
+      rolesJson: analysisJob.job.roles,
+      runtimeMode: analysisJob.job.runtimeMode,
+      title: "Lifecycle remediation report",
+      summaryJson: {
+        totalFindings: 1,
+        high: 1,
+        medium: 0,
+        low: 0,
+        auditBundleId: "standard",
+        categoryCounts: { security: 1 },
+        releaseGateDecision: null,
+        remediationPacks: [],
+        fixHandoff: null,
+        changeset: null,
+        latestRemediationJobId: null,
+        executionCoverage: { attempted: [], skipped: [] },
+        qualityScorecard: null,
+        capabilityGaps: [],
+        artifactAnalysis: null,
+        executionSteps: [],
+      },
+      findingsJson: [
+        {
+          id: "finding_lifecycle_owner_only",
+          title: "Lifecycle remediation finding",
+          severity: "high",
+          category: "security",
+          summary: "Used to seed owner-only remediation lifecycle coverage.",
+        },
+      ],
+      sectionsJson: [],
+    },
+  });
+  await prisma.analysisJob.update({
+    where: { id: analysisJob.job.id },
+    data: { reportId: report.id },
+  });
+
+  const remediateResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/reports/${report.id}/remediate`,
+    payload: {
+      sourceId: sourceRecord.id,
+      baseRef: "HEAD",
+      maxIterations: 1,
+      outputMode: "changeset",
+      publishRemote: false,
+    },
+  });
+  assert.equal(remediateResponse.statusCode, 200);
+  const remediatePayload = remediateResponse.json() as {
+    job: {
+      job: {
+        id: string;
+        jobKind: string;
+      };
+    };
+  };
+  assert.equal(remediatePayload.job.job.jobKind, "remediation");
+  const remediationJobId = remediatePayload.job.job.id;
+
+  await prisma.analysisJob.update({
+    where: { id: remediationJobId },
+    data: {
+      status: "queued",
+      startedAt: null,
+      finishedAt: null,
+      cancelRequestedAt: null,
+      failureReason: null,
+    },
+  });
+
+  const memberCancelResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/jobs/${remediationJobId}/cancel`,
+    headers: {
+      cookie: workspaceMemberCookie,
+    },
+  });
+  assert.equal(memberCancelResponse.statusCode, 403);
+
+  await prisma.analysisJob.update({
+    where: { id: remediationJobId },
+    data: {
+      status: "cancelled",
+      finishedAt: new Date(),
+      failureReason: "Cancelled for remediation lifecycle auth coverage.",
+    },
+  });
+
+  const memberRetryResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/jobs/${remediationJobId}/retry`,
+    headers: {
+      cookie: workspaceMemberCookie,
+    },
+  });
+  assert.equal(memberRetryResponse.statusCode, 403);
+
+  const ownerRetryResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/jobs/${remediationJobId}/retry`,
+  });
+  assert.equal(ownerRetryResponse.statusCode, 200);
+  const ownerRetryPayload = ownerRetryResponse.json() as {
+    job: {
+      job: {
+        id: string;
+        jobKind: string;
+      };
+    };
+  };
+  assert.equal(ownerRetryPayload.job.job.jobKind, "remediation");
+  assert.notEqual(ownerRetryPayload.job.job.id, remediationJobId);
+});
+
 test("hosted API rejects removed analysis control payloads", async t => {
   const instance = await createStubbedAiWorkerApiAppInstance();
   const { app } = instance;

@@ -1093,11 +1093,13 @@ export function JobLifecycleActions({
   workspaceId,
   jobId,
   status,
+  canManageLifecycle = true,
   testIdPrefix = "workspace-runs-job",
 }: {
   workspaceId: string;
   jobId: string;
   status: string;
+  canManageLifecycle?: boolean;
   testIdPrefix?: string;
 }) {
   const router = useRouter();
@@ -1107,7 +1109,7 @@ export function JobLifecycleActions({
   const canCancel = status === "pending" || status === "queued" || status === "running";
   const canRetry = status === "failed" || status === "cancelled";
 
-  if (!canCancel && !canRetry) {
+  if (!canManageLifecycle || (!canCancel && !canRetry)) {
     return null;
   }
 

@@ -2,14 +2,23 @@ import type { Route } from "next";
 import Link from "next/link";
 import { PortalShell } from "@speclens/ui";
 import { JobLifecycleActions, JobLogConsole } from "../../../../../../components/portal-actions";
-import { ApiResponseError, getHostedJob, getPortalAnalysisTasks, getSourceLearnables } from "../../../../../../lib/api";
+import {
+  ApiResponseError,
+  getCurrentUser,
+  getHostedJob,
+  getPortalAnalysisTasks,
+  getSourceLearnables,
+  getWorkspaceConsole,
+} from "../../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../../lib/auth";
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
+  canManageWorkspaceJobLifecycle,
   formatJobExecutionMode,
   formatJobLabel,
   isWorkspaceScopedJobContext,
+  isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../../lib/portal";
 
 export default async function WorkspaceJobPage({
@@ -21,13 +30,20 @@ export default async function WorkspaceJobPage({
   const session = await requirePortalSession(`/portal/workspaces/${workspaceId}/runs/${jobId}`);
 
   try {
-    const [envelope, tasks] = await Promise.all([
+    const [envelope, tasks, currentUser] = await Promise.all([
       getHostedJob(jobId, "default"),
       getPortalAnalysisTasks(),
+      getCurrentUser(),
     ]);
     if (!isWorkspaceScopedJobContext(workspaceId, envelope.job, envelope.report)) {
       throw new ApiResponseError(404, `Job ${jobId} does not belong to workspace ${workspaceId}.`);
     }
+    const workspaceConsole = await getWorkspaceConsole(workspaceId);
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)) {
+      throw new ApiResponseError(404, `Workspace run payload does not belong to workspace ${workspaceId}.`);
+    }
+    const canMutateWorkspace = isPortalAdminSession(session) || currentUser.id === workspaceConsole.workspace.ownerUserId;
+    const canManageLifecycle = canManageWorkspaceJobLifecycle(envelope.job.jobKind, canMutateWorkspace);
     const sourceLearnables = await getSourceLearnables(envelope.job.workspaceId, envelope.job.sourceId);
     const executionLabel = formatJobLabel(envelope.job, tasks);
 
@@ -72,7 +88,17 @@ export default async function WorkspaceJobPage({
                 <strong>Parent report:</strong> {envelope.job.parentReportId}
               </p>
             ) : null}
-            <JobLifecycleActions workspaceId={workspaceId} jobId={envelope.job.id} status={envelope.job.status} />
+            {!canManageLifecycle ? (
+              <p className="subtle-note" data-testid="workspace-runs-job-lifecycle-read-only">
+                This account can review remediation logs and artifacts, but only the workspace owner can cancel or retry remediation runs.
+              </p>
+            ) : null}
+            <JobLifecycleActions
+              workspaceId={workspaceId}
+              jobId={envelope.job.id}
+              status={envelope.job.status}
+              canManageLifecycle={canManageLifecycle}
+            />
             {envelope.job.changeset ? (
               <div className="subtle-note" data-testid="workspace-runs-job-changeset-summary">
                 <p><strong>Branch:</strong> {envelope.job.changeset.branchName ?? "not created"}</p>

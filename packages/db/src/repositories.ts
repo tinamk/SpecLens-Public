@@ -1163,6 +1163,15 @@ async function requireJobAccess(jobId: string, userId: string): Promise<JobWithR
   return requireJobAccessWithLogVisibility(jobId, userId, "all");
 }
 
+async function requireJobLifecycleMutationAccess(jobId: string, userId: string): Promise<JobWithRelations> {
+  const job = await requireJobAccess(jobId, userId);
+  if (job.jobKind !== "remediation") {
+    return job;
+  }
+  await requireWorkspaceRole(job.workspaceId, userId, "owner");
+  return job;
+}
+
 async function requireJobAccessWithLogVisibility(
   jobId: string,
   userId: string,
@@ -3991,7 +4000,7 @@ export async function requestJobCancellationForUser(
   shouldCancelQueueMessage: boolean;
   executionPath: JobExecutionPath;
 }> {
-  const job = await requireJobAccess(jobId, userId);
+  const job = await requireJobLifecycleMutationAccess(jobId, userId);
   const prisma = getPrismaClient();
   const executionPath = resolveJobExecutionPath({
     agentId: job.agentId,
@@ -4072,7 +4081,7 @@ export async function requestJobCancellationForUser(
 }
 
 export async function retryAnalysisJobForUser(jobId: string, userId: string): Promise<JobEnvelope> {
-  const current = await getJobEnvelopeForUser(jobId, userId);
+  const current = buildJobEnvelope(await requireJobLifecycleMutationAccess(jobId, userId));
   if (current.job.status !== "failed" && current.job.status !== "cancelled") {
     throw statusError(403, "Only failed or cancelled jobs can be retried.");
   }
