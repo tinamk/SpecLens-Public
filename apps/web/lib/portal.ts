@@ -44,6 +44,13 @@ export function getWorkspaceReportHref(workspaceId: string, reportId?: string | 
   return `/portal/workspaces/${workspaceId}/reports/${reportId}` as Route;
 }
 
+export function getWorkspaceRunHref(workspaceId: string, jobId?: string | null): Route | null {
+  if (!jobId) {
+    return null;
+  }
+  return `/portal/workspaces/${workspaceId}/runs/${jobId}` as Route;
+}
+
 export function getWorkspaceReportsEmptyState(query: string): { title: string; detail: string } {
   const normalizedQuery = query.trim();
   if (normalizedQuery) {

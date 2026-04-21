@@ -6,6 +6,7 @@ import { ApiResponseError, getPortalAnalysisTasks, getWorkspaceConsole, getWorks
 import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
 import {
   buildPortalPrimaryNav,
+  getWorkspaceRunHref,
   buildWorkspaceNav,
   formatJobLabel,
   getWorkspaceReportHref,
@@ -81,6 +82,7 @@ export default async function WorkspaceReportsPage({
           ) : null}
           {jobsWithReports.map(job => {
             const reportHref = getWorkspaceReportHref(workspaceId, job.report?.id);
+            const jobHref = getWorkspaceRunHref(workspaceId, job.job.id);
             return (
               <div className="list-row" data-testid={`workspace-reports-row-${job.report?.id ?? job.job.id}`} key={job.job.id}>
                 <div>
@@ -106,7 +108,7 @@ export default async function WorkspaceReportsPage({
                   <Link
                     className="button-ghost"
                     data-testid={`workspace-reports-open-job-${job.job.id}`}
-                    href={`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route}
+                    href={jobHref ?? (`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route)}
                   >
                     Open job
                   </Link>

@@ -11,6 +11,7 @@ import {
   getWorkspaceReportFindingsEmptyStateTagClass,
   getWorkspaceReportRemediationSummary,
   getWorkspaceReportSectionsEmptyState,
+  getWorkspaceRunHref,
   isWorkspaceScopedReportContext,
 } from "../../../../../../lib/portal";
 
@@ -81,6 +82,7 @@ export default async function WorkspaceReportPage({
       latestRemediationJobId: report.summary.latestRemediationJobId,
       latestRemediationJobStatus: latestRemediationJob?.job.status ?? null,
     });
+    const analysisJobHref = getWorkspaceRunHref(workspaceId, report.jobId);
 
     return (
       <PortalShell
@@ -295,6 +297,9 @@ export default async function WorkspaceReportPage({
         <div className="list-row">
           <div />
           <div className="list-row__actions">
+            {analysisJobHref ? (
+              <Link className="button-secondary" data-testid="report-open-analysis-job" href={analysisJobHref}>Open analysis job</Link>
+            ) : null}
             <Link className="button-ghost" data-testid="report-back-to-reports" href={`/portal/workspaces/${workspaceId}/reports` as Route}>Back to reports</Link>
           </div>
         </div>

@@ -266,6 +266,17 @@ test("workspace report href helper returns the direct report route when a report
   assert.equal(module.getWorkspaceReportHref("ws_demo", "report_demo"), "/portal/workspaces/ws_demo/reports/report_demo");
 });
 
+test("workspace run href helper suppresses broken analysis-job links when the job payload is missing", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(module.getWorkspaceRunHref("ws_demo", null), null);
+  assert.equal(module.getWorkspaceRunHref("ws_demo", undefined), null);
+});
+
+test("workspace run href helper returns the direct run route when a job id is present", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(module.getWorkspaceRunHref("ws_demo", "job_demo"), "/portal/workspaces/ws_demo/runs/job_demo");
+});
+
 test("workspace reports empty-state helper explains filtered searches separately", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.deepEqual(module.getWorkspaceReportsEmptyState("security"), {
