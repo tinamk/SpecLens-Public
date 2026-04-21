@@ -257,6 +257,13 @@ export function isWorkspaceScopedEntityPage(
   return entities.every(entity => entity.workspaceId === workspaceId);
 }
 
+export function isWorkspaceScopedJobsPage(
+  workspaceId: string,
+  jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>,
+): boolean {
+  return jobs.every(({ job, report }) => job.workspaceId === workspaceId && (!report || report.workspaceId === workspaceId));
+}
+
 export function isWorkspaceScopedGithubRepositoriesPage(
   workspaceInstallations: Array<{ githubInstallationId: string }>,
   repositories: Array<{ githubInstallationId: string }>,

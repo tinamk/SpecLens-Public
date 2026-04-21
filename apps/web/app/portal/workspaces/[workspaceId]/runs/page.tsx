@@ -22,6 +22,9 @@ import {
   buildWorkspaceNav,
   formatJobExecutionMode,
   formatJobLabel,
+  isWorkspaceScopedEntityPage,
+  isWorkspaceScopedJobsPage,
+  isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
 
 export default async function WorkspaceRunsPage({
@@ -65,6 +68,11 @@ export default async function WorkspaceRunsPage({
       getCurrentUser(),
     ]);
     const canManageWorkspace = currentUser.id === workspaceConsole.workspace.ownerUserId;
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
+      || !isWorkspaceScopedJobsPage(workspaceId, jobs)
+      || !isWorkspaceScopedEntityPage(workspaceId, secrets)) {
+      throw new ApiResponseError(404, `Workspace runs payload does not belong to workspace ${workspaceId}.`);
+    }
 
     return (
       <PortalShell

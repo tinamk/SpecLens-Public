@@ -557,6 +557,45 @@ test("workspace-scoped entity page helper rejects paginated members or sources f
   );
 });
 
+test("workspace-scoped jobs page helper accepts run rows from the active workspace", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedJobsPage("ws_demo", [
+      {
+        job: { workspaceId: "ws_demo" },
+        report: { workspaceId: "ws_demo" },
+      },
+      {
+        job: { workspaceId: "ws_demo" },
+        report: null,
+      },
+    ]),
+    true,
+  );
+});
+
+test("workspace-scoped jobs page helper rejects foreign job or report rows", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedJobsPage("ws_demo", [
+      {
+        job: { workspaceId: "ws_other" },
+        report: { workspaceId: "ws_demo" },
+      },
+    ]),
+    false,
+  );
+  assert.equal(
+    module.isWorkspaceScopedJobsPage("ws_demo", [
+      {
+        job: { workspaceId: "ws_demo" },
+        report: { workspaceId: "ws_other" },
+      },
+    ]),
+    false,
+  );
+});
+
 test("workspace-scoped github repository page helper rejects repositories from unlinked installations", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(
