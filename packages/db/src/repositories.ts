@@ -3509,25 +3509,19 @@ export async function createRemediationJobForUser(
   input: CreateRemediationTaskInput,
   options: {
     requestId?: string;
-    allowAdmin?: boolean;
   } = {},
 ): Promise<JobEnvelope> {
   const prisma = getPrismaClient();
-  const report = options.allowAdmin
-    ? await prisma.analysisReport.findUnique({
-        where: { id: reportId },
-        include: { job: true },
-      })
-    : await prisma.analysisReport.findFirst({
-        where: {
-          id: reportId,
-          OR: [
-            { workspace: { ownerUserId: userId } },
-            { workspace: { memberships: { some: { userId } } } },
-          ],
-        },
-        include: { job: true },
-      });
+  const report = await prisma.analysisReport.findFirst({
+    where: {
+      id: reportId,
+      OR: [
+        { workspace: { ownerUserId: userId } },
+        { workspace: { memberships: { some: { userId } } } },
+      ],
+    },
+    include: { job: true },
+  });
   if (!report) {
     throw statusError(404, `Report not found: ${reportId}`);
   }
@@ -3540,7 +3534,7 @@ export async function createRemediationJobForUser(
     throw statusError(404, `Workspace not found for report ${reportId}.`);
   }
   const role = buildRoleFromWorkspace(workspace, userId);
-  if (!options.allowAdmin && role !== "owner") {
+  if (role !== "owner") {
     throw statusError(403, "Workspace owner access is required for remediation jobs.");
   }
 

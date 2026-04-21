@@ -7,6 +7,7 @@ import { requirePortalSession, isPortalAdminSession } from "../../../../../../li
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
+  canManageWorkspaceRemediation,
   getReleaseGateTagClass,
   getChangesetBranchName,
   getWorkspaceReportFindingCodeHref,
@@ -51,7 +52,7 @@ export default async function WorkspaceReportPage({
         : Promise.resolve(null),
     ]);
     const roleLookup = new Map(report.roles.map(role => [role.id, role.title]));
-    const canMutate = currentUser.id === workspaceConsole.workspace.ownerUserId || isPortalAdminSession(session);
+    const canMutate = canManageWorkspaceRemediation(currentUser.id === workspaceConsole.workspace.ownerUserId);
     if (!isWorkspaceScopedReportPageContext(
       workspaceId,
       [report, job.job, latestRemediationJob?.job],
@@ -102,7 +103,7 @@ export default async function WorkspaceReportPage({
       <PortalShell
         eyebrow="Workspace report"
         title={report.title}
-        lede="Report review stays separate from queueing and settings so report assertions remain durable across local and production environments."
+        lede="Review findings, artifacts, and remediation status for this analysis run in one place."
         pageTestId="workspace-report-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -112,7 +113,7 @@ export default async function WorkspaceReportPage({
         <section className="report-hero" data-testid="report-hero">
           <span className="tag tag--info">Hosted report</span>
           <h2 className="mt-4 text-white">{report.title}</h2>
-          <p>This hosted report view renders normalized parity sections, findings, and export-ready run metadata.</p>
+          <p>Use this report to understand what the run found, download evidence, and jump into remediation when needed.</p>
           <div className="report-grid">
             <div className="report-summary-card" data-testid="report-summary-total"><strong>Total</strong><br />{report.summary.totalFindings}</div>
             <div className="report-summary-card" data-testid="report-summary-high"><strong>High</strong><br />{report.summary.high}</div>

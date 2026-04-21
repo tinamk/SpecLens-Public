@@ -1420,17 +1420,8 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const user = await currentUser(request);
     const reportId = (request.params as { reportId: string }).reportId;
     const input = createRemediationTaskInputSchema.parse(request.body ?? {});
-    const allowAdmin = (() => {
-      try {
-        assertAdminUser(user);
-        return true;
-      } catch {
-        return false;
-      }
-    })();
     const job = await createRemediationJobForUser(reportId, user.id, input, {
       requestId: request.requestId,
-      allowAdmin,
     });
     await recordAuditLog({
       userId: user.id,

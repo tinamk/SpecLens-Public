@@ -132,13 +132,13 @@ export function getWorkspaceReportSectionsEmptyState(input: {
 }): { title: string; detail: string } {
   if (input.totalFindings > 0) {
     return {
-      title: "Normalized sections are not available for this report yet.",
-      detail: "Review the findings below and open the job or artifacts if you need the raw execution evidence before section rendering is available.",
+      title: "Sections are not ready for this report yet.",
+      detail: "Check the findings below, or open the run and artifacts if you need the raw evidence before the section summary is available.",
     };
   }
   return {
-    title: "No normalized sections were generated for this report.",
-    detail: "Open the job or artifact history if you need to confirm whether the run produced an intentionally empty report or stopped before section output was written.",
+    title: "This report has no section summary yet.",
+    detail: "Open the run and artifacts to confirm whether the analysis finished with an intentionally empty report or stopped before section output was written.",
   };
 }
 
@@ -161,25 +161,25 @@ export function getWorkspaceReportFindingsEmptyState(input: {
 }): { title: string; detail: string } {
   if (input.releaseGateStatus === "pass") {
     return {
-      title: "No findings were recorded in this report.",
-      detail: "The release gate is currently passing. Review the sections and artifacts if you need the supporting execution evidence for this clean result.",
+      title: "No findings were recorded for this report.",
+      detail: "The release gate is passing. Review the sections or artifacts if you want the supporting evidence for this clean result.",
     };
   }
   if ((input.releaseGateStatus === "warn" || input.releaseGateStatus === "fail") && input.sectionsCount > 0) {
     return {
-      title: "No findings were extracted, but the release gate still needs review.",
-      detail: `The release gate is currently ${input.releaseGateStatus === "warn" ? "warning" : "failing"}. Review the normalized sections, job logs, and artifacts to confirm what evidence was captured before treating this report as clean.`,
+      title: "No findings were listed, but this report still needs review.",
+      detail: `The release gate is currently ${input.releaseGateStatus === "warn" ? "warning" : "failing"}. Review the sections, run logs, and artifacts before treating this run as clean.`,
     };
   }
   if (input.sectionsCount > 0) {
     return {
-      title: "No findings were extracted from the available report sections.",
-      detail: "Review the normalized sections above and the run artifacts below if you need to understand what the analysis covered or where evidence was captured.",
+      title: "No findings were pulled out of the available sections.",
+      detail: "Review the sections above and the artifacts below if you need to see what the analysis covered.",
     };
   }
   return {
-    title: "This report does not contain any findings yet.",
-    detail: "Open the job and artifact history to confirm whether the run finished with no actionable issues or stopped before finding output was generated.",
+    title: "This report does not list any findings yet.",
+    detail: "Open the run and artifacts to confirm whether the analysis finished cleanly or stopped before findings were written.",
   };
 }
 
@@ -262,8 +262,8 @@ export function getWorkspaceReportRemediationSummary(input: {
   if (input.changesetGenerated) {
     return {
       tagClass: "tag tag--success",
-      title: "Remediation changeset ready",
-      detail: "SpecLens has already generated reviewable remediation output for this report. Open the remediation run if you need the underlying logs or artifacts.",
+      title: "Remediation changes are ready",
+      detail: "SpecLens already prepared a reviewable fix for this report. Open the remediation run if you need the logs or artifacts behind it.",
       canOpenRun: Boolean(input.latestRemediationJobId),
     };
   }
@@ -271,8 +271,8 @@ export function getWorkspaceReportRemediationSummary(input: {
   if (!input.latestRemediationJobId) {
     return {
       tagClass: "tag tag--neutral",
-      title: "No remediation changeset has been generated for this report yet.",
-      detail: "Launch remediation from this report when you want SpecLens to prepare a queued fix run and produce reviewable changeset output.",
+      title: "No remediation run has been started for this report yet.",
+      detail: "Start remediation from this report when you want SpecLens to queue a fix run and prepare reviewable changes.",
       canOpenRun: false,
     };
   }
@@ -281,7 +281,7 @@ export function getWorkspaceReportRemediationSummary(input: {
     return {
       tagClass: "tag tag--warning",
       title: "Remediation run queued",
-      detail: "A remediation run has already been queued for this report. Open the remediation run to follow progress, logs, and artifacts before a changeset is ready.",
+      detail: "A remediation run is already queued for this report. Open the run to follow progress, logs, and artifacts while SpecLens prepares the fix.",
       canOpenRun: true,
     };
   }
@@ -290,7 +290,7 @@ export function getWorkspaceReportRemediationSummary(input: {
     return {
       tagClass: "tag tag--warning",
       title: "Remediation run in progress",
-      detail: "SpecLens is still preparing remediation output for this report. Open the remediation run to follow progress, logs, and artifacts before a changeset is ready.",
+      detail: "SpecLens is still working on the fix for this report. Open the run to follow progress, logs, and artifacts.",
       canOpenRun: true,
     };
   }
@@ -299,15 +299,15 @@ export function getWorkspaceReportRemediationSummary(input: {
     return {
       tagClass: input.latestRemediationJobStatus === "failed" ? "tag tag--danger" : "tag tag--neutral",
       title: "Latest remediation run needs review",
-      detail: "The latest remediation run did not finish cleanly, so no changeset is available yet. Open the remediation run to inspect logs and artifacts before retrying.",
+      detail: "The latest remediation run did not finish cleanly, so there is no reviewable fix yet. Open the run to inspect logs and artifacts before retrying.",
       canOpenRun: true,
     };
   }
 
   return {
     tagClass: "tag tag--neutral",
-    title: "Latest remediation run finished without a changeset",
-    detail: "The remediation run completed, but there is no reviewable changeset yet. Open the remediation run to inspect logs and artifacts before deciding whether to retry.",
+    title: "Latest remediation run finished without reviewable changes",
+    detail: "The remediation run finished, but there is no fix output yet. Open the run to inspect logs and artifacts before deciding whether to retry.",
     canOpenRun: true,
   };
 }
@@ -414,6 +414,10 @@ export function canManageWorkspaceJobLifecycle(
   jobKind: string,
   isWorkspaceOwner: boolean,
 ): boolean {
+  return isWorkspaceOwner;
+}
+
+export function canManageWorkspaceRemediation(isWorkspaceOwner: boolean): boolean {
   return isWorkspaceOwner;
 }
 

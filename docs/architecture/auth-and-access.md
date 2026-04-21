@@ -112,6 +112,7 @@ Rules:
 
 - all protected API actions resolve a current authenticated user
 - workspace-scoped operations are checked against membership or ownership
+- portal admin allow-list access is limited to `/portal/admin/**` and `/api/admin/ai/**`; it does not bypass workspace-owner checks for remediation or other workspace mutations
 - admin AI flows require explicit admin allow-list membership through `ADMIN_EMAILS`
 - job, report, source, and secret access are always user/workspace mediated through the API
 

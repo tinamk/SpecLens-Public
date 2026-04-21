@@ -46,6 +46,12 @@ const workspaceMemberCookie = makePortalSessionCookie({
   email: "workspace-member@speclens.test",
   displayName: "Workspace Member",
 });
+const workspaceAdminCookie = makePortalSessionCookie({
+  provider: "local-dev",
+  subject: "local-dev-admin",
+  email: "portal-admin@speclens.test",
+  displayName: "Portal Admin",
+});
 
 async function postStripeWebhook(
   app: { inject: (options: Record<string, unknown>) => Promise<unknown> },
@@ -1301,6 +1307,105 @@ test("hosted API keeps remediation job lifecycle owner-only after queueing", asy
   };
   assert.equal(ownerRetryPayload.job.job.jobKind, "remediation");
   assert.notEqual(ownerRetryPayload.job.job.id, remediationJobId);
+});
+
+test("hosted API does not let portal admins bypass workspace ownership for remediation", async t => {
+  const instance = await createApiAppInstance(createTestDatabaseName("speclens_api_admin_remediation"), {
+    ADMIN_EMAILS: "portal-admin@speclens.test",
+  });
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const workspaceResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: "/api/workspaces",
+    payload: {
+      name: "Admin Remediation Workspace",
+      description: "Verifies portal admins cannot bypass workspace-owner remediation rules.",
+    },
+  });
+  assert.equal(workspaceResponse.statusCode, 200);
+  const workspacePayload = workspaceResponse.json() as { workspace: { id: string } };
+
+  const owner = await ensureAuthenticatedPortalUser();
+  await ensureAuthenticatedPortalUser({ cookie: workspaceAdminCookie });
+  const sourceRecord = await createSourceForUserForTests(workspacePayload.workspace.id, owner.id, {
+    type: "git-public",
+    displayName: "Admin remediation fixture",
+    location: fixtureUrl,
+  });
+  const analysisJob = await createAgentJobForUser(workspacePayload.workspace.id, owner.id, "agent-universal-standard", {
+    sourceId: sourceRecord.id,
+  });
+  const prisma = getPrismaClient();
+  await prisma.analysisJob.update({
+    where: { id: analysisJob.job.id },
+    data: {
+      status: "succeeded",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    },
+  });
+  const report = await prisma.analysisReport.create({
+    data: {
+      workspaceId: workspacePayload.workspace.id,
+      jobId: analysisJob.job.id,
+      status: "succeeded",
+      rolesJson: analysisJob.job.roles,
+      runtimeMode: analysisJob.job.runtimeMode,
+      title: "Admin remediation report",
+      summaryJson: {
+        totalFindings: 1,
+        high: 1,
+        medium: 0,
+        low: 0,
+        auditBundleId: "standard",
+        categoryCounts: { security: 1 },
+        releaseGateDecision: null,
+        remediationPacks: [],
+        fixHandoff: null,
+        changeset: null,
+        latestRemediationJobId: null,
+        executionCoverage: { attempted: [], skipped: [] },
+        qualityScorecard: null,
+        capabilityGaps: [],
+        artifactAnalysis: null,
+        executionSteps: [],
+      },
+      findingsJson: [
+        {
+          id: "finding_admin_owner_only",
+          title: "Admin should not bypass remediation ownership",
+          severity: "high",
+          category: "security",
+          summary: "Used to prove portal admins cannot queue remediation outside workspace ownership.",
+        },
+      ],
+      sectionsJson: [],
+    },
+  });
+  await prisma.analysisJob.update({
+    where: { id: analysisJob.job.id },
+    data: { reportId: report.id },
+  });
+
+  const adminRemediationResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/reports/${report.id}/remediate`,
+    headers: {
+      cookie: workspaceAdminCookie,
+    },
+    payload: {
+      sourceId: sourceRecord.id,
+      baseRef: "HEAD",
+      maxIterations: 1,
+      outputMode: "changeset",
+      publishRemote: false,
+    },
+  });
+  assert.equal(adminRemediationResponse.statusCode, 404);
 });
 
 test("hosted API keeps audit job lifecycle owner-only after queueing", async t => {

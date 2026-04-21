@@ -340,16 +340,16 @@ test("workspace reports empty-state helper guides first-time report review", asy
 test("workspace report sections empty-state helper explains missing normalized sections when findings exist", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.deepEqual(module.getWorkspaceReportSectionsEmptyState({ totalFindings: 2 }), {
-    title: "Normalized sections are not available for this report yet.",
-    detail: "Review the findings below and open the job or artifacts if you need the raw execution evidence before section rendering is available.",
+    title: "Sections are not ready for this report yet.",
+    detail: "Check the findings below, or open the run and artifacts if you need the raw evidence before the section summary is available.",
   });
 });
 
 test("workspace report findings empty-state helper explains clean release-gate outcomes", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.deepEqual(module.getWorkspaceReportFindingsEmptyState({ releaseGateStatus: "pass", sectionsCount: 1 }), {
-    title: "No findings were recorded in this report.",
-    detail: "The release gate is currently passing. Review the sections and artifacts if you need the supporting execution evidence for this clean result.",
+    title: "No findings were recorded for this report.",
+    detail: "The release gate is passing. Review the sections or artifacts if you want the supporting evidence for this clean result.",
   });
   assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass("pass"), "tag tag--success");
 });
@@ -357,8 +357,8 @@ test("workspace report findings empty-state helper explains clean release-gate o
 test("workspace report findings empty-state helper warns when the release gate is not passing", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.deepEqual(module.getWorkspaceReportFindingsEmptyState({ releaseGateStatus: "warn", sectionsCount: 1 }), {
-    title: "No findings were extracted, but the release gate still needs review.",
-    detail: "The release gate is currently warning. Review the normalized sections, job logs, and artifacts to confirm what evidence was captured before treating this report as clean.",
+    title: "No findings were listed, but this report still needs review.",
+    detail: "The release gate is currently warning. Review the sections, run logs, and artifacts before treating this run as clean.",
   });
   assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass("warn"), "tag tag--warning");
   assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass("fail"), "tag tag--danger");
@@ -367,8 +367,8 @@ test("workspace report findings empty-state helper warns when the release gate i
 test("workspace report findings empty-state helper explains fully empty report payloads", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.deepEqual(module.getWorkspaceReportFindingsEmptyState({ releaseGateStatus: null, sectionsCount: 0 }), {
-    title: "This report does not contain any findings yet.",
-    detail: "Open the job and artifact history to confirm whether the run finished with no actionable issues or stopped before finding output was generated.",
+    title: "This report does not list any findings yet.",
+    detail: "Open the run and artifacts to confirm whether the analysis finished cleanly or stopped before findings were written.",
   });
   assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass(null), "tag tag--neutral");
 });
@@ -382,7 +382,7 @@ test("workspace report remediation helper keeps queued remediation runs visible 
   }), {
     tagClass: "tag tag--warning",
     title: "Remediation run queued",
-    detail: "A remediation run has already been queued for this report. Open the remediation run to follow progress, logs, and artifacts before a changeset is ready.",
+    detail: "A remediation run is already queued for this report. Open the run to follow progress, logs, and artifacts while SpecLens prepares the fix.",
     canOpenRun: true,
   });
 });
@@ -396,7 +396,7 @@ test("workspace report remediation helper explains failed remediation runs witho
   }), {
     tagClass: "tag tag--danger",
     title: "Latest remediation run needs review",
-    detail: "The latest remediation run did not finish cleanly, so no changeset is available yet. Open the remediation run to inspect logs and artifacts before retrying.",
+    detail: "The latest remediation run did not finish cleanly, so there is no reviewable fix yet. Open the run to inspect logs and artifacts before retrying.",
     canOpenRun: true,
   });
 });
@@ -409,8 +409,8 @@ test("workspace report remediation helper keeps first-run guidance when no remed
     latestRemediationJobStatus: null,
   }), {
     tagClass: "tag tag--neutral",
-    title: "No remediation changeset has been generated for this report yet.",
-    detail: "Launch remediation from this report when you want SpecLens to prepare a queued fix run and produce reviewable changeset output.",
+    title: "No remediation run has been started for this report yet.",
+    detail: "Start remediation from this report when you want SpecLens to queue a fix run and prepare reviewable changes.",
     canOpenRun: false,
   });
 });
@@ -862,10 +862,44 @@ test("workspace-scoped sources page context helper rejects repositories from for
   );
 });
 
+test("workspace report copy helpers keep empty and remediation states plain-language", async () => {
+  const module = await import("../apps/web/lib/portal");
+
+  assert.deepEqual(
+    module.getWorkspaceReportSectionsEmptyState({ totalFindings: 3 }),
+    {
+      title: "Sections are not ready for this report yet.",
+      detail: "Check the findings below, or open the run and artifacts if you need the raw evidence before the section summary is available.",
+    },
+  );
+  assert.deepEqual(
+    module.getWorkspaceReportFindingsEmptyState({ releaseGateStatus: "warn", sectionsCount: 2 }),
+    {
+      title: "No findings were listed, but this report still needs review.",
+      detail: "The release gate is currently warning. Review the sections, run logs, and artifacts before treating this run as clean.",
+    },
+  );
+  assert.deepEqual(
+    module.getWorkspaceReportRemediationSummary({ changesetGenerated: false, latestRemediationJobId: "job_123", latestRemediationJobStatus: "running" }),
+    {
+      tagClass: "tag tag--warning",
+      title: "Remediation run in progress",
+      detail: "SpecLens is still working on the fix for this report. Open the run to follow progress, logs, and artifacts.",
+      canOpenRun: true,
+    },
+  );
+});
+
 test("workspace job lifecycle helper keeps all job retries and cancellation owner-only", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(module.canManageWorkspaceJobLifecycle("audit", false), false);
   assert.equal(module.canManageWorkspaceJobLifecycle("audit", true), true);
   assert.equal(module.canManageWorkspaceJobLifecycle("remediation", false), false);
   assert.equal(module.canManageWorkspaceJobLifecycle("remediation", true), true);
+});
+
+test("workspace remediation helper keeps report and code mutations owner-only", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(module.canManageWorkspaceRemediation(false), false);
+  assert.equal(module.canManageWorkspaceRemediation(true), true);
 });

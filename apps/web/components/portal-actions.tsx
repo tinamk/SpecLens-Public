@@ -1673,7 +1673,7 @@ export function ReportRemediationForm({
   if (!canMutate) {
     return (
       <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "read-only")}>
-        This account can review code and findings, but only workspace owners and admins can launch remediation jobs.
+        This account can review code and findings, but only workspace owners can launch remediation jobs.
       </p>
     );
   }

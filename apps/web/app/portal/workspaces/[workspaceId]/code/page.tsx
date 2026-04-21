@@ -7,6 +7,7 @@ import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from 
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
+  canManageWorkspaceRemediation,
   formatSourceType,
   getChangesetBranchName,
   isWorkspaceScopedCodePageContext,
@@ -59,7 +60,7 @@ export default async function WorkspaceCodePage({
     if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)) {
       throw new ApiResponseError(404, `Workspace code payload does not belong to workspace ${workspaceId}.`);
     }
-    const canMutate = user.id === workspaceConsole.workspace.ownerUserId || isPortalAdminSession(session);
+    const canMutate = canManageWorkspaceRemediation(user.id === workspaceConsole.workspace.ownerUserId);
     if (!sourceId && workspaceConsole.sources.length > 1) {
       const privateSources = workspaceConsole.sources.filter(source => source.type === "github-private").length;
       const archiveSources = workspaceConsole.sources.filter(source => source.type === "upload-archive").length;
