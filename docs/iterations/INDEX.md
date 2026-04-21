@@ -17,6 +17,10 @@ SpecLens uses milestone-based Design Science iterations.
 | Iteration 2 | Archived transition | TagTwo-first repo analysis and deterministic checks | `docs/archive/iteration-2-architecture.md`, `docs/archive/iteration-2-evaluation.md` |
 | Iteration 1 | Archived baseline | client-first visual and browser-driven pipeline | `docs/archive/iteration-1-baseline.md` |
 
+## Cross-Iteration Synthesis
+
+- `docs/thesis/ITERATIONS-001-005-thesis-foundation.md` consolidates all five iterations into one thesis-oriented narrative covering method, artifact evolution, results, discussion themes, and conclusion claims.
+
 ## Conventions
 
 - Use one iteration doc per milestone or Design Science cycle.
