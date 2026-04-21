@@ -759,6 +759,43 @@ test("hosted API supports owner-managed member, secret, and source lifecycle flo
   assert.equal(memberSecretsPayload.items[0]?.valuePreview.includes("stored"), true);
   assert.equal(memberSecretsPayload.pageInfo.total >= 1, true);
 
+  const memberSecretSource = await createSourceForUserForTests(workspacePayload.workspace.id, owner.id, {
+    type: "git-public",
+    displayName: "Member queued source",
+    location: fixtureUrl,
+  });
+  const memberAnalyzeWithSecretResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/workspaces/${workspacePayload.workspace.id}/analyze`,
+    headers: {
+      cookie: workspaceMemberCookie,
+    },
+    payload: {
+      sourceId: memberSecretSource.id,
+      agentId: "agent-universal-standard",
+      secretRefs: [secretPayload.secret.id],
+    },
+  });
+  assert.equal(memberAnalyzeWithSecretResponse.statusCode, 403);
+
+  const memberPlainSource = await createSourceForUserForTests(workspacePayload.workspace.id, owner.id, {
+    type: "git-public",
+    displayName: "Member queued source without secrets",
+    location: fixtureUrl,
+  });
+  const memberAnalyzeWithoutSecretResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: `/api/workspaces/${workspacePayload.workspace.id}/analyze`,
+    headers: {
+      cookie: workspaceMemberCookie,
+    },
+    payload: {
+      sourceId: memberPlainSource.id,
+      agentId: "agent-universal-standard",
+    },
+  });
+  assert.equal(memberAnalyzeWithoutSecretResponse.statusCode, 200);
+
   const secretUpdateResponse: any = await authenticatedInject(app, {
     method: "PATCH",
     url: `/api/workspaces/${workspacePayload.workspace.id}/secrets/${secretPayload.secret.id}`,

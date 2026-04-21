@@ -120,6 +120,7 @@ Rules:
 - browser sessions are cookie-based through `apps/web`
 - Codex tokens are stored in `AiAuth` and staged into worker-local auth files for execution
 - workspace secrets are encrypted at rest in `WorkspaceSecret`
+- only workspace owners may attach stored workspace secrets to new hosted analysis jobs
 
 ## Practical Rule
 

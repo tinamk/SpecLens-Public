@@ -3367,7 +3367,10 @@ export async function createAnalysisJobForUser(
   input: CreateAnalysisJobInput,
   options: { requestId?: string; agentId?: string } = {},
 ): Promise<JobEnvelope> {
-  await getAccessibleWorkspaceRecord(workspaceId, userId);
+  const { role } = await getAccessibleWorkspaceRecord(workspaceId, userId);
+  if ((input.secretRefs?.length ?? 0) > 0 && role !== "owner") {
+    throw statusError(403, "Workspace owner access is required to attach workspace secrets to analysis jobs.");
+  }
   const prisma = getPrismaClient();
   const source = await prisma.source.findFirst({
     where: {

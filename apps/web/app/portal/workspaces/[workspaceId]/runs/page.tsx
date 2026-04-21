@@ -86,6 +86,7 @@ export default async function WorkspaceRunsPage({
               workspaceId={workspaceId}
               tasks={tasks}
               secrets={secrets}
+              canUseSecrets={canManageWorkspace}
               sources={workspaceConsole.sources.map(source => ({
                 id: source.id,
                 displayName: source.displayName,
@@ -136,7 +137,7 @@ export default async function WorkspaceRunsPage({
               <CreateWorkspaceSecretForm workspaceId={workspaceId} />
             ) : (
               <p className="subtle-note" data-testid="workspace-runs-secrets-read-only">
-                Secret values remain write-only. This account can select existing secret references during queueing, but cannot modify them.
+                Secret values remain write-only. This account can review stored secret metadata, but only the workspace owner can attach those secrets to new runs or modify them.
               </p>
             )}
             {secrets.length === 0 ? <p className="subtle-note">No workspace secrets stored yet.</p> : null}

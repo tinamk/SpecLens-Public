@@ -477,6 +477,7 @@ export function QueueAnalysisForm({
   tasks,
   sources,
   secrets = [],
+  canUseSecrets = true,
   jobPathTemplate = "/portal/workspaces/{workspaceId}/runs/{jobId}",
   testIdPrefix = "workspace-runs",
 }: {
@@ -484,6 +485,7 @@ export function QueueAnalysisForm({
   tasks: PortalAnalysisTask[];
   sources: Array<{ id: string; displayName: string; visibility: string; type: string; location: string; verificationStatus: string; verificationError: string | null }>;
   secrets?: WorkspaceSecret[];
+  canUseSecrets?: boolean;
   jobPathTemplate?: string;
   testIdPrefix?: string;
 }) {
@@ -648,7 +650,7 @@ export function QueueAnalysisForm({
           ? "Browser mode asks the selected task to gather runtime and route-level evidence when the repo can boot safely."
           : "This task is currently static-only, so the run will collect repository and report evidence without runtime execution."}
       </p>
-      {secrets.length > 0 ? (
+      {secrets.length > 0 && canUseSecrets ? (
         <fieldset className="field" data-testid={scopedTestId(testIdPrefix, "secrets-fieldset")}>
           <span>Workspace secrets</span>
           {secrets.map(secret => (
@@ -667,6 +669,11 @@ export function QueueAnalysisForm({
           ))}
           <p className="subtle-note">Secret values stay write-only. Selecting one only passes its reference into the run.</p>
         </fieldset>
+      ) : null}
+      {secrets.length > 0 && !canUseSecrets ? (
+        <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "secrets-owner-only")}>
+          Only the workspace owner can attach stored workspace secrets to new runs.
+        </p>
       ) : null}
       <button className="button" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending || sources.length === 0 || tasks.length === 0}>
         {pending ? "Queueing..." : "Queue AI task"}
