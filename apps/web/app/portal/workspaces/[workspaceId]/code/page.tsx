@@ -8,7 +8,8 @@ import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
   formatSourceType,
-  isWorkspaceScopedCodeReviewContext,
+  isWorkspaceScopedCodePageContext,
+  isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
 
 function buildCodeHref(workspaceId: string, query: {
@@ -54,6 +55,9 @@ export default async function WorkspaceCodePage({
     const reportId = typeof query.reportId === "string" ? query.reportId : undefined;
     const findingId = typeof query.findingId === "string" ? query.findingId : undefined;
     const pr = typeof query.pr === "string" ? query.pr : undefined;
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)) {
+      throw new ApiResponseError(404, `Workspace code payload does not belong to workspace ${workspaceId}.`);
+    }
     const canMutate = user.id === workspaceConsole.workspace.ownerUserId || isPortalAdminSession(session);
     if (!sourceId && workspaceConsole.sources.length > 1) {
       return (
@@ -110,7 +114,7 @@ export default async function WorkspaceCodePage({
     if (findingId) reviewQuery.findingId = findingId;
     if (pr) reviewQuery.pr = pr;
     const review = await getWorkspaceCodeReview(workspaceId, reviewQuery);
-    if (!isWorkspaceScopedCodeReviewContext(workspaceId, review, workspaceConsole.sources)) {
+    if (!isWorkspaceScopedCodePageContext(workspaceId, review, workspaceConsole)) {
       throw new ApiResponseError(404, `Code review payload does not belong to workspace ${workspaceId}.`);
     }
     const findings = review.activeFindingId

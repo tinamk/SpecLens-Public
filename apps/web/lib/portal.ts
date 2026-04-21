@@ -229,6 +229,21 @@ export function isWorkspaceScopedCodeReviewContext(
   return workspaceSources.some(source => source.id === review.source.id);
 }
 
+export function isWorkspaceScopedCodePageContext(
+  workspaceId: string,
+  review: { workspaceId: string; source: { id: string } },
+  workspaceConsole: {
+    workspace: { id: string };
+    members: Array<{ workspaceId: string }>;
+    sources: Array<{ id: string; workspaceId: string }>;
+    installations: Array<{ workspaceId: string }>;
+    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
+  },
+): boolean {
+  return isWorkspaceScopedCodeReviewContext(workspaceId, review, workspaceConsole.sources)
+    && isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole);
+}
+
 export function isWorkspaceScopedWorkspaceConsoleContext(
   workspaceId: string,
   workspaceConsole: {

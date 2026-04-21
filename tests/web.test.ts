@@ -544,6 +544,57 @@ test("workspace-scoped code-review context helper rejects mismatched review work
   );
 });
 
+test("workspace-scoped code page context helper accepts matching review and workspace console payloads", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedCodePageContext(
+      "ws_demo",
+      {
+        workspaceId: "ws_demo",
+        source: { id: "source_demo" },
+      },
+      {
+        workspace: {
+          id: "ws_demo",
+        },
+        members: [{ workspaceId: "ws_demo" }],
+        sources: [{ id: "source_demo", workspaceId: "ws_demo" }],
+        installations: [{ workspaceId: "ws_demo" }],
+        jobs: [
+          {
+            job: { workspaceId: "ws_demo" },
+            report: { workspaceId: "ws_demo" },
+          },
+        ],
+      },
+    ),
+    true,
+  );
+});
+
+test("workspace-scoped code page context helper rejects mismatched workspace console payloads", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedCodePageContext(
+      "ws_demo",
+      {
+        workspaceId: "ws_demo",
+        source: { id: "source_demo" },
+      },
+      {
+        workspace: {
+          id: "ws_other",
+        },
+        members: [{ workspaceId: "ws_demo" }],
+        sources: [{ id: "source_demo", workspaceId: "ws_demo" }],
+        installations: [{ workspaceId: "ws_demo" }],
+        jobs: [],
+      },
+    ),
+    false,
+  );
+});
+
 test("workspace-scoped console context helper accepts overview payloads from the active workspace", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(
