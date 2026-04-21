@@ -258,6 +258,17 @@ test("workspace report findings empty-state helper explains clean release-gate o
     title: "No findings were recorded in this report.",
     detail: "The release gate is currently passing. Review the sections and artifacts if you need the supporting execution evidence for this clean result.",
   });
+  assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass("pass"), "tag tag--success");
+});
+
+test("workspace report findings empty-state helper warns when the release gate is not passing", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportFindingsEmptyState({ releaseGateStatus: "warn", sectionsCount: 1 }), {
+    title: "No findings were extracted, but the release gate still needs review.",
+    detail: "The release gate is currently warning. Review the normalized sections, job logs, and artifacts to confirm what evidence was captured before treating this report as clean.",
+  });
+  assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass("warn"), "tag tag--warning");
+  assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass("fail"), "tag tag--danger");
 });
 
 test("workspace report findings empty-state helper explains fully empty report payloads", async () => {
@@ -266,6 +277,7 @@ test("workspace report findings empty-state helper explains fully empty report p
     title: "This report does not contain any findings yet.",
     detail: "Open the job and artifact history to confirm whether the run finished with no actionable issues or stopped before finding output was generated.",
   });
+  assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass(null), "tag tag--neutral");
 });
 
 test("workspace-scoped report context helper accepts report and job payloads from the active workspace", async () => {

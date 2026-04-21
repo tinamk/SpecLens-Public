@@ -72,6 +72,19 @@ export function getWorkspaceReportSectionsEmptyState(input: {
   };
 }
 
+export function getWorkspaceReportFindingsEmptyStateTagClass(releaseGateStatus?: string | null): string {
+  if (releaseGateStatus === "fail") {
+    return "tag tag--danger";
+  }
+  if (releaseGateStatus === "warn") {
+    return "tag tag--warning";
+  }
+  if (releaseGateStatus === "pass") {
+    return "tag tag--success";
+  }
+  return "tag tag--neutral";
+}
+
 export function getWorkspaceReportFindingsEmptyState(input: {
   releaseGateStatus?: string | null;
   sectionsCount: number;
@@ -80,6 +93,12 @@ export function getWorkspaceReportFindingsEmptyState(input: {
     return {
       title: "No findings were recorded in this report.",
       detail: "The release gate is currently passing. Review the sections and artifacts if you need the supporting execution evidence for this clean result.",
+    };
+  }
+  if ((input.releaseGateStatus === "warn" || input.releaseGateStatus === "fail") && input.sectionsCount > 0) {
+    return {
+      title: "No findings were extracted, but the release gate still needs review.",
+      detail: `The release gate is currently ${input.releaseGateStatus === "warn" ? "warning" : "failing"}. Review the normalized sections, job logs, and artifacts to confirm what evidence was captured before treating this report as clean.`,
     };
   }
   if (input.sectionsCount > 0) {

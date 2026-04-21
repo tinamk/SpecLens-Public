@@ -8,6 +8,7 @@ import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
   getWorkspaceReportFindingsEmptyState,
+  getWorkspaceReportFindingsEmptyStateTagClass,
   getWorkspaceReportSectionsEmptyState,
   isWorkspaceScopedReportContext,
 } from "../../../../../../lib/portal";
@@ -182,7 +183,7 @@ export default async function WorkspaceReportPage({
           <section className="portal-grid">
             {report.findings.length === 0 ? (
               <article className="portal-panel xl:col-span-2" data-testid="report-findings-empty-state">
-                <span className="tag tag--success">Findings</span>
+                <span className={getWorkspaceReportFindingsEmptyStateTagClass(report.summary.releaseGateDecision?.status ?? null)}>Findings</span>
                 <h2>{findingsEmptyState.title}</h2>
                 <p>{findingsEmptyState.detail}</p>
               </article>
