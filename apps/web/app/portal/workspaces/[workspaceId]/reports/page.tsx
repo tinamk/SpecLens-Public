@@ -11,6 +11,8 @@ import {
   formatJobLabel,
   getWorkspaceReportHref,
   getWorkspaceReportsEmptyState,
+  isWorkspaceScopedJobsPage,
+  isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
 
 export default async function WorkspaceReportsPage({
@@ -43,6 +45,10 @@ export default async function WorkspaceReportsPage({
     ]);
 
     const emptyState = getWorkspaceReportsEmptyState(reportQuery.q);
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
+      || !isWorkspaceScopedJobsPage(workspaceId, jobsWithReports)) {
+      throw new ApiResponseError(404, `Workspace reports payload does not belong to workspace ${workspaceId}.`);
+    }
 
     return (
       <PortalShell
