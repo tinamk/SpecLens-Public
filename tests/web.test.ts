@@ -280,6 +280,48 @@ test("workspace report findings empty-state helper explains fully empty report p
   assert.equal(module.getWorkspaceReportFindingsEmptyStateTagClass(null), "tag tag--neutral");
 });
 
+test("workspace report remediation helper keeps queued remediation runs visible before a changeset exists", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportRemediationSummary({
+    changesetGenerated: false,
+    latestRemediationJobId: "job_remediate",
+    latestRemediationJobStatus: "queued",
+  }), {
+    tagClass: "tag tag--warning",
+    title: "Remediation run queued",
+    detail: "A remediation run has already been queued for this report. Open the remediation run to follow progress, logs, and artifacts before a changeset is ready.",
+    canOpenRun: true,
+  });
+});
+
+test("workspace report remediation helper explains failed remediation runs without a changeset", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportRemediationSummary({
+    changesetGenerated: false,
+    latestRemediationJobId: "job_remediate",
+    latestRemediationJobStatus: "failed",
+  }), {
+    tagClass: "tag tag--danger",
+    title: "Latest remediation run needs review",
+    detail: "The latest remediation run did not finish cleanly, so no changeset is available yet. Open the remediation run to inspect logs and artifacts before retrying.",
+    canOpenRun: true,
+  });
+});
+
+test("workspace report remediation helper keeps first-run guidance when no remediation run exists yet", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportRemediationSummary({
+    changesetGenerated: false,
+    latestRemediationJobId: null,
+    latestRemediationJobStatus: null,
+  }), {
+    tagClass: "tag tag--neutral",
+    title: "No remediation changeset has been generated for this report yet.",
+    detail: "Launch remediation from this report when you want SpecLens to prepare a queued fix run and produce reviewable changeset output.",
+    canOpenRun: false,
+  });
+});
+
 test("workspace-scoped report context helper accepts report and job payloads from the active workspace", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(

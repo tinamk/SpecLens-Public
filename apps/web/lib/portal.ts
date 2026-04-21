@@ -1,4 +1,5 @@
 import type { Route } from "next";
+import type { JobStatus } from "@speclens/contracts";
 import type { PortalNavItem } from "@speclens/ui";
 import {
   getGithubRepositories,
@@ -110,6 +111,69 @@ export function getWorkspaceReportFindingsEmptyState(input: {
   return {
     title: "This report does not contain any findings yet.",
     detail: "Open the job and artifact history to confirm whether the run finished with no actionable issues or stopped before finding output was generated.",
+  };
+}
+
+export function getWorkspaceReportRemediationSummary(input: {
+  changesetGenerated: boolean;
+  latestRemediationJobId?: string | null;
+  latestRemediationJobStatus?: JobStatus | null;
+}): {
+  tagClass: string;
+  title: string;
+  detail: string;
+  canOpenRun: boolean;
+} {
+  if (input.changesetGenerated) {
+    return {
+      tagClass: "tag tag--success",
+      title: "Remediation changeset ready",
+      detail: "SpecLens has already generated reviewable remediation output for this report. Open the remediation run if you need the underlying logs or artifacts.",
+      canOpenRun: Boolean(input.latestRemediationJobId),
+    };
+  }
+
+  if (!input.latestRemediationJobId) {
+    return {
+      tagClass: "tag tag--neutral",
+      title: "No remediation changeset has been generated for this report yet.",
+      detail: "Launch remediation from this report when you want SpecLens to prepare a queued fix run and produce reviewable changeset output.",
+      canOpenRun: false,
+    };
+  }
+
+  if (input.latestRemediationJobStatus === "pending" || input.latestRemediationJobStatus === "queued") {
+    return {
+      tagClass: "tag tag--warning",
+      title: "Remediation run queued",
+      detail: "A remediation run has already been queued for this report. Open the remediation run to follow progress, logs, and artifacts before a changeset is ready.",
+      canOpenRun: true,
+    };
+  }
+
+  if (input.latestRemediationJobStatus === "running") {
+    return {
+      tagClass: "tag tag--warning",
+      title: "Remediation run in progress",
+      detail: "SpecLens is still preparing remediation output for this report. Open the remediation run to follow progress, logs, and artifacts before a changeset is ready.",
+      canOpenRun: true,
+    };
+  }
+
+  if (input.latestRemediationJobStatus === "failed" || input.latestRemediationJobStatus === "cancelled") {
+    return {
+      tagClass: input.latestRemediationJobStatus === "failed" ? "tag tag--danger" : "tag tag--neutral",
+      title: "Latest remediation run needs review",
+      detail: "The latest remediation run did not finish cleanly, so no changeset is available yet. Open the remediation run to inspect logs and artifacts before retrying.",
+      canOpenRun: true,
+    };
+  }
+
+  return {
+    tagClass: "tag tag--neutral",
+    title: "Latest remediation run finished without a changeset",
+    detail: "The remediation run completed, but there is no reviewable changeset yet. Open the remediation run to inspect logs and artifacts before deciding whether to retry.",
+    canOpenRun: true,
   };
 }
 

@@ -9,6 +9,7 @@ import {
   buildWorkspaceNav,
   getWorkspaceReportFindingsEmptyState,
   getWorkspaceReportFindingsEmptyStateTagClass,
+  getWorkspaceReportRemediationSummary,
   getWorkspaceReportSectionsEmptyState,
   isWorkspaceScopedReportContext,
 } from "../../../../../../lib/portal";
@@ -74,6 +75,11 @@ export default async function WorkspaceReportPage({
     const findingsEmptyState = getWorkspaceReportFindingsEmptyState({
       releaseGateStatus: report.summary.releaseGateDecision?.status ?? null,
       sectionsCount: report.sections.length,
+    });
+    const remediationSummary = getWorkspaceReportRemediationSummary({
+      changesetGenerated: Boolean(report.summary.changeset),
+      latestRemediationJobId: report.summary.latestRemediationJobId,
+      latestRemediationJobStatus: latestRemediationJob?.job.status ?? null,
     });
 
     return (
@@ -158,7 +164,16 @@ export default async function WorkspaceReportPage({
                   </div>
                 </div>
               ) : (
-                <p className="subtle-note" data-testid="report-remediation-changeset-empty">No remediation changeset has been generated for this report yet.</p>
+                <div className="subtle-note" data-testid="report-remediation-changeset-empty">
+                  <p className={remediationSummary.tagClass}>Remediation status</p>
+                  <p><strong>{remediationSummary.title}</strong></p>
+                  <p>{remediationSummary.detail}</p>
+                  {remediationSummary.canOpenRun && report.summary.latestRemediationJobId ? (
+                    <p>
+                      <Link className="button-ghost" data-testid="report-open-remediation-job" href={`/portal/workspaces/${workspaceId}/runs/${report.summary.latestRemediationJobId}` as Route}>Open remediation run</Link>
+                    </p>
+                  ) : null}
+                </div>
               )}
             </article>
           </section>
