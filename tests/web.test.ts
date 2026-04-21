@@ -717,3 +717,32 @@ test("workspace-scoped github repository page helper rejects repositories from u
     false,
   );
 });
+
+test("workspace-scoped sources page context helper rejects repositories from foreign installations", async () => {
+  const module = await import("../apps/web/lib/portal");
+  const workspaceConsole = {
+    workspace: { id: "ws_demo" },
+    members: [{ workspaceId: "ws_demo" }],
+    sources: [{ workspaceId: "ws_demo" }],
+    installations: [{ workspaceId: "ws_demo", githubInstallationId: "github_installation_1" }],
+    jobs: [{ job: { workspaceId: "ws_demo" }, report: null }],
+  };
+  assert.equal(
+    module.isWorkspaceScopedSourcesPageContext(
+      "ws_demo",
+      workspaceConsole,
+      [{ workspaceId: "ws_demo" }],
+      [{ githubInstallationId: "github_installation_1" }],
+    ),
+    true,
+  );
+  assert.equal(
+    module.isWorkspaceScopedSourcesPageContext(
+      "ws_demo",
+      workspaceConsole,
+      [{ workspaceId: "ws_demo" }],
+      [{ githubInstallationId: "github_installation_2" }],
+    ),
+    false,
+  );
+});

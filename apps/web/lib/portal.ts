@@ -302,6 +302,23 @@ export function isWorkspaceScopedGithubRepositoriesPage(
   return repositories.every(repository => installationIds.has(repository.githubInstallationId));
 }
 
+export function isWorkspaceScopedSourcesPageContext(
+  workspaceId: string,
+  workspaceConsole: {
+    workspace: { id: string };
+    members: Array<{ workspaceId: string }>;
+    sources: Array<{ workspaceId: string }>;
+    installations: Array<{ workspaceId: string; githubInstallationId: string }>;
+    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
+  },
+  sources: Array<{ workspaceId: string }>,
+  githubRepositories: Array<{ githubInstallationId: string }>,
+): boolean {
+  return isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
+    && isWorkspaceScopedEntityPage(workspaceId, sources)
+    && isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations, githubRepositories);
+}
+
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
   const items: PortalNavItem[] = [
     {
