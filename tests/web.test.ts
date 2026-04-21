@@ -419,3 +419,44 @@ test("workspace-scoped job context helper rejects mismatched job workspace paylo
     false,
   );
 });
+
+test("workspace-scoped code-review context helper accepts review payloads from the active workspace and visible sources", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedCodeReviewContext(
+      "ws_demo",
+      {
+        workspaceId: "ws_demo",
+        source: { id: "source_demo" },
+      },
+      [{ id: "source_demo" }, { id: "source_other" }],
+    ),
+    true,
+  );
+});
+
+test("workspace-scoped code-review context helper rejects mismatched review workspace payloads and foreign sources", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedCodeReviewContext(
+      "ws_demo",
+      {
+        workspaceId: "ws_other",
+        source: { id: "source_demo" },
+      },
+      [{ id: "source_demo" }],
+    ),
+    false,
+  );
+  assert.equal(
+    module.isWorkspaceScopedCodeReviewContext(
+      "ws_demo",
+      {
+        workspaceId: "ws_demo",
+        source: { id: "source_foreign" },
+      },
+      [{ id: "source_demo" }],
+    ),
+    false,
+  );
+});

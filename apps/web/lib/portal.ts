@@ -198,6 +198,17 @@ export function isWorkspaceScopedJobContext(
   return scopedEntities.every(entity => !entity || entity.workspaceId === workspaceId);
 }
 
+export function isWorkspaceScopedCodeReviewContext(
+  workspaceId: string,
+  review: { workspaceId: string; source: { id: string } },
+  workspaceSources: Array<{ id: string }>,
+): boolean {
+  if (review.workspaceId !== workspaceId) {
+    return false;
+  }
+  return workspaceSources.some(source => source.id === review.source.id);
+}
+
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
   const items: PortalNavItem[] = [
     {

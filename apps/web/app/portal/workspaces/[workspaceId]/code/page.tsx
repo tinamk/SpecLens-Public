@@ -4,7 +4,12 @@ import { PortalShell } from "@speclens/ui";
 import { WorkspaceCodePrPanel } from "../../../../../components/workspace-code-pr-panel";
 import { ApiResponseError, getCurrentUser, getWorkspaceCodeReview, getWorkspaceConsole } from "../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
-import { buildPortalPrimaryNav, buildWorkspaceNav, formatSourceType } from "../../../../../lib/portal";
+import {
+  buildPortalPrimaryNav,
+  buildWorkspaceNav,
+  formatSourceType,
+  isWorkspaceScopedCodeReviewContext,
+} from "../../../../../lib/portal";
 
 function buildCodeHref(workspaceId: string, query: {
   sourceId: string;
@@ -105,6 +110,9 @@ export default async function WorkspaceCodePage({
     if (findingId) reviewQuery.findingId = findingId;
     if (pr) reviewQuery.pr = pr;
     const review = await getWorkspaceCodeReview(workspaceId, reviewQuery);
+    if (!isWorkspaceScopedCodeReviewContext(workspaceId, review, workspaceConsole.sources)) {
+      throw new ApiResponseError(404, `Code review payload does not belong to workspace ${workspaceId}.`);
+    }
     const findings = review.activeFindingId
       ? [
           ...review.findings.filter(finding => finding.id === review.activeFindingId),
