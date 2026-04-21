@@ -544,3 +544,33 @@ test("workspace-scoped console context helper rejects mismatched overview payloa
     false,
   );
 });
+
+test("workspace-scoped entity page helper rejects paginated members or sources from another workspace", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedEntityPage("ws_demo", [{ workspaceId: "ws_demo" }, { workspaceId: "ws_demo" }]),
+    true,
+  );
+  assert.equal(
+    module.isWorkspaceScopedEntityPage("ws_demo", [{ workspaceId: "ws_demo" }, { workspaceId: "ws_other" }]),
+    false,
+  );
+});
+
+test("workspace-scoped github repository page helper rejects repositories from unlinked installations", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedGithubRepositoriesPage(
+      [{ githubInstallationId: "github_installation_1" }],
+      [{ githubInstallationId: "github_installation_1" }],
+    ),
+    true,
+  );
+  assert.equal(
+    module.isWorkspaceScopedGithubRepositoriesPage(
+      [{ githubInstallationId: "github_installation_1" }],
+      [{ githubInstallationId: "github_installation_2" }],
+    ),
+    false,
+  );
+});

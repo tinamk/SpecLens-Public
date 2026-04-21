@@ -250,6 +250,21 @@ export function isWorkspaceScopedWorkspaceConsoleContext(
   ].every(entity => entity.workspaceId === workspaceId);
 }
 
+export function isWorkspaceScopedEntityPage(
+  workspaceId: string,
+  entities: Array<{ workspaceId: string }>,
+): boolean {
+  return entities.every(entity => entity.workspaceId === workspaceId);
+}
+
+export function isWorkspaceScopedGithubRepositoriesPage(
+  workspaceInstallations: Array<{ githubInstallationId: string }>,
+  repositories: Array<{ githubInstallationId: string }>,
+): boolean {
+  const installationIds = new Set(workspaceInstallations.map(installation => installation.githubInstallationId));
+  return repositories.every(repository => installationIds.has(repository.githubInstallationId));
+}
+
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
   const items: PortalNavItem[] = [
     {

@@ -11,7 +11,12 @@ import {
   getWorkspaceMembersPage,
 } from "../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
-import { buildPortalPrimaryNav, buildWorkspaceNav } from "../../../../../lib/portal";
+import {
+  buildPortalPrimaryNav,
+  buildWorkspaceNav,
+  isWorkspaceScopedEntityPage,
+  isWorkspaceScopedWorkspaceConsoleContext,
+} from "../../../../../lib/portal";
 
 export default async function WorkspaceAccessPage({
   params,
@@ -36,6 +41,10 @@ export default async function WorkspaceAccessPage({
       getCurrentUser(),
     ]);
     const canManageWorkspace = currentUser.id === workspaceConsole.workspace.ownerUserId;
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
+      || !isWorkspaceScopedEntityPage(workspaceId, members)) {
+      throw new ApiResponseError(404, `Workspace access payload does not belong to workspace ${workspaceId}.`);
+    }
     const ownerMember = workspaceConsole.members.find(member => member.userId === workspaceConsole.workspace.ownerUserId) ?? null;
 
     return (

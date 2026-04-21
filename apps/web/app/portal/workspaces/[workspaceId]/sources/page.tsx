@@ -17,6 +17,8 @@ import {
   buildWorkspaceNav,
   formatSourceType,
   getEntitlementTagClass,
+  isWorkspaceScopedEntityPage,
+  isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
 
 export default async function WorkspaceSourcesPage({
@@ -52,6 +54,10 @@ export default async function WorkspaceSourcesPage({
       getCurrentUser(),
     ]);
     const canManageWorkspace = currentUser.id === workspaceConsole.workspace.ownerUserId;
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
+      || !isWorkspaceScopedEntityPage(workspaceId, sources)) {
+      throw new ApiResponseError(404, `Workspace sources payload does not belong to workspace ${workspaceId}.`);
+    }
     const sourceLearnableEntries = await Promise.all(
       sources.map(async source => [source.id, await getSourceLearnables(workspaceId, source.id)] as const),
     );

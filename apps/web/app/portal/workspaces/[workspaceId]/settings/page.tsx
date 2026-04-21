@@ -16,6 +16,8 @@ import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/a
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
+  isWorkspaceScopedGithubRepositoriesPage,
+  isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
 
 function renderWorkspaceBanner(githubState: string | null) {
@@ -74,6 +76,10 @@ export default async function WorkspaceSettingsPage({
       getCurrentUser(),
     ]);
     const canManageWorkspace = currentUser.id === workspaceConsole.workspace.ownerUserId;
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
+      || !isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations, githubRepositories)) {
+      throw new ApiResponseError(404, `Workspace settings payload does not belong to workspace ${workspaceId}.`);
+    }
     const repositoriesByInstallation = workspaceConsole.installations.map(installation => ({
       installation,
       repositories: githubRepositories.filter(repository => repository.githubInstallationId === installation.githubInstallationId),
