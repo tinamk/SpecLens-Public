@@ -4,7 +4,13 @@ import { PortalShell } from "@speclens/ui";
 import { ReportExportAction, ReportRemediationForm } from "../../../../../../components/portal-actions";
 import { ApiResponseError, getCurrentUser, getHostedJob, getHostedReport, getWorkspaceConsole } from "../../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../../lib/auth";
-import { buildPortalPrimaryNav, buildWorkspaceNav, isWorkspaceScopedReportContext } from "../../../../../../lib/portal";
+import {
+  buildPortalPrimaryNav,
+  buildWorkspaceNav,
+  getWorkspaceReportFindingsEmptyState,
+  getWorkspaceReportSectionsEmptyState,
+  isWorkspaceScopedReportContext,
+} from "../../../../../../lib/portal";
 
 function getTagTone(tone: string): string {
   if (tone === "high" || tone === "failed" || tone === "error") return "tag tag--danger";
@@ -63,6 +69,11 @@ export default async function WorkspaceReportPage({
     const resolveFindingPath = (paths: string[]) => paths.length === 1 ? paths[0] : null;
     const remediationSourceId = latestRemediationJob?.job.sourceId ?? job.job.sourceId;
     const remediationSourceOption = sourceOptions.find(source => source.id === remediationSourceId) ?? sourceOptions[0] ?? null;
+    const sectionsEmptyState = getWorkspaceReportSectionsEmptyState({ totalFindings: report.summary.totalFindings });
+    const findingsEmptyState = getWorkspaceReportFindingsEmptyState({
+      releaseGateStatus: report.summary.releaseGateDecision?.status ?? null,
+      sectionsCount: report.sections.length,
+    });
 
     return (
       <PortalShell
@@ -151,6 +162,13 @@ export default async function WorkspaceReportPage({
             </article>
           </section>
           <section className="portal-grid">
+            {report.sections.length === 0 ? (
+              <article className="portal-panel xl:col-span-2" data-testid="report-sections-empty-state">
+                <span className="tag tag--neutral">Sections</span>
+                <h2>{sectionsEmptyState.title}</h2>
+                <p>{sectionsEmptyState.detail}</p>
+              </article>
+            ) : null}
             {report.sections.map(section => (
               <article className="portal-panel" data-testid={`report-section-${section.id}`} key={section.id}>
                 <p className={getTagTone(String(section.status).toLowerCase())}>{section.status.toUpperCase()}</p>
@@ -162,6 +180,13 @@ export default async function WorkspaceReportPage({
             ))}
           </section>
           <section className="portal-grid">
+            {report.findings.length === 0 ? (
+              <article className="portal-panel xl:col-span-2" data-testid="report-findings-empty-state">
+                <span className="tag tag--success">Findings</span>
+                <h2>{findingsEmptyState.title}</h2>
+                <p>{findingsEmptyState.detail}</p>
+              </article>
+            ) : null}
             {report.findings.map(finding => (
               <article className="portal-panel" data-testid={`report-finding-${finding.id}`} key={finding.id}>
                 <p className={getTagTone(String(finding.severity).toLowerCase())}>{finding.severity.toUpperCase()}</p>

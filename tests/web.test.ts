@@ -228,6 +228,46 @@ test("workspace report href helper returns the direct report route when a report
   assert.equal(module.getWorkspaceReportHref("ws_demo", "report_demo"), "/portal/workspaces/ws_demo/reports/report_demo");
 });
 
+test("workspace reports empty-state helper explains filtered searches separately", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportsEmptyState("security"), {
+    title: "No reports matched this filter.",
+    detail: "Try a different title, source, or status search for “security”, or open the runs view to inspect jobs that have not produced report output yet.",
+  });
+});
+
+test("workspace reports empty-state helper guides first-time report review", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportsEmptyState(""), {
+    title: "No reports available yet.",
+    detail: "Completed runs with durable report output will appear here. Open the runs view to inspect in-progress jobs, logs, and artifacts while you wait.",
+  });
+});
+
+test("workspace report sections empty-state helper explains missing normalized sections when findings exist", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportSectionsEmptyState({ totalFindings: 2 }), {
+    title: "Normalized sections are not available for this report yet.",
+    detail: "Review the findings below and open the job or artifacts if you need the raw execution evidence before section rendering is available.",
+  });
+});
+
+test("workspace report findings empty-state helper explains clean release-gate outcomes", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportFindingsEmptyState({ releaseGateStatus: "pass", sectionsCount: 1 }), {
+    title: "No findings were recorded in this report.",
+    detail: "The release gate is currently passing. Review the sections and artifacts if you need the supporting execution evidence for this clean result.",
+  });
+});
+
+test("workspace report findings empty-state helper explains fully empty report payloads", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.deepEqual(module.getWorkspaceReportFindingsEmptyState({ releaseGateStatus: null, sectionsCount: 0 }), {
+    title: "This report does not contain any findings yet.",
+    detail: "Open the job and artifact history to confirm whether the run finished with no actionable issues or stopped before finding output was generated.",
+  });
+});
+
 test("workspace-scoped report context helper accepts report and job payloads from the active workspace", async () => {
   const module = await import("../apps/web/lib/portal");
   assert.equal(

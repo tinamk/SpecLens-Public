@@ -4,7 +4,13 @@ import { PortalShell } from "@speclens/ui";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import { ApiResponseError, getPortalAnalysisTasks, getWorkspaceConsole, getWorkspaceJobsPage } from "../../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
-import { buildPortalPrimaryNav, buildWorkspaceNav, formatJobLabel, getWorkspaceReportHref } from "../../../../../lib/portal";
+import {
+  buildPortalPrimaryNav,
+  buildWorkspaceNav,
+  formatJobLabel,
+  getWorkspaceReportHref,
+  getWorkspaceReportsEmptyState,
+} from "../../../../../lib/portal";
 
 export default async function WorkspaceReportsPage({
   params,
@@ -34,6 +40,8 @@ export default async function WorkspaceReportsPage({
         ...(reportQuery.q ? { q: reportQuery.q } : {}),
       }),
     ]);
+
+    const emptyState = getWorkspaceReportsEmptyState(reportQuery.q);
 
     return (
       <PortalShell
@@ -65,7 +73,12 @@ export default async function WorkspaceReportsPage({
             </label>
             <button className="button-ghost" data-testid="workspace-reports-search-submit" type="submit">Apply report filter</button>
           </form>
-          {jobsWithReports.length === 0 ? <p className="subtle-note">No reports available yet.</p> : null}
+          {jobsWithReports.length === 0 ? (
+            <div className="subtle-note" data-testid="workspace-reports-empty-state">
+              <p><strong>{emptyState.title}</strong></p>
+              <p>{emptyState.detail}</p>
+            </div>
+          ) : null}
           {jobsWithReports.map(job => {
             const reportHref = getWorkspaceReportHref(workspaceId, job.report?.id);
             return (

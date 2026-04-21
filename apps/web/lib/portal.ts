@@ -43,6 +43,57 @@ export function getWorkspaceReportHref(workspaceId: string, reportId?: string | 
   return `/portal/workspaces/${workspaceId}/reports/${reportId}` as Route;
 }
 
+export function getWorkspaceReportsEmptyState(query: string): { title: string; detail: string } {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery) {
+    return {
+      title: "No reports matched this filter.",
+      detail: `Try a different title, source, or status search for “${normalizedQuery}”, or open the runs view to inspect jobs that have not produced report output yet.`,
+    };
+  }
+  return {
+    title: "No reports available yet.",
+    detail: "Completed runs with durable report output will appear here. Open the runs view to inspect in-progress jobs, logs, and artifacts while you wait.",
+  };
+}
+
+export function getWorkspaceReportSectionsEmptyState(input: {
+  totalFindings: number;
+}): { title: string; detail: string } {
+  if (input.totalFindings > 0) {
+    return {
+      title: "Normalized sections are not available for this report yet.",
+      detail: "Review the findings below and open the job or artifacts if you need the raw execution evidence before section rendering is available.",
+    };
+  }
+  return {
+    title: "No normalized sections were generated for this report.",
+    detail: "Open the job or artifact history if you need to confirm whether the run produced an intentionally empty report or stopped before section output was written.",
+  };
+}
+
+export function getWorkspaceReportFindingsEmptyState(input: {
+  releaseGateStatus?: string | null;
+  sectionsCount: number;
+}): { title: string; detail: string } {
+  if (input.releaseGateStatus === "pass") {
+    return {
+      title: "No findings were recorded in this report.",
+      detail: "The release gate is currently passing. Review the sections and artifacts if you need the supporting execution evidence for this clean result.",
+    };
+  }
+  if (input.sectionsCount > 0) {
+    return {
+      title: "No findings were extracted from the available report sections.",
+      detail: "Review the normalized sections above and the run artifacts below if you need to understand what the analysis covered or where evidence was captured.",
+    };
+  }
+  return {
+    title: "This report does not contain any findings yet.",
+    detail: "Open the job and artifact history to confirm whether the run finished with no actionable issues or stopped before finding output was generated.",
+  };
+}
+
 export function isWorkspaceScopedReportContext(
   workspaceId: string,
   ...scopedEntities: Array<{ workspaceId: string } | null | undefined>
