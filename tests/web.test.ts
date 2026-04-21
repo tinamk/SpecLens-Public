@@ -490,3 +490,57 @@ test("workspace-scoped code-review context helper rejects mismatched review work
     false,
   );
 });
+
+test("workspace-scoped console context helper accepts overview payloads from the active workspace", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedWorkspaceConsoleContext("ws_demo", {
+      workspace: {
+        id: "ws_demo",
+      },
+      members: [{ workspaceId: "ws_demo" }],
+      sources: [{ workspaceId: "ws_demo" }],
+      installations: [{ workspaceId: "ws_demo" }],
+      jobs: [
+        {
+          job: { workspaceId: "ws_demo" },
+          report: { workspaceId: "ws_demo" },
+        },
+      ],
+    }),
+    true,
+  );
+});
+
+test("workspace-scoped console context helper rejects mismatched overview payloads", async () => {
+  const module = await import("../apps/web/lib/portal");
+  assert.equal(
+    module.isWorkspaceScopedWorkspaceConsoleContext("ws_demo", {
+      workspace: {
+        id: "ws_other",
+      },
+      members: [{ workspaceId: "ws_demo" }],
+      sources: [{ workspaceId: "ws_demo" }],
+      installations: [{ workspaceId: "ws_demo" }],
+      jobs: [],
+    }),
+    false,
+  );
+  assert.equal(
+    module.isWorkspaceScopedWorkspaceConsoleContext("ws_demo", {
+      workspace: {
+        id: "ws_demo",
+      },
+      members: [{ workspaceId: "ws_demo" }],
+      sources: [{ workspaceId: "ws_demo" }],
+      installations: [{ workspaceId: "ws_other" }],
+      jobs: [
+        {
+          job: { workspaceId: "ws_demo" },
+          report: { workspaceId: "ws_other" },
+        },
+      ],
+    }),
+    false,
+  );
+});

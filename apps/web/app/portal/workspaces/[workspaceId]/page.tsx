@@ -10,6 +10,7 @@ import {
   formatSourceType,
   getEntitlementTagClass,
   getWorkspacePageData,
+  isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../lib/portal";
 
 export default async function WorkspaceOverviewPage({
@@ -22,6 +23,9 @@ export default async function WorkspaceOverviewPage({
 
   try {
     const { workspaceConsole, tasks } = await getWorkspacePageData(workspaceId);
+    if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)) {
+      throw new ApiResponseError(404, `Workspace overview payload does not belong to workspace ${workspaceId}.`);
+    }
     const completedJobs = workspaceConsole.jobs.filter(job => job.job.status === "succeeded").length;
 
     return (

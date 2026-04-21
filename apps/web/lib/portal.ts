@@ -229,6 +229,27 @@ export function isWorkspaceScopedCodeReviewContext(
   return workspaceSources.some(source => source.id === review.source.id);
 }
 
+export function isWorkspaceScopedWorkspaceConsoleContext(
+  workspaceId: string,
+  workspaceConsole: {
+    workspace: { id: string };
+    members: Array<{ workspaceId: string }>;
+    sources: Array<{ workspaceId: string }>;
+    installations: Array<{ workspaceId: string }>;
+    jobs: Array<{ job: { workspaceId: string }; report?: { workspaceId: string } | null }>;
+  },
+): boolean {
+  if (workspaceConsole.workspace.id !== workspaceId) {
+    return false;
+  }
+  return [
+    ...workspaceConsole.members,
+    ...workspaceConsole.sources,
+    ...workspaceConsole.installations,
+    ...workspaceConsole.jobs.flatMap(envelope => [envelope.job, envelope.report].filter(Boolean) as Array<{ workspaceId: string }>),
+  ].every(entity => entity.workspaceId === workspaceId);
+}
+
 export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
   const items: PortalNavItem[] = [
     {
