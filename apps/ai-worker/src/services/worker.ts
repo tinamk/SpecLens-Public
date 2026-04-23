@@ -70,6 +70,7 @@ import {
   standardizedAgentBlockerSchema,
   standardizedAgentHandoffSchema,
   type AnalysisExecutionStep,
+  type ArtifactReference,
   type Learnable,
   type AiToolCapability,
   type AnalysisLogEvent,
@@ -518,6 +519,89 @@ function buildExecutionStep(step: Partial<AnalysisExecutionStep> & Pick<Analysis
     finishedAt: null,
     durationMs: null,
     ...step,
+  });
+}
+
+async function uploadAgentFailureDiagnostics(options: {
+  jobId: string;
+  tempDir: string;
+  status: "failed" | "cancelled";
+  failureReason: string;
+  logs: AnalysisLogEvent[];
+}): Promise<ArtifactReference[]> {
+  const diagnosticPath = path.join(options.tempDir, "agent-failure.json");
+  const payload = {
+    schemaVersion: "speclens.agent-failure.v1",
+    jobId: options.jobId,
+    status: options.status,
+    failureReason: options.failureReason,
+    generatedAt: new Date().toISOString(),
+    executionSteps: collectAnalysisExecutionSteps(options.logs),
+    logs: options.logs.map(log => ({
+      id: log.id,
+      level: log.level,
+      scope: log.scope,
+      message: log.message,
+      visibility: log.visibility,
+      requestId: log.requestId ?? null,
+      createdAt: log.createdAt,
+    })),
+  };
+  fs.writeFileSync(diagnosticPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return [
+    await putObjectFromFile(
+      storageConfig(),
+      `jobs/${options.jobId}/agent-failure.json`,
+      diagnosticPath,
+      "application/json",
+      {
+        kind: "runtime-log",
+        jobId: options.jobId,
+        reportId: null,
+      },
+    ),
+  ];
+}
+
+async function finalizeAgentJobFailure(options: {
+  jobId: string;
+  tempDir: string;
+  status?: "failed" | "cancelled";
+  failureReason: string;
+  logs: AnalysisLogEvent[];
+}): Promise<JobEnvelope> {
+  const status = options.status ?? "failed";
+  let artifacts: ArtifactReference[] = [];
+  try {
+    await appendLog(
+      options.jobId,
+      options.logs,
+      "artifact",
+      `Persisting agent ${status} diagnostics for post-run review.`,
+      status === "failed" ? "error" : "warn",
+    );
+    artifacts = await uploadAgentFailureDiagnostics({
+      jobId: options.jobId,
+      tempDir: options.tempDir,
+      status,
+      failureReason: options.failureReason,
+      logs: options.logs,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to persist agent diagnostics.";
+    await appendLog(
+      options.jobId,
+      options.logs,
+      "artifact",
+      `Failed to persist agent diagnostics: ${message}`,
+      "warn",
+    );
+  }
+  return await finalizeAnalysisJobFailure(options.jobId, {
+    status,
+    failureReason: options.failureReason,
+    logs: options.logs,
+    ...(artifacts.length > 0 ? { artifacts } : {}),
   });
 }
 
@@ -5099,7 +5183,7 @@ async function executeRole(options: {
     const nativeStepId = `${roleStepId}:native`;
     await appendExecutionStepLog(options.jobId, options.logs, {
       id: nativeStepId,
-      order: 1000 + options.role.skills.length,
+      order: roleOrder + 1,
       title: `${options.role.name} native executor`,
       stepType: "executor",
       agentId: options.agentId,
@@ -5386,7 +5470,7 @@ async function executeRole(options: {
     const detail = sanitizeCodexDiagnosticText(run.stderr) || sanitizeCodexDiagnosticText(run.stdout);
     await appendExecutionStepLog(options.jobId, options.logs, {
       id: roleStepId,
-      order: 100 + options.role.skills.length,
+      order: roleOrder,
       title: options.role.name,
       stepType: "role",
       agentId: options.agentId,
@@ -5572,14 +5656,13 @@ async function runAgentJob(
   const tempDir = path.join(config.tempRoot, `${safeSegment(jobId)}-${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
 
-  const agentId = execution.job.agentId;
-  if (!agentId) {
-    throw new Error("Agent job is missing agentId.");
-  }
-
   await appendLog(jobId, logs, "agent", `Agent ${config.workerId} claimed job ${jobId}.`);
 
   try {
+    const agentId = execution.job.agentId;
+    if (!agentId) {
+      throw new Error("Agent job is missing agentId.");
+    }
     const plan = await getAiAgentExecutionPlan(agentId);
     const roleDefinitions = mapRoleDefinitions(plan);
     const estimatedTotalDurationMs = estimatePlanDurationMs(plan.roles, execution.job.runtimeMode);
@@ -5687,10 +5770,14 @@ async function runAgentJob(
 
     for (const [roleIndex, role] of plan.roles.entries()) {
       if (await isCancellationRequested(jobId)) {
-        await appendLog(jobId, logs, "agent", "Job cancelled during agent execution.", "warn");
-        return await finalizeAnalysisJobFailure(jobId, {
+        const failureReason = "Job cancelled during agent execution.";
+        await appendLog(jobId, logs, "agent", failureReason, "warn");
+        return await finalizeAgentJobFailure({
+          jobId,
+          tempDir,
           status: "cancelled",
-          failureReason: "Job cancelled during agent execution.",
+          failureReason,
+          logs,
         });
       }
       const roleStartedAt = Date.now();
@@ -5896,13 +5983,16 @@ async function runAgentJob(
     );
     return await finalizeAnalysisJobSuccess(jobId, {
       ...mirroredEnvelope,
-      logs: [],
+      logs,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent worker failed.";
     await appendLog(jobId, logs, "agent", message, "error");
-    return await finalizeAnalysisJobFailure(jobId, {
+    return await finalizeAgentJobFailure({
+      jobId,
+      tempDir,
       failureReason: message,
+      logs,
     });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -6238,7 +6328,7 @@ async function runRemediationJob(
         changeset,
         finishedAt: new Date().toISOString(),
       },
-      logs: [],
+      logs,
       report: null,
       artifacts,
       timing,

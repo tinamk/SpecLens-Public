@@ -13,6 +13,7 @@ import {
   initializeDatabase,
   listActiveSourceLearnables,
   listAiAgents,
+  resolveObjectStoragePath,
   upsertUserIdentity,
 } from "@speclens/db";
 import aiWorker from "../apps/ai-worker/src/services/worker";
@@ -166,6 +167,37 @@ function writeCodexStub(stubPath: string): void {
     "  };",
     "}",
     "fs.writeFileSync(outputPath, JSON.stringify(payload));",
+  ].join("\n");
+  fs.writeFileSync(stubPath, script, { encoding: "utf8" });
+  fs.chmodSync(stubPath, 0o755);
+}
+
+function writeFailingCodexStub(stubPath: string, failingRoleId: string): void {
+  const script = [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const args = process.argv.slice(2);",
+    "let outputPath = null;",
+    "for (let i = 0; i < args.length - 1; i += 1) {",
+    "  if (args[i] === '--output-last-message') {",
+    "    outputPath = args[i + 1];",
+    "    break;",
+    "  }",
+    "}",
+    "if (!outputPath) {",
+    "  console.error('Missing --output-last-message');",
+    "  process.exit(2);",
+    "}",
+    "const roleId = /role-(.+)\\.json$/.exec(outputPath)?.[1] ?? 'unknown';",
+    `if (roleId === ${JSON.stringify(failingRoleId)}) {`,
+    "  console.error(`Intentional role failure for ${roleId}`);",
+    "  process.exit(17);",
+    "}",
+    "fs.writeFileSync(outputPath, JSON.stringify({",
+    "  summary: `Fallback summary for ${roleId}`,",
+    "  sections: [{ title: `Fallback section ${roleId}`, status: 'ready', summary: 'ok', data: { roleId } }],",
+    "  findings: [],",
+    "}));",
   ].join("\n");
   fs.writeFileSync(stubPath, script, { encoding: "utf8" });
   fs.chmodSync(stubPath, 0o755);
@@ -437,6 +469,101 @@ test("ai-worker keeps smoke-agent handoff synthesis deterministic without hosted
       result.report?.sections.some(section => section.title === "Browser QA execution"),
       false,
       "Smoke-agent runs should not execute hosted browser follow-up.",
+    );
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test("ai-worker persists execution diagnostics when a role fails", async () => {
+  const tempRoot = createHomeTempDirSync("speclens-ai-worker-failure-");
+  const databaseUrl = await preparePrismaTestDatabase(createTestDatabaseName("aiworkerfailure"));
+  const stubPath = path.join(tempRoot, "codex-failing-stub.js");
+  writeFailingCodexStub(stubPath, "runtime-scout");
+
+  const originalEnv = { ...process.env };
+  process.env.DATABASE_URL = databaseUrl;
+  Object.assign(process.env, { NODE_ENV: "test" });
+  ensureTestAuthSecrets();
+  process.env.OBJECT_STORAGE_PROVIDER = "local";
+  process.env.APP_STATE_PATH = path.join(tempRoot, "state.json");
+  process.env.CODEX_BIN = stubPath;
+  process.env.AI_WORKER_TEMP_ROOT = path.join(tempRoot, "worker");
+  process.env.AI_WORKER_CODEX_TIMEOUT_MS = "10000";
+
+  try {
+    await initializeDatabase();
+    const user = await upsertUserIdentity({
+      provider: "local-dev",
+      subject: "ai-worker-failure-test",
+      email: "ai-worker-failure-test@speclens.dev",
+      displayName: "AI Worker Failure Test",
+    });
+    const workspace = await createWorkspaceForUser(user, {
+      name: "AI Worker Failure Workspace",
+    });
+    const source = await createSourceForUserForTests(workspace.id, user.id, {
+      type: "git-public",
+      displayName: "Fixture Repo",
+      location: browserFixtureRepoUrl,
+    });
+    const runtimeAgent = (await listAiAgents()).find(agent => agent.id === "agent-universal-standard");
+    const runtimeScoutRole = runtimeAgent?.roles.find(role => role.id === "runtime-scout");
+    assert.ok(runtimeScoutRole, "Expected the universal audit standard agent to include the runtime-scout role.");
+    const failureProbeAgent = await createAiAgent({
+      name: "Failure diagnostics runtime-scout probe",
+      description: "Minimal agent for failed role diagnostics coverage.",
+      roleIds: [runtimeScoutRole?.id ?? "runtime-scout"],
+    });
+    const failureJob = await createAgentJobForUser(workspace.id, user.id, failureProbeAgent.id, {
+      sourceId: source.id,
+    });
+
+    const result = await aiWorker.runAgentJobForTest(failureJob.job.id);
+    assert.equal(result.job.status, "failed");
+    assert.match(result.job.failureReason ?? "", /Runtime scout failed: Intentional role failure for runtime-scout/);
+
+    const envelope = await getJobEnvelopeForUser(failureJob.job.id, user.id, { logVisibility: "all" });
+    assert.equal(
+      envelope.executionSteps.some(step => step.id === "stage:materialize-source" && step.status === "succeeded"),
+      true,
+      "Expected materialization telemetry to remain on failed jobs.",
+    );
+    assert.equal(
+      envelope.executionSteps.some(step => step.id === "role:runtime-scout" && step.status === "failed"),
+      true,
+      "Expected failed role telemetry to remain on failed jobs.",
+    );
+    const diagnosticArtifact = envelope.artifacts.find(artifact => artifact.key.endsWith("agent-failure.json"));
+    assert.ok(diagnosticArtifact, "Expected failed agent jobs to persist a diagnostic artifact.");
+    assert.equal(diagnosticArtifact?.kind, "runtime-log");
+    const diagnosticPath = resolveObjectStoragePath({
+      objectStorageProvider: "local",
+      objectStorageBucket: null,
+      objectStorageEndpoint: null,
+      objectStoragePublicEndpoint: null,
+      objectStorageRegion: null,
+      objectStorageForcePathStyle: false,
+    }, diagnosticArtifact?.key ?? "");
+    const diagnosticPayload = JSON.parse(fs.readFileSync(diagnosticPath, "utf8")) as {
+      schemaVersion?: string;
+      jobId?: string;
+      status?: string;
+      failureReason?: string;
+      executionSteps?: Array<{ id?: string; status?: string }>;
+      logs?: Array<{ scope?: string; message?: string }>;
+    };
+    assert.equal(diagnosticPayload.schemaVersion, "speclens.agent-failure.v1");
+    assert.equal(diagnosticPayload.jobId, failureJob.job.id);
+    assert.equal(diagnosticPayload.status, "failed");
+    assert.match(diagnosticPayload.failureReason ?? "", /Intentional role failure for runtime-scout/);
+    assert.equal(
+      diagnosticPayload.executionSteps?.some(step => step.id === "role:runtime-scout" && step.status === "failed"),
+      true,
+    );
+    assert.equal(
+      diagnosticPayload.logs?.some(log => log.scope === "agent" && (log.message ?? "").includes("Runtime scout failed")),
+      true,
     );
   } finally {
     process.env = originalEnv;

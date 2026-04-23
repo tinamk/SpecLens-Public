@@ -76,6 +76,8 @@ For universal audit bundles, the persisted report also includes:
 - an artifact audit against expected report and browser outputs
 - a release-gate decision with confidence and blocking findings
 
+If an AI-agent job fails or is cancelled before a report is available, the worker still replays its duplicate-safe in-memory log timeline into finalization and uploads `jobs/{jobId}/agent-failure.json` as a `runtime-log` artifact. The diagnostic artifact contains the status, failure reason, execution steps, and logs needed to review the interrupted role chain.
+
 ## Paired Sources
 
 A job still has one primary `sourceId`, but it can also persist one optional companion source.
