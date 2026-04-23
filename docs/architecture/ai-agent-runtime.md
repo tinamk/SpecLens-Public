@@ -85,6 +85,7 @@ Each role prompt combines:
 - granted tool capabilities
 - selected prior role outputs
 - active source learnables
+- the role output contract, including the expected section title and required structured data keys
 - repository working directory context
 
 When a paired source run is used, the materialized workspace exposes:
@@ -98,7 +99,10 @@ When a paired source run is used, the materialized workspace exposes:
 - default posture is read-only repo analysis unless granted capabilities require more
 - prompts are role-scoped instead of one giant multi-purpose prompt
 - outputs are normalized before being persisted
+- seeded roles have canonical output contracts; reports include a `Role contract audit` section and quality role scores reflect contract readiness
 - canonical runtime/auth/playwright handoffs are treated as executable contracts, not just summaries
+- Playwright preflight detects both direct commands and repo-local wrapper scripts, records validation logs under the artifact pipeline, and clears stale repo-native report directories before copying fresh artifacts
+- artifact analysis only treats required artifact expectations as release-affecting gaps; optional Playwright outputs remain advisory
 - reports carry structured audit metadata including `auditBundleId`, categorized findings, execution coverage, remediation packs, artifact expectations, and a release-gate decision
 - execution artifacts are written into the hosted artifact pipeline so the portal can audit what the worker actually observed
 - logs are written continuously for live job visibility

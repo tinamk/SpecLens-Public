@@ -7,6 +7,8 @@ Issue docs live here while work is active, closing out, or retained as implement
 | Issue | Status | Summary |
 |---|---|---|
 | `behavioral-parity-migration.md` | Implemented | Tracks the Iteration 5 migration of archived analysis breadth into the hosted TypeScript product |
+| `ai-agent-role-contract-hardening.md` | Implemented | Makes seeded AI roles deterministic with prompt contracts, contract audit data, and contract-aware quality scoring |
+| `ai-playwright-execution-hardening.md` | Implemented | Hardens Playwright role detection, run-scoped artifact capture, and optional artifact handling for hosted AI runs |
 | `job-execution-artifact-hardening.md` | Implemented | Hardens AI-worker failure/cancellation finalization with durable execution logs and diagnostics artifacts |
 | `hosted-saas-platform.md` | Done | Tracks the Iteration 4 hosted SaaS scaffold, runner plane, pricing/legal pages, and dual-license integration |
 | `hosted-web-route-map-ux-audit.md` | Done | Maps the full `apps/web` route surface, diagnoses current IA fragmentation, and proposes a cleaner owner-first route structure |

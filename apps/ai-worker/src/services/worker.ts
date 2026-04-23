@@ -200,8 +200,36 @@ type NativeExecutionResult = {
   logs: AnalysisLogEvent[];
 };
 
+type RoleOutputContract = {
+  expectedSectionTitle: string;
+  acceptedSectionTitles?: string[];
+  purpose: string;
+  requiredDataKeys: string[];
+  recommendedDataKeys: string[];
+};
+
+type RoleContractEvaluation = {
+  roleId: string;
+  title: string;
+  expectedSectionTitle: string;
+  status: "ready" | "planned" | "skipped" | "missing";
+  sectionTitles: string[];
+  missingSection: boolean;
+  missingDataKeys: string[];
+  recommendedDataKeys: string[];
+  summary: string;
+};
+
 const MAX_BROWSER_QA_PAGES = 8;
 const MAX_BROWSER_QA_INTERACTIONS = 4;
+const PLAYWRIGHT_CONFIG_FILE_NAMES = [
+  "playwright.config.ts",
+  "playwright.config.mts",
+  "playwright.config.js",
+  "playwright.config.mjs",
+  "playwright.config.cjs",
+];
+const KNOWN_PLAYWRIGHT_ARTIFACT_NAMES = ["playwright-report", "test-results"];
 let embeddedWorkerStarted = false;
 
 const findingCategoryByRoleId: Record<string, z.infer<typeof findingCategorySchema>> = {
@@ -230,6 +258,163 @@ const findingCategoryByRoleId: Record<string, z.infer<typeof findingCategorySche
   "release-gate-scorer": "ops",
   "standardized-json-output": "ops",
   "smoke-summary": "ops",
+};
+
+const roleOutputContracts: Record<string, RoleOutputContract> = {
+  "source-topology-scout": {
+    expectedSectionTitle: "Source topology",
+    acceptedSectionTitles: ["Repository inventory"],
+    purpose: "Classify repository shape, product surfaces, package boundaries, and evidence-backed ownership hints.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["apps", "packages", "languages", "manifests", "surfaces", "services"],
+  },
+  "runtime-scout": {
+    expectedSectionTitle: "Runtime scout",
+    purpose: "Derive the exact install, build, start, verification, target, port, and environment contract.",
+    requiredDataKeys: ["packageManagers", "workingDirectories", "targets"],
+    recommendedDataKeys: ["installCommands", "buildCommands", "startCommands", "verificationCommands", "envFiles", "ports", "baseUrls", "serviceDependencies"],
+  },
+  "auth-cartographer": {
+    expectedSectionTitle: "Auth map",
+    purpose: "Map frontend and API auth strategies, routes, protected surfaces, bootstrap steps, and required secret references.",
+    requiredDataKeys: ["frontend", "api"],
+    recommendedDataKeys: ["frontend.loginRoutes", "frontend.protectedRoutes", "frontend.secretRefs", "api.protectedRoutes", "api.secretRefs", "bootstrapSteps"],
+  },
+  "live-surface-resolver": {
+    expectedSectionTitle: "Live surface resolution",
+    purpose: "Resolve only trusted live or companion URLs and explain blockers when no live surface is evidence-backed.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["trustedUrls", "liveSurfaces", "blockedUrls", "blockers", "evidence"],
+  },
+  "license-governor": {
+    expectedSectionTitle: "License review",
+    acceptedSectionTitles: ["License policy"],
+    purpose: "Review license files, package notices, legal copy, and dual-license consistency.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["licenses", "notices", "policyFindings", "legalCopyPaths"],
+  },
+  "dependency-risk-reviewer": {
+    expectedSectionTitle: "Dependency risk review",
+    purpose: "Assess dependency posture, lockfiles, install drift, risky packages, and supply-chain gaps.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["packageManagers", "lockfiles", "riskSignals", "verificationCommands"],
+  },
+  "architecture-reviewer": {
+    expectedSectionTitle: "Architecture review",
+    purpose: "Assess boundaries, ownership, layering, coupling, dead modules, and rule/spec alignment.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["subsystems", "boundaries", "couplingRisks", "adrRefs"],
+  },
+  "code-health-reviewer": {
+    expectedSectionTitle: "Code health review",
+    purpose: "Assess correctness, validation, typing, observability, error handling, and meaningful test gaps.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["correctnessRisks", "validationGaps", "testGaps", "observabilityGaps"],
+  },
+  "component-cartographer": {
+    expectedSectionTitle: "Component inventory",
+    purpose: "Inventory significant UI components, shared primitives, duplication, and ownership drift.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["components", "duplicateNames", "sharedPrimitiveGaps", "ownershipNotes"],
+  },
+  "design-system-auditor": {
+    expectedSectionTitle: "Design system review",
+    purpose: "Assess tokens, spacing, typography, visual patterns, and reusable state coverage.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["tokens", "spacing", "typography", "stateCoverage", "consistencyIssues"],
+  },
+  "copy-consistency-auditor": {
+    expectedSectionTitle: "Copy consistency review",
+    acceptedSectionTitles: ["UI label scan"],
+    purpose: "Assess terminology, CTAs, labels, legal/pricing wording, and missing user-facing text.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["inconsistentTerms", "missingTextSurfaces", "unclearCtas", "legalPricingDrift"],
+  },
+  "accessibility-auditor": {
+    expectedSectionTitle: "Accessibility review",
+    purpose: "Assess landmarks, headings, forms, names, semantics, and structural accessibility evidence.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["landmarks", "headingIssues", "formIssues", "semanticIssues"],
+  },
+  "navigation-qa-planner": {
+    expectedSectionTitle: "Navigation QA plan",
+    purpose: "Map route inventory, auth boundaries, high-risk journeys, browser assertions, and detected surfaces.",
+    requiredDataKeys: ["navigationTargets", "journeys", "assertions"],
+    recommendedDataKeys: ["detectedSurfaces", "artifactExpectations", "coverageGaps"],
+  },
+  "browser-executor": {
+    expectedSectionTitle: "Browser QA execution",
+    purpose: "Prepare and execute direct browser QA targets, interaction heuristics, and required visible artifacts.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["targets", "journeys", "assertions", "artifacts", "failureHeuristics"],
+  },
+  "playwright-operator": {
+    expectedSectionTitle: "Playwright operator plan",
+    purpose: "Resolve repository-native Playwright readiness, commands, auth strategy, targets, and artifacts.",
+    requiredDataKeys: ["readiness", "present", "workingDirectories"],
+    recommendedDataKeys: ["packageManager", "configPaths", "commands", "setupCommands", "baseUrlStrategy", "authStrategy", "testTargets", "artifacts", "coverageGaps"],
+  },
+  "visual-qa-critic": {
+    expectedSectionTitle: "Visual QA review",
+    acceptedSectionTitles: ["Visual inspection"],
+    purpose: "Assess concrete layout, overlap, clipping, hierarchy, density, and readability issues.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["reviewedSurfaces", "overlapRisks", "hierarchyIssues", "readabilityIssues"],
+  },
+  "ux-friction-reviewer": {
+    expectedSectionTitle: "UX friction review",
+    purpose: "Assess empty states, loading states, error states, action clarity, and IA friction.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["journeys", "emptyStateIssues", "loadingStateIssues", "errorStateIssues", "informationArchitectureIssues"],
+  },
+  "cross-surface-consistency-reviewer": {
+    expectedSectionTitle: "Cross-surface consistency",
+    purpose: "Compare repository, docs, legal, pricing, auth, admin, and browser surfaces for drift.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["surfacesCompared", "mismatches", "documentationGaps", "evidence"],
+  },
+  "artifact-auditor": {
+    expectedSectionTitle: "Artifact expectations",
+    purpose: "Define expected report, screenshot, trace, storage, route-map, and remediation artifacts.",
+    requiredDataKeys: ["artifactExpectations"],
+    recommendedDataKeys: ["expectedKinds", "requiredArtifacts", "sourcePaths"],
+  },
+  "remediation-planner": {
+    expectedSectionTitle: "Remediation planning",
+    purpose: "Group findings into ordered, implementation-ready packs with actions and validation expectations.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["remediationPacks", "actions", "validationCommands", "dependencies"],
+  },
+  "e2e-remediation-planner": {
+    expectedSectionTitle: "Remediation planning",
+    purpose: "Synthesize stable remediation packs for local E2E coverage.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["remediationPacks", "actions", "validationCommands", "dependencies"],
+  },
+  "fix-readiness-emitter": {
+    expectedSectionTitle: "Fix readiness handoff",
+    purpose: "Prepare downstream implementation handoff entries, target files, tests, and rollback notes.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["fixHandoff", "targetFiles", "validationCommands", "rollbackNotes"],
+  },
+  "release-gate-scorer": {
+    expectedSectionTitle: "Release gate recommendation",
+    purpose: "Emit pass, warn, or fail recommendation with confidence, blockers, and rationale.",
+    requiredDataKeys: ["releaseGateDecision"],
+    recommendedDataKeys: ["blockingFindingIds", "confidence", "rationale"],
+  },
+  "standardized-json-output": {
+    expectedSectionTitle: "Standardized JSON handoff",
+    purpose: "Emit the canonical machine-readable universal audit handoff.",
+    requiredDataKeys: ["standardizedOutput"],
+    recommendedDataKeys: ["standardizedOutput.runtime", "standardizedOutput.auth", "standardizedOutput.playwright", "standardizedOutput.artifactExpectations", "standardizedOutput.remediationPacks", "standardizedOutput.releaseGateDecision"],
+  },
+  "smoke-summary": {
+    expectedSectionTitle: "Smoke analysis",
+    purpose: "Produce a concise, high-signal intake summary and the most obvious release risk.",
+    requiredDataKeys: [],
+    recommendedDataKeys: ["stackHints", "topRisks", "nextSteps"],
+  },
 };
 
 function truncateLogMessage(value: string, maxLength = 500): string {
@@ -319,6 +504,7 @@ function shouldSuppressCodexLogLine(line: string): boolean {
     "Constraints:",
     "Granted tools:",
     "Completed role handoff context (JSON):",
+    "Role output contract:",
     "Output shape reminder:",
     "--------",
     "[]",
@@ -519,6 +705,159 @@ function buildExecutionStep(step: Partial<AnalysisExecutionStep> & Pick<Analysis
     finishedAt: null,
     durationMs: null,
     ...step,
+  });
+}
+
+function getRoleOutputContract(roleId: string): RoleOutputContract | null {
+  return roleOutputContracts[roleId] ?? null;
+}
+
+function normalizeContractLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function findRoleContractSection(
+  sections: RoleOutput["sections"] | AnalysisReport["sections"],
+  contract: RoleOutputContract,
+): (RoleOutput["sections"][number] | AnalysisReport["sections"][number]) | null {
+  const acceptedTitles = [contract.expectedSectionTitle, ...(contract.acceptedSectionTitles ?? [])]
+    .map(normalizeContractLabel);
+  return sections.find(section => acceptedTitles.includes(normalizeContractLabel(section.title))) ?? null;
+}
+
+function getNestedDataValue(data: Record<string, unknown>, keyPath: string): unknown {
+  return keyPath.split(".").reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+    return (current as Record<string, unknown>)[segment];
+  }, data);
+}
+
+function hasMeaningfulContractValue(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value === "boolean") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>).length > 0;
+  }
+  return false;
+}
+
+function evaluateRoleContract(
+  role: Pick<RoleDefinition, "id" | "title">,
+  sections: AnalysisReport["sections"],
+): RoleContractEvaluation {
+  const contract = getRoleOutputContract(role.id) ?? {
+    expectedSectionTitle: role.title,
+    purpose: role.title,
+    requiredDataKeys: [],
+    recommendedDataKeys: [],
+  };
+  const roleSections = sections.filter(section => section.roleId === role.id);
+  const contractSection = findRoleContractSection(roleSections, contract) as AnalysisReport["sections"][number] | null;
+  const missingDataKeys = contractSection
+    ? contract.requiredDataKeys.filter(key => !hasMeaningfulContractValue(getNestedDataValue(contractSection.data, key)))
+    : contract.requiredDataKeys;
+  const status: RoleContractEvaluation["status"] = contractSection
+    ? contractSection.status === "ready" && missingDataKeys.length === 0
+      ? "ready"
+      : contractSection.status === "skipped"
+        ? "skipped"
+        : "planned"
+    : roleSections.length > 0
+      ? roleSections.some(section => section.status === "skipped")
+        ? "skipped"
+        : "planned"
+      : "missing";
+  const summary = contractSection
+    ? missingDataKeys.length > 0
+      ? `${contract.expectedSectionTitle} was present but missed required data: ${missingDataKeys.join(", ")}.`
+      : `${contract.expectedSectionTitle} satisfied the role output contract.`
+    : roleSections.length > 0
+      ? `${role.title} produced sections, but none matched ${contract.expectedSectionTitle}.`
+      : `${role.title} did not produce a role-backed report section.`;
+  return {
+    roleId: role.id,
+    title: role.title,
+    expectedSectionTitle: contract.expectedSectionTitle,
+    status,
+    sectionTitles: roleSections.map(section => section.title),
+    missingSection: !contractSection,
+    missingDataKeys,
+    recommendedDataKeys: contract.recommendedDataKeys,
+    summary,
+  };
+}
+
+function evaluateRoleContracts(
+  roles: RoleDefinition[],
+  sections: AnalysisReport["sections"],
+): RoleContractEvaluation[] {
+  return roles.map(role => evaluateRoleContract(role, sections));
+}
+
+function formatRoleOutputContractForPrompt(roleId: string): string {
+  const contract = getRoleOutputContract(roleId);
+  if (!contract) {
+    return [
+      "- Emit at least one ready section that clearly matches this role's purpose.",
+      "- Put structured details in each section's data object.",
+      "- Findings must include concrete evidence when reporting a defect or blocker.",
+    ].join("\n");
+  }
+
+  return [
+    `- Required section title: ${contract.expectedSectionTitle}`,
+    contract.acceptedSectionTitles?.length
+      ? `- Accepted equivalent section titles: ${contract.acceptedSectionTitles.join(", ")}`
+      : null,
+    `- Contract purpose: ${contract.purpose}`,
+    contract.requiredDataKeys.length > 0
+      ? `- Required data keys in that section: ${contract.requiredDataKeys.join(", ")}`
+      : "- Required data keys in that section: none beyond evidence-backed structured data",
+    contract.recommendedDataKeys.length > 0
+      ? `- Recommended data keys: ${contract.recommendedDataKeys.join(", ")}`
+      : null,
+    "- If evidence is insufficient, still emit the required section with status \"planned\" and explain the blocker in summary/data.",
+    "- Put defects, blockers, or unresolved risks in findings with severity, message, suggestion, and evidence.",
+  ].filter(Boolean).join("\n");
+}
+
+function applyRoleOutputContract(roleId: string, output: RoleOutput): RoleOutput {
+  const contract = getRoleOutputContract(roleId);
+  if (!contract || output.sections.length !== 1 || findRoleContractSection(output.sections, contract)) {
+    return output;
+  }
+  const [section] = output.sections;
+  if (!section) {
+    return output;
+  }
+  return roleOutputSchema.parse({
+    ...output,
+    sections: [{
+      ...section,
+      title: contract.expectedSectionTitle,
+      data: {
+        ...section.data,
+        roleContract: {
+          canonicalizedFromTitle: section.title,
+          expectedSectionTitle: contract.expectedSectionTitle,
+        },
+      },
+    }],
   });
 }
 
@@ -1793,6 +2132,7 @@ function buildRolePrompt(options: {
   const grantedTools = collectToolCapabilities(options.skills);
   const priorOutputsBlock = formatPriorRoleOutputsForPrompt(options.priorOutputs);
   const learnablesBlock = formatLearnablesForPrompt(options.learnables);
+  const roleOutputContractBlock = formatRoleOutputContractForPrompt(options.roleId);
 
   return [
     `You are the \"${options.roleName}\" role (id: ${options.roleId}) in the ${options.agentName} agent run.`,
@@ -1819,6 +2159,8 @@ function buildRolePrompt(options: {
       : null,
     "Active source learnables (JSON):",
     learnablesBlock,
+    "Role output contract:",
+    roleOutputContractBlock,
     "Task:",
     options.rolePrompt,
     "Constraints:",
@@ -2294,7 +2636,10 @@ function buildArtifactAudit(
 ) {
   const expectedKinds = [...new Set((handoff?.artifactExpectations ?? []).map(expectation => expectation.kind))];
   const presentKinds = [...new Set(artifacts.map(artifact => artifact.kind ?? "artifact"))];
-  const missingKinds = expectedKinds.filter(kind => !presentKinds.includes(kind));
+  const requiredKinds = [...new Set((handoff?.artifactExpectations ?? [])
+    .filter(expectation => expectation.required !== false)
+    .map(expectation => expectation.kind))];
+  const missingKinds = requiredKinds.filter(kind => !presentKinds.includes(kind));
   const invalidArtifacts = artifacts
     .filter(artifact => !artifact.key || artifact.sizeBytes < 0)
     .map(artifact => artifact.key);
@@ -2481,9 +2826,10 @@ function buildQualityScorecard(
     report.sections.some(section => section.title === "Standardized JSON handoff"),
     report.sections.some(section => section.title === "Artifact audit"),
     report.sections.some(section => section.title === "Release gate"),
+    report.sections.some(section => section.title === "Role contract audit"),
     report.summary.releaseGateDecision !== null,
   ].filter(Boolean).length;
-  const transparencyScore = clampPercent((transparencySignals / 4) * 100);
+  const transparencyScore = clampPercent((transparencySignals / 5) * 100);
   const capabilityPenalty = capabilityGaps.reduce((total, gap) => total + (gap.severity === "high" ? 35 : gap.severity === "medium" ? 18 : 8), 0);
   const capabilityScore = clampPercent(100 - capabilityPenalty);
 
@@ -2515,7 +2861,7 @@ function buildQualityScorecard(
       id: "transparency" as const,
       label: "Transparency",
       score: transparencyScore,
-      rationale: `${transparencySignals} of 4 transparency signals were present in the report.`,
+      rationale: `${transparencySignals} of 5 transparency signals were present in the report.`,
       evidence: sections.slice(0, 6).map(section => section.title),
     },
     {
@@ -2532,15 +2878,16 @@ function buildQualityScorecard(
   const roleScores = report.roles.map(role => {
     const roleSections = sections.filter(section => section.roleId === role.id);
     const findingCount = findings.filter(finding => finding.roleId === role.id).length;
-    const hasReady = roleSections.some(section => section.status === "ready");
-    const hasPlanned = roleSections.some(section => section.status === "planned");
-    const hasSkipped = roleSections.some(section => section.status === "skipped");
-    const status = hasReady ? "ready" : hasPlanned ? "planned" : hasSkipped ? "skipped" : "missing";
+    const contractEvaluation = evaluateRoleContract(role, sections);
+    const status = contractEvaluation.status;
+    const highSeverityCount = findings.filter(finding => finding.roleId === role.id && finding.severity === "high").length;
     const score = clampPercent(
       status === "ready"
-        ? 100 - (findings.filter(finding => finding.roleId === role.id && finding.severity === "high").length * 25)
+        ? 100 - (highSeverityCount * 25)
         : status === "planned"
-          ? 55
+          ? roleSections.length > 0
+            ? 65
+            : 55
           : status === "skipped"
             ? 35
             : 0,
@@ -2551,9 +2898,7 @@ function buildQualityScorecard(
       status,
       score,
       findingCount,
-      rationale: roleSections.length > 0
-        ? `${roleSections.length} section(s) and ${findingCount} finding(s) were produced.`
-        : "No role-backed report section was produced.",
+      rationale: `${contractEvaluation.summary} ${roleSections.length} section(s) and ${findingCount} finding(s) were produced.`,
     };
   });
 
@@ -2579,6 +2924,10 @@ function buildQualityScorecard(
   const overallScore = clampPercent(dimensions.reduce((total, item) => total + item.score, 0) / dimensions.length);
   const warnings = [
     ...(artifactAnalysis.missingKinds.length > 0 ? [`Missing artifact kinds: ${artifactAnalysis.missingKinds.join(", ")}.`] : []),
+    ...evaluateRoleContracts(report.roles, sections)
+      .filter(contract => contract.status !== "ready")
+      .slice(0, 8)
+      .map(contract => `Role contract gap: ${contract.title} - ${contract.summary}`),
     ...capabilityGaps.slice(0, 5).map(gap => gap.title),
   ];
 
@@ -2714,9 +3063,18 @@ function enrichReportForUniversalAudit(report: AnalysisReport, agentId: string):
         { fixHandoff },
       )
     : baseSections;
+  const roleContractEvaluations = evaluateRoleContracts(report.roles, sectionsWithFixHandoff);
+  const readyRoleContracts = roleContractEvaluations.filter(contract => contract.status === "ready").length;
+  const sectionsWithRoleContractAudit = upsertSummarySection(
+    sectionsWithFixHandoff,
+    "quality-review",
+    "Role contract audit",
+    `${readyRoleContracts} of ${roleContractEvaluations.length} role output contract(s) are ready.`,
+    { roleContracts: roleContractEvaluations },
+  );
   const reportWithSections = {
     ...reportWithCoverage,
-    sections: sectionsWithFixHandoff,
+    sections: sectionsWithRoleContractAudit,
     summary: {
       ...reportWithCoverage.summary,
       auditBundleId,
@@ -2730,7 +3088,7 @@ function enrichReportForUniversalAudit(report: AnalysisReport, agentId: string):
   };
   const qualityScorecard = buildQualityScorecard(reportWithSections, artifactAnalysis, capabilityGaps);
   const sections = upsertSummarySection(
-    sectionsWithFixHandoff,
+    sectionsWithRoleContractAudit,
     "quality-review",
     "Quality scorecard",
     `Overall audit quality score: ${qualityScorecard.overallScore}/100.`,
@@ -2984,6 +3342,59 @@ function walkRepoForFileNames(rootDir: string, fileNames: Set<string>, maxDepth 
   return matches;
 }
 
+function findNearestPlaywrightConfig(workingDirectory: string, repoPath: string, configPaths: string[]): string | null {
+  let currentDir = workingDirectory;
+  for (;;) {
+    const configPath = configPaths.find(candidate => path.dirname(candidate) === currentDir);
+    if (configPath) {
+      return path.relative(workingDirectory, configPath) || path.basename(configPath);
+    }
+    if (currentDir === repoPath) {
+      break;
+    }
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir || !parentDir.startsWith(repoPath)) {
+      break;
+    }
+    currentDir = parentDir;
+  }
+  return null;
+}
+
+function tokenizeShellCommand(command: string): string[] {
+  return command
+    .split(/\s+/)
+    .map(token => token.trim())
+    .map(token => token.replace(/^[("'`]+|[)"'`,;]+$/g, ""))
+    .filter(Boolean)
+    .filter(token => token !== "&&" && token !== "||" && token !== "|" && token !== ";");
+}
+
+function scriptContainsPlaywrightTest(
+  script: string,
+  workingDirectory: string,
+  repoPath: string,
+): boolean {
+  if (/\bplaywright\s+test\b/.test(script)) {
+    return true;
+  }
+
+  const candidatePaths = tokenizeShellCommand(script)
+    .filter(token => /\.(?:[cm]?js|[cm]?ts|tsx)$/i.test(token))
+    .map(token => path.resolve(workingDirectory, token))
+    .filter(candidatePath => candidatePath.startsWith(repoPath) && fs.existsSync(candidatePath))
+    .filter(candidatePath => fs.statSync(candidatePath).isFile());
+
+  return candidatePaths.some(candidatePath => {
+    try {
+      const source = fs.readFileSync(candidatePath, "utf8").slice(0, 24_000);
+      return /\bplaywright\b/.test(source) && /\btest\b/.test(source);
+    } catch {
+      return false;
+    }
+  });
+}
+
 function detectPackageManager(directory: string, repoPath: string): PackageManager {
   let currentDir = directory;
   for (;;) {
@@ -3057,15 +3468,8 @@ function scriptPreferenceScore(scriptName: string): number {
 }
 
 function detectPlaywrightPreflight(repoPath: string): PlaywrightPreflightPlan | null {
-  const playwrightConfigCandidates = new Set([
-    "playwright.config.ts",
-    "playwright.config.mts",
-    "playwright.config.js",
-    "playwright.config.mjs",
-    "playwright.config.cjs",
-  ]);
   const packageJsonPaths = walkRepoForFileNames(repoPath, new Set(["package.json"]), 4);
-  const configPaths = walkRepoForFileNames(repoPath, playwrightConfigCandidates, 4);
+  const configPaths = walkRepoForFileNames(repoPath, new Set(PLAYWRIGHT_CONFIG_FILE_NAMES), 4);
   const plans: Array<PlaywrightPreflightPlan & { score: number }> = [];
 
   for (const packageJsonPath of packageJsonPaths) {
@@ -3077,7 +3481,7 @@ function detectPlaywrightPreflight(repoPath: string): PlaywrightPreflightPlan | 
       const scripts = manifest.scripts ?? {};
       const packageManager = detectPackageManager(workingDirectory, repoPath);
       for (const [scriptName, script] of Object.entries(scripts)) {
-        if (typeof script !== "string" || !script.includes("playwright test")) {
+        if (typeof script !== "string" || !scriptContainsPlaywrightTest(script, workingDirectory, repoPath)) {
           continue;
         }
         plans.push({
@@ -3086,7 +3490,7 @@ function detectPlaywrightPreflight(repoPath: string): PlaywrightPreflightPlan | 
           workingDirectory,
           source: "package-script",
           packageManager,
-          configPath: null,
+          configPath: findNearestPlaywrightConfig(workingDirectory, repoPath, configPaths),
           score: scriptPreferenceScore(scriptName) - path.relative(repoPath, workingDirectory).split(path.sep).filter(Boolean).length,
         });
       }
@@ -3712,7 +4116,7 @@ async function attemptCredentialLogin(options: {
 
 function copyKnownPlaywrightArtifacts(cwd: string, artifactsDir: string): string[] {
   const copied: string[] = [];
-  for (const candidate of ["playwright-report", "test-results"]) {
+  for (const candidate of KNOWN_PLAYWRIGHT_ARTIFACT_NAMES) {
     const sourcePath = path.join(cwd, candidate);
     if (!fs.existsSync(sourcePath)) {
       continue;
@@ -3723,6 +4127,19 @@ function copyKnownPlaywrightArtifacts(cwd: string, artifactsDir: string): string
     copied.push(destinationPath);
   }
   return copied;
+}
+
+function clearKnownPlaywrightArtifacts(cwd: string): string[] {
+  const removed: string[] = [];
+  for (const candidate of KNOWN_PLAYWRIGHT_ARTIFACT_NAMES) {
+    const targetPath = path.join(cwd, candidate);
+    if (!fs.existsSync(targetPath)) {
+      continue;
+    }
+    fs.rmSync(targetPath, { recursive: true, force: true });
+    removed.push(targetPath);
+  }
+  return removed;
 }
 
 async function executeStandardizedHandoff(options: {
@@ -3863,6 +4280,18 @@ async function executeStandardizedHandoff(options: {
     if (playwrightCommand) {
       const playwrightLogPath = path.join(artifactsDir, "playwright-command.log");
       const playwrightCwd = resolveWorkingDirectory(options.repoPath, playwrightCommand.workingDirectory);
+      const clearedArtifactPaths = clearKnownPlaywrightArtifacts(playwrightCwd)
+        .map(item => relativeArtifactPath(options.repoPath, item))
+        .filter((item): item is string => item !== null);
+      if (clearedArtifactPaths.length > 0) {
+        await appendLog(
+          options.jobId,
+          options.logs,
+          "playwright",
+          `Cleared stale Playwright artifacts before repository-native execution: ${clearedArtifactPaths.join(", ")}.`,
+          "info",
+        );
+      }
       await appendLog(options.jobId, options.logs, "playwright", `Running documented Playwright command "${playwrightCommand.command}".`, "info");
       const run = await runShellCommand({
         command: playwrightCommand.command,
@@ -3892,6 +4321,7 @@ async function executeStandardizedHandoff(options: {
             command: playwrightCommand,
             logPath: relativeArtifactPath(options.tempDir, playwrightLogPath),
             copiedArtifacts,
+            clearedArtifacts: clearedArtifactPaths,
             exitCode: run.exitCode,
             timedOut: run.timedOut,
           },
@@ -3905,6 +4335,7 @@ async function executeStandardizedHandoff(options: {
             command: playwrightCommand,
             logPath: relativeArtifactPath(options.tempDir, playwrightLogPath),
             copiedArtifacts,
+            clearedArtifacts: clearedArtifactPaths,
           },
         });
       }
@@ -4198,6 +4629,7 @@ async function augmentWithPlaywrightPreflight(options: {
   jobId: string;
   logs: AnalysisLogEvent[];
   repoPath: string;
+  tempDir: string;
   output: RoleOutput;
   primarySourceId: string;
   companionSourceId: string | null;
@@ -4222,6 +4654,15 @@ async function augmentWithPlaywrightPreflight(options: {
     };
   }
 
+  const workspace = createCoreWorkspace({
+    rootDir: options.tempDir,
+    name: safeSegment(options.jobId),
+  });
+  const artifactsDir = path.join(workspace.generatedDir, "browser", options.jobId);
+  fs.mkdirSync(artifactsDir, { recursive: true });
+  const preflightLogPath = path.join(artifactsDir, "playwright-preflight.log");
+  const config = loadAiWorkerConfig();
+
   await appendLog(
     options.jobId,
     options.logs,
@@ -4233,17 +4674,31 @@ async function augmentWithPlaywrightPreflight(options: {
   const run = await runShellCommand({
     command: preflightPlan.command,
     cwd: preflightPlan.workingDirectory,
-    timeoutMs: 300_000,
+    timeoutMs: Math.min(config.playwrightCommandTimeoutMs, 300_000),
   });
 
   const combinedOutput = truncateText(
     [run.stdout.trim(), run.stderr.trim()].filter(Boolean).join("\n\n"),
   );
   const relativeWorkingDirectory = path.relative(options.repoPath, preflightPlan.workingDirectory) || ".";
+  const relativeConfigPath = preflightPlan.configPath
+    ? relativeArtifactPath(options.repoPath, path.resolve(preflightPlan.workingDirectory, preflightPlan.configPath))
+    : null;
+  fs.writeFileSync(
+    preflightLogPath,
+    [
+      `command: ${preflightPlan.command}`,
+      `workingDirectory: ${relativeWorkingDirectory}`,
+      relativeConfigPath ? `configPath: ${relativeConfigPath}` : null,
+      "",
+      combinedOutput,
+    ].filter(Boolean).join("\n"),
+    "utf8",
+  );
   const preflightPaths = extractFindingPaths(
     [
       relativeWorkingDirectory,
-      preflightPlan.configPath ? path.join(relativeWorkingDirectory, preflightPlan.configPath) : "",
+      relativeConfigPath ?? "",
     ].filter(Boolean),
   );
   const preflightSourceIds = inferFindingSourceIds({
@@ -4268,10 +4723,11 @@ async function augmentWithPlaywrightPreflight(options: {
             detected: true,
             label: preflightPlan.label,
             command: preflightPlan.command,
-            workingDirectory: preflightPlan.workingDirectory,
+            workingDirectory: relativeWorkingDirectory,
             source: preflightPlan.source,
             packageManager: preflightPlan.packageManager,
-            configPath: preflightPlan.configPath,
+            configPath: relativeConfigPath,
+            logPath: relativeArtifactPath(options.tempDir, preflightLogPath),
             timedOut: true,
             output: combinedOutput,
           },
@@ -4307,10 +4763,11 @@ async function augmentWithPlaywrightPreflight(options: {
             detected: true,
             label: preflightPlan.label,
             command: preflightPlan.command,
-            workingDirectory: preflightPlan.workingDirectory,
+            workingDirectory: relativeWorkingDirectory,
             source: preflightPlan.source,
             packageManager: preflightPlan.packageManager,
-            configPath: preflightPlan.configPath,
+            configPath: relativeConfigPath,
+            logPath: relativeArtifactPath(options.tempDir, preflightLogPath),
             output: combinedOutput,
           },
         },
@@ -4337,10 +4794,11 @@ async function augmentWithPlaywrightPreflight(options: {
           detected: true,
           label: preflightPlan.label,
           command: preflightPlan.command,
-          workingDirectory: preflightPlan.workingDirectory,
+          workingDirectory: relativeWorkingDirectory,
           source: preflightPlan.source,
           packageManager: preflightPlan.packageManager,
-          configPath: preflightPlan.configPath,
+          configPath: relativeConfigPath,
+          logPath: relativeArtifactPath(options.tempDir, preflightLogPath),
           exitCode: run.exitCode,
           output: combinedOutput,
         },
@@ -4776,7 +5234,11 @@ function buildDeterministicStandardizedHandoff(options: {
           ]
         : []),
       ...(preflightPlan
-        ? [{ kind: "playwright-report", required: false, label: "Repository-native Playwright report artifacts when present." }]
+        ? [
+            { kind: "validation-log", required: true, label: "Playwright preflight logs proving the detected repository-native execution path." },
+            { kind: "playwright-report", required: false, label: "Repository-native Playwright report artifacts when present." },
+            { kind: "test-results", required: false, label: "Repository-native Playwright test-result artifacts when present." },
+          ]
         : []),
     ],
   );
@@ -5324,6 +5786,7 @@ async function executeRole(options: {
           };
         })()
       : nativeOnlyOutput;
+    const contractNativeOutput = applyRoleOutputContract(options.role.id, finalizedNativeOutput);
     await appendExecutionStepLog(options.jobId, options.logs, {
       id: roleStepId,
       order: roleOrder,
@@ -5336,12 +5799,12 @@ async function executeRole(options: {
       executorKind: options.role.executorKind,
       nativeExecutorId: options.role.nativeExecutorId,
       status: "succeeded",
-      detail: `${finalizedNativeOutput.sections.length} section(s), ${finalizedNativeOutput.findings.length} finding(s)`,
+      detail: `${contractNativeOutput.sections.length} section(s), ${contractNativeOutput.findings.length} finding(s)`,
       startedAt: roleStartedAt,
       finishedAt: new Date().toISOString(),
       durationMs: Math.max(0, new Date().getTime() - new Date(roleStartedAt).getTime()),
     }, defaultVisibility);
-    return finalizedNativeOutput;
+    return contractNativeOutput;
   }
 
   const prompt = buildRolePrompt({
@@ -5513,6 +5976,7 @@ async function executeRole(options: {
         jobId: options.jobId,
         logs: options.logs,
         repoPath: options.repoPath,
+        tempDir: options.tempDir,
         output: baseOutput,
         primarySourceId: options.primarySource.id,
         companionSourceId: options.companionSource?.id ?? null,
@@ -5555,7 +6019,10 @@ async function executeRole(options: {
         };
       })()
     : output;
-  const mergedOutput = nativeOutput ? mergeRoleOutputs(nativeOutput, finalizedOutput) : finalizedOutput;
+  const mergedOutput = applyRoleOutputContract(
+    options.role.id,
+    nativeOutput ? mergeRoleOutputs(nativeOutput, finalizedOutput) : finalizedOutput,
+  );
   await appendExecutionStepLog(options.jobId, options.logs, {
     id: roleStepId,
     order: roleOrder,
@@ -5565,10 +6032,10 @@ async function executeRole(options: {
     agentName: options.agentName,
     roleId: options.role.id,
     roleName: options.role.name,
-    executorKind: options.role.executorKind,
-    nativeExecutorId: options.role.nativeExecutorId,
-    status: "succeeded",
-    detail: `${(nativeOutput ? mergedOutput : finalizedOutput).sections.length} section(s), ${(nativeOutput ? mergedOutput : finalizedOutput).findings.length} finding(s)`,
+      executorKind: options.role.executorKind,
+      nativeExecutorId: options.role.nativeExecutorId,
+      status: "succeeded",
+      detail: `${mergedOutput.sections.length} section(s), ${mergedOutput.findings.length} finding(s)`,
     startedAt: roleStartedAt,
     finishedAt: new Date().toISOString(),
     durationMs: Math.max(0, new Date().getTime() - new Date(roleStartedAt).getTime()),
@@ -6385,6 +6852,13 @@ export function detectPlaywrightPreflightForTest(repoPath: string): PlaywrightPr
   return detectPlaywrightPreflight(repoPath);
 }
 
+export function buildArtifactAnalysisForTest(
+  handoff: StandardizedHandoff | null,
+  artifacts: AnalysisReport["artifacts"],
+) {
+  return buildArtifactAnalysis(handoff, artifacts);
+}
+
 export async function startAgentLoop(): Promise<void> {
   const config = loadAiWorkerConfig();
   console.log(JSON.stringify({
@@ -6445,6 +6919,7 @@ export function stopEmbeddedAgentWorker(): void {
 }
 
 export default {
+  buildArtifactAnalysisForTest,
   detectPlaywrightPreflightForTest,
   runAgentJobForTest,
   startAgentLoop,

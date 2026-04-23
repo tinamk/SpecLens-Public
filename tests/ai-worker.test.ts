@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test, { after } from "node:test";
 import { createHomeTempDirSync } from "@speclens/core";
-import { parseAnalysisExecutionStepEvent } from "@speclens/contracts";
+import { parseAnalysisExecutionStepEvent, standardizedAgentHandoffSchema } from "@speclens/contracts";
 import {
   createAgentJobForUser,
   createAiAgent,
@@ -300,6 +300,10 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     assert.equal((firstResult.report?.summary.remediationPacks.length ?? 0) > 0, true);
     assert.ok(firstResult.report?.summary.qualityScorecard, "Expected a computed quality scorecard.");
     assert.equal((firstResult.report?.summary.qualityScorecard?.overallScore ?? 0) > 0, true);
+    assert.ok(
+      firstResult.report?.summary.qualityScorecard?.roleScores.some(role => role.roleId === "runtime-scout" && role.status === "ready"),
+      "Expected role scorecard to mark runtime-scout contract ready.",
+    );
     assert.ok(firstResult.report?.summary.artifactAnalysis, "Expected artifact analysis in the report summary.");
     assert.equal((firstResult.report?.summary.artifactAnalysis?.producedCount ?? 0) >= 0, true);
     assert.ok(Array.isArray(firstResult.report?.summary.capabilityGaps), "Expected capability gap analysis on the report summary.");
@@ -314,6 +318,14 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     const standardizedSection = firstResult.report?.sections.find(section => section.title === "Standardized JSON handoff");
     assert.ok(standardizedSection, "Expected a standardized JSON handoff section.");
     assert.equal((standardizedSection?.data.standardizedOutput as { schemaVersion?: string } | undefined)?.schemaVersion, "speclens.agent-handoff.v1");
+    const roleContractSection = firstResult.report?.sections.find(section => section.title === "Role contract audit");
+    assert.ok(roleContractSection, "Expected a role contract audit section.");
+    assert.equal(
+      ((roleContractSection?.data.roleContracts as Array<{ roleId?: string; status?: string }> | undefined) ?? [])
+        .some(contract => contract.roleId === "runtime-scout" && contract.status === "ready"),
+      true,
+      "Expected role contract audit to include ready runtime-scout coverage.",
+    );
     const runtimeExecutionSection = firstResult.report?.sections.find(section => section.title === "Runtime execution");
     assert.equal(runtimeExecutionSection?.status, "ready");
     const browserExecutionSection = firstResult.report?.sections.find(section => section.title === "Browser QA execution");
@@ -371,6 +383,9 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     const runtimeScoutPrompt = capturedPrompts.find(item => item.roleId === "runtime-scout");
     assert.ok(runtimeScoutPrompt, "Expected the second run to capture the runtime-scout prompt.");
     assert.equal(runtimeScoutPrompt?.prompt.includes("Active source learnables (JSON):"), true);
+    assert.equal(runtimeScoutPrompt?.prompt.includes("Role output contract:"), true);
+    assert.equal(runtimeScoutPrompt?.prompt.includes("Required section title: Runtime scout"), true);
+    assert.equal(runtimeScoutPrompt?.prompt.includes("Required data keys in that section: packageManagers, workingDirectories, targets"), true);
     assert.equal(
       runtimeScoutPrompt?.prompt.includes(storedLearnables[0]?.statement ?? ""),
       true,
@@ -415,6 +430,90 @@ test("ai-worker detects nested Playwright setups and package managers for prefli
   assert.equal(plan?.label, "e2e:local");
   assert.equal(plan?.command, "pnpm e2e:local -- --list");
   assert.equal(plan?.workingDirectory, appDir);
+});
+
+test("ai-worker detects Playwright wrapper scripts for preflight", () => {
+  const repoRoot = createHomeTempDirSync("speclens-playwright-wrapper-");
+  const scriptsDir = path.join(repoRoot, "scripts", "e2e");
+  fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(repoRoot, "package.json"),
+    JSON.stringify({
+      name: "wrapper-app",
+      scripts: {
+        "e2e:production": "node scripts/e2e/run-production.mjs tests/e2e/public-site.spec.ts",
+      },
+    }, null, 2),
+    "utf8",
+  );
+  fs.writeFileSync(path.join(repoRoot, "playwright.config.ts"), "export default {};\n", "utf8");
+  fs.writeFileSync(
+    path.join(scriptsDir, "run-production.mjs"),
+    [
+      "const playwrightArgs = ['playwright', 'test', ...process.argv.slice(2)];",
+      "console.log(playwrightArgs.join(' '));",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const plan = (
+    aiWorker as typeof aiWorker & {
+      detectPlaywrightPreflightForTest: (repoPath: string) => {
+        packageManager: string;
+        source: string;
+        label: string;
+        command: string;
+        workingDirectory: string;
+        configPath: string | null;
+      } | null;
+    }
+  ).detectPlaywrightPreflightForTest(repoRoot);
+  assert.ok(plan, "Expected a Playwright wrapper script to be detected.");
+  assert.equal(plan?.packageManager, "npm");
+  assert.equal(plan?.source, "package-script");
+  assert.equal(plan?.label, "e2e:production");
+  assert.equal(plan?.command, "npm run e2e:production -- --list");
+  assert.equal(plan?.workingDirectory, repoRoot);
+  assert.equal(plan?.configPath, "playwright.config.ts");
+});
+
+test("ai-worker treats optional Playwright artifacts as non-blocking in artifact analysis", () => {
+  const analysis = (
+    aiWorker as typeof aiWorker & {
+      buildArtifactAnalysisForTest: (
+        handoff: ReturnType<typeof standardizedAgentHandoffSchema.parse>,
+        artifacts: Array<{ kind: string; key: string; sizeBytes: number; mimeType: string; bucket: string; region: string }>,
+      ) => {
+        expectedKinds: string[];
+        missingKinds: string[];
+      };
+    }
+  ).buildArtifactAnalysisForTest(
+    standardizedAgentHandoffSchema.parse({
+      schemaVersion: "speclens.agent-handoff.v1",
+      generatedBy: {
+        agentId: "agent-test",
+        agentName: "Test Agent",
+        roleId: "role-test",
+        roleName: "Test Role",
+      },
+      runtime: {},
+      auth: {
+        frontend: {},
+        api: {},
+      },
+      playwright: {},
+      artifactExpectations: [
+        { kind: "validation-log", label: "Playwright preflight log", required: true },
+        { kind: "playwright-report", label: "HTML Playwright report", required: false },
+        { kind: "test-results", label: "Playwright test results", required: false },
+      ],
+    }),
+    [],
+  );
+
+  assert.deepEqual(analysis.expectedKinds, ["validation-log", "playwright-report", "test-results"]);
+  assert.deepEqual(analysis.missingKinds, ["validation-log"]);
 });
 
 test("ai-worker keeps smoke-agent handoff synthesis deterministic without hosted execution follow-up", async () => {

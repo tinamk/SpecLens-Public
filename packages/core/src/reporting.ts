@@ -178,6 +178,9 @@ function detectArtifactKind(filePath: string): ArtifactReference["kind"] {
   if (normalized.includes("/test-results/")) {
     return "test-results";
   }
+  if (baseName.endsWith(".log")) {
+    return "validation-log";
+  }
   if (baseName.includes("component-inventory")) {
     return "component-inventory";
   }
