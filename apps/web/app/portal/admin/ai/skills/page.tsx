@@ -17,7 +17,7 @@ export default async function AdminAiSkillsPage() {
           badgeLabel="Admin only"
           description="Administrator access is required."
           descriptionTestId="admin-ai-access-denied"
-          title="This area is reserved for portal administrators"
+          title="Admin only"
         />
       </PortalShell>
     );
@@ -29,7 +29,6 @@ export default async function AdminAiSkillsPage() {
     <PortalShell
       eyebrow="Admin AI"
       title="Skills"
-      lede="Skill definitions are managed in their own admin route so CRUD coverage stays focused and deterministic."
       pageTestId="admin-ai-skills-page"
       primaryNav={buildPortalPrimaryNav(true)}
       activePrimaryNavKey="admin"

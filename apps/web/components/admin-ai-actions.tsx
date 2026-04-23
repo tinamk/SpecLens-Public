@@ -9,7 +9,7 @@ function getApiBaseUrl(): string {
   return "/api/proxy";
 }
 
-async function requestJson<T>(method: "GET" | "POST" | "PUT" | "DELETE", pathname: string, payload?: unknown): Promise<T> {
+async function requestJson<T>(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", pathname: string, payload?: unknown): Promise<T> {
   const init: RequestInit = { method };
   if (payload !== undefined) {
     init.headers = {
@@ -84,13 +84,13 @@ function AdminSummaryCard({
 }: {
   label: string;
   value: ReactNode;
-  detail: ReactNode;
+  detail?: ReactNode;
 }) {
   return (
     <article className="admin-summary-card">
       <span className="admin-summary-card__label">{label}</span>
       <span className="admin-summary-card__value">{value}</span>
-      <p>{detail}</p>
+      {detail ? <p>{detail}</p> : null}
     </article>
   );
 }
@@ -315,22 +315,20 @@ export function AdminAiPanel({
   return (
     <>
       {showAuth ? (
-        <section className="portal-grid">
+        <section>
           <article className="portal-panel" data-testid="admin-ai-auth-panel">
             <PortalSectionHeader
-              badgeLabel="Authentication"
-              badgeClassName="tag tag--info"
-              title="Codex device auth"
-              description="Keep device-flow state explicit before you queue or manage any hosted agent work."
+              title="Device session"
             />
             <div className="admin-summary-grid">
               <AdminSummaryCard label="State" value={authLabel} detail={<span className={`status-pill status-pill--${authTone}`}>{auth.status}</span>} />
-              <AdminSummaryCard label="Account" value={auth.accountId ?? "Not linked"} detail="The connected Codex account for admin agent execution." />
-              <AdminSummaryCard label="Refresh" value={formatTimestamp(auth.lastRefresh) ?? "No refresh yet"} detail="Last observed auth verification time." />
+              <AdminSummaryCard label="Fallback" value={auth.disabled ? "Disabled" : "Enabled"} detail={auth.disabled ? "Global shared auth is blocked." : "Workspace runs may select the shared global auth."} />
+              <AdminSummaryCard label="Account" value={auth.accountId ?? "Not linked"} detail="" />
+              <AdminSummaryCard label="Refresh" value={formatTimestamp(auth.lastRefresh) ?? "No refresh yet"} detail="" />
               <AdminSummaryCard
                 label="Device code"
                 value={auth.userCode ?? "—"}
-                detail={auth.status === "pending" ? "Use this code on the verification page." : "Only shown while the device flow is pending."}
+                detail=""
               />
             </div>
 
@@ -343,6 +341,13 @@ export function AdminAiPanel({
                     { label: "Last refresh", value: formatTimestamp(auth.lastRefresh) ?? "not recorded" },
                   ]}
                 />
+              </div>
+            ) : null}
+
+            {auth.disabled ? (
+              <div className="auth-callout">
+                <p className="auth-callout__title">Global fallback disabled</p>
+                <p className="subtle-note">Users can still connect their own account or workspace auth, but shared global auth cannot be selected until you enable it again.</p>
               </div>
             ) : null}
 
@@ -386,7 +391,13 @@ export function AdminAiPanel({
             ) : null}
 
             {auth.status === "unauthenticated" ? (
-              <p className="subtle-note">Start the device flow to generate a verification code.</p>
+              <div className="auth-callout">
+                <p className="auth-callout__title">Connect Codex before queueing jobs</p>
+                <p className="subtle-note">
+                  Local/dev: import the session from the machine running SpecLens if you already authenticated the `codex` CLI there.
+                  Hosted/prod: start the device flow and complete verification in the browser.
+                </p>
+              </div>
             ) : null}
 
             {auth.status === "error" && auth.lastError ? (
@@ -419,6 +430,26 @@ export function AdminAiPanel({
             <button
               className="button-secondary"
               type="button"
+              data-testid="admin-ai-auth-import-local"
+              disabled={pending}
+              onClick={() => {
+                setAuthError(null);
+                startTransition(async () => {
+                  try {
+                    const payload = await requestJson<{ auth: CodexAuthStatus }>("POST", "/api/admin/ai/auth/import-local");
+                    setAuth(payload.auth);
+                    router.refresh();
+                  } catch (error) {
+                    setAuthError(error instanceof Error ? error.message : "Local auth import failed.");
+                  }
+                });
+              }}
+            >
+              {pending ? "Importing..." : "Use local Codex auth"}
+            </button>
+            <button
+              className="button-secondary"
+              type="button"
               data-testid="admin-ai-auth-check"
               disabled={pending}
               onClick={() => {
@@ -428,6 +459,28 @@ export function AdminAiPanel({
               }}
             >
               {pending ? "Checking..." : "Check status"}
+            </button>
+            <button
+              className="button-ghost"
+              type="button"
+              data-testid="admin-ai-auth-toggle-disabled"
+              disabled={pending}
+              onClick={() => {
+                setAuthError(null);
+                startTransition(async () => {
+                  try {
+                    const payload = await requestJson<{ auth: CodexAuthStatus }>("PATCH", "/api/admin/ai/auth", {
+                      disabled: !auth.disabled,
+                    });
+                    setAuth(payload.auth);
+                    router.refresh();
+                  } catch (error) {
+                    setAuthError(error instanceof Error ? error.message : "Failed to update global auth availability.");
+                  }
+                });
+              }}
+            >
+              {pending ? "Saving..." : auth.disabled ? "Enable global fallback" : "Disable global fallback"}
             </button>
             <button
               className="button-ghost"
@@ -456,19 +509,16 @@ export function AdminAiPanel({
       ) : null}
 
       {showAgents ? (
-        <section className="portal-grid">
+        <section>
           <article className="portal-panel" data-testid="admin-ai-run-panel">
             <PortalSectionHeader
-              badgeLabel="Execution"
-              badgeClassName="tag tag--warning"
-              title="Run agent analysis"
-              description="Queue an agent against a specific workspace source after you verify its role and skill plan."
+              title="Queue an agent run"
             />
             <div className="admin-summary-grid">
-              <AdminSummaryCard label="Agents" value={agents.length} detail="Available admin agents that can be queued from this surface." />
-              <AdminSummaryCard label="Workspaces" value={workspaceOptions.length} detail="Workspaces currently available to the admin run form." />
-              <AdminSummaryCard label="Source options" value={availableSources.length} detail="Sources inside the selected workspace." />
-              <AdminSummaryCard label="Tool grants" value={selectedAgentToolCapabilities.length} detail="Unique tool capabilities inherited through the selected agent roles." />
+              <AdminSummaryCard label="Agents" value={agents.length} />
+              <AdminSummaryCard label="Workspaces" value={workspaceOptions.length} />
+              <AdminSummaryCard label="Sources" value={availableSources.length} />
+              <AdminSummaryCard label="Tool grants" value={selectedAgentToolCapabilities.length} />
             </div>
             <form
               className="stack-form form-shell"
@@ -558,16 +608,12 @@ export function AdminAiPanel({
                 {selectedAgent ? (
                   <PortalMetaList
                     items={[
-                      { label: "Agent", value: selectedAgent.name },
                       { label: "Description", value: selectedAgent.description ?? "No description provided." },
-                      { label: "Role count", value: selectedAgentRoles.length },
-                      { label: "Skill count", value: selectedAgentSkills.length },
-                      { label: "Runtime", value: "Unified agent planning with native executor support." },
                       { label: "Tool grants", value: selectedAgentToolCapabilities.length > 0 ? selectedAgentToolCapabilities.join(", ") : "None declared." },
                     ]}
                   />
                 ) : (
-                  <p className="subtle-note">Select or create an agent to inspect its execution plan.</p>
+                  <p className="subtle-note">Select an agent.</p>
                 )}
               </div>
               <div className="admin-form-actions">
@@ -588,24 +634,20 @@ export function AdminAiPanel({
       ) : null}
 
       {showSkills ? (
-        <section className="portal-grid">
+        <section>
           <article className="portal-panel" data-testid="admin-ai-skill-panel">
             <PortalSectionHeader
-              badgeLabel="Skills"
-              badgeClassName="tag tag--success"
               title="Skill library"
-              description="Manage reusable instructions and tool-grant bundles that roles can attach to hosted agent execution."
             />
             <div className="admin-summary-grid">
-              <AdminSummaryCard label="Skills" value={skills.length} detail="Saved skills currently available to roles and agents." />
-              <AdminSummaryCard label="Tool grants" value={availableToolCapabilities.length} detail="Selectable capability grants exposed by the admin UI." />
+              <AdminSummaryCard label="Skills" value={skills.length} />
+              <AdminSummaryCard label="Tool grants" value={availableToolCapabilities.length} />
             </div>
             <div className="admin-stack">
               <div className="admin-record-card">
                 <div className="admin-record-card__header">
                   <div className="admin-record-card__title">
                     <h3>Create skill</h3>
-                    <p>Capture reusable instructions once, then compose them into roles.</p>
                   </div>
                 </div>
                 <form
@@ -671,7 +713,7 @@ export function AdminAiPanel({
                     <div className="admin-record-card__header">
                       <div className="admin-record-card__title">
                         <h3>{skill.name}</h3>
-                        <p>{skill.description ?? "No description provided."}</p>
+                        {skill.description ? <p>{skill.description}</p> : null}
                       </div>
                       <div className="admin-record-card__meta">
                         <span className="tag tag--neutral">order {skill.order ?? "auto"}</span>
@@ -727,7 +769,6 @@ export function AdminAiPanel({
                   ))}
                 </select>
               </label>
-              <p className="subtle-note">Granted: {skill.toolCapabilities.join(", ") || "repo-read"}</p>
                       <div className="admin-form-actions">
                 <button className="button-ghost" data-testid={`admin-ai-skill-update-${skill.id}`} type="submit" disabled={pending}>Update</button>
                 <button
@@ -761,24 +802,20 @@ export function AdminAiPanel({
       ) : null}
 
       {showRoles ? (
-        <section className="portal-grid">
+        <section>
           <article className="portal-panel" data-testid="admin-ai-role-panel">
             <PortalSectionHeader
-              badgeLabel="Roles"
-              badgeClassName="tag tag--warning"
               title="Role graph"
-              description="Roles define prompts, execution mode, and skill composition before agents inherit them."
             />
             <div className="admin-summary-grid">
-              <AdminSummaryCard label="Roles" value={roles.length} detail="Saved role definitions currently available to agents." />
-              <AdminSummaryCard label="Skills linked" value={roles.reduce((sum, role) => sum + role.skills.length, 0)} detail="Total skill attachments across all roles." />
+              <AdminSummaryCard label="Roles" value={roles.length} />
+              <AdminSummaryCard label="Skills linked" value={roles.reduce((sum, role) => sum + role.skills.length, 0)} />
             </div>
             <div className="admin-stack">
               <div className="admin-record-card">
                 <div className="admin-record-card__header">
                   <div className="admin-record-card__title">
                     <h3>Create role</h3>
-                    <p>Define the prompt, visibility, executor, dependencies, and attached skills in one place.</p>
                   </div>
                 </div>
                 <form
@@ -875,7 +912,7 @@ export function AdminAiPanel({
                     <div className="admin-record-card__header">
                       <div className="admin-record-card__title">
                         <h3>{role.name}</h3>
-                        <p>{role.description ?? "No description provided."}</p>
+                        {role.description ? <p>{role.description}</p> : null}
                       </div>
                       <div className="admin-record-card__meta">
                         <span className="tag tag--neutral">{role.executorKind}</span>
@@ -996,24 +1033,20 @@ export function AdminAiPanel({
       ) : null}
 
       {showAgents ? (
-        <section className="portal-grid">
+        <section>
           <article className="portal-panel" data-testid="admin-ai-agent-panel">
             <PortalSectionHeader
-              badgeLabel="Agents"
-              badgeClassName="tag tag--info"
               title="Agent catalog"
-              description="Agents are the queueable execution bundles that inherit one or more role definitions."
             />
             <div className="admin-summary-grid">
-              <AdminSummaryCard label="Agents" value={agents.length} detail="Saved agent bundles available to the admin runner." />
-              <AdminSummaryCard label="Role links" value={agents.reduce((sum, agent) => sum + agent.roles.length, 0)} detail="Total role attachments across the current agent catalog." />
+              <AdminSummaryCard label="Agents" value={agents.length} />
+              <AdminSummaryCard label="Role links" value={agents.reduce((sum, agent) => sum + agent.roles.length, 0)} />
             </div>
             <div className="admin-stack">
               <div className="admin-record-card">
                 <div className="admin-record-card__header">
                   <div className="admin-record-card__title">
                     <h3>Create agent</h3>
-                    <p>Bundle one or more roles into a queueable hosted execution profile.</p>
                   </div>
                 </div>
                 <form
@@ -1074,7 +1107,7 @@ export function AdminAiPanel({
                     <div className="admin-record-card__header">
                       <div className="admin-record-card__title">
                         <h3>{agent.name}</h3>
-                        <p>{agent.description ?? "No description provided."}</p>
+                        {agent.description ? <p>{agent.description}</p> : null}
                       </div>
                       <div className="admin-record-card__meta">
                         <span className="tag tag--neutral">order {agent.order ?? "auto"}</span>

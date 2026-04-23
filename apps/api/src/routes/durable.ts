@@ -42,6 +42,8 @@ import {
   createAiRole,
   createAiSkill,
   clearCodexAuth,
+  clearUserCodexAuth,
+  clearWorkspaceCodexAuth,
   createCommercialContactRequest,
   createCheckoutSessionForUser,
   createSourceForUser,
@@ -60,6 +62,11 @@ import {
   getJobEnvelopeForUser,
   getPrismaClient,
   getReportForUser,
+  getUserCodexAuthRecord,
+  getUserCodexAuthStatus,
+  getWorkspaceCodexAuthRecord,
+  getWorkspaceCodexAuthStatus,
+  getCodexAuthSelectionForWorkspace,
   listAiAnalysisTasks,
   listAiAgents,
   listAiRoles,
@@ -83,6 +90,9 @@ import {
   getGithubInstallIntentById,
   recordAuditLog,
   listActiveGithubWebhookTargets,
+  importCodexTokensFromLocalAuthFile,
+  importUserCodexTokensFromLocalAuthFile,
+  importWorkspaceCodexTokensFromLocalAuthFile,
   registerGithubInstallationForIntent,
   registerGithubWebhookTarget,
   requestJobCancellationForUser,
@@ -91,9 +101,16 @@ import {
   removeWorkspaceMember,
   retryAnalysisJobForUser,
   setCodexAuthError,
+  setUserCodexAuthError,
+  setWorkspaceCodexAuthError,
+  setGlobalCodexAuthDisabled,
   statusError,
   startCodexDeviceFlow,
+  startUserCodexDeviceFlow,
+  startWorkspaceCodexDeviceFlow,
   storeCodexTokens,
+  storeUserCodexTokens,
+  storeWorkspaceCodexTokens,
   updateSourceForUser,
   updateAiAgent,
   updateAiRole,
@@ -306,6 +323,11 @@ function buildConfiguredAppUrl(pathname: string, searchParams?: Record<string, s
   return url.toString();
 }
 
+function readOptionalUrlEnv(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
 function safeFilename(value: string): string {
   return path.basename(value).replace(/[^a-zA-Z0-9._-]+/g, "-") || "upload.bin";
 }
@@ -431,15 +453,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     providers: listAiProviders(),
   }));
 
-  app.get("/api/admin/ai/auth/status", async request => {
-    await currentAdminUser(request);
-    return {
-      auth: await getCodexAuthStatus(),
-    };
-  });
-
-  app.post("/api/admin/ai/auth/device", async request => {
-    await currentAdminUser(request);
+  const requestCodexDeviceStartPayload = async () => {
     const config = getCodexAuthConfig();
     const deviceFlowUrls = resolveCodexDeviceFlowUrls(config);
     const body = JSON.stringify({
@@ -480,24 +494,32 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         intervalSeconds = parsed;
       }
     }
-    const status = await startCodexDeviceFlow({
+    return {
       deviceCode,
       userCode,
       verificationUri: payload.verification_uri ?? deviceFlowUrls.verificationUri,
       verificationUriComplete: payload.verification_uri_complete ?? null,
       expiresAt: new Date(Date.now() + expiresIn * 1000),
       intervalSeconds,
-    });
-    return { auth: status };
-  });
+    };
+  };
 
-  app.post("/api/admin/ai/auth/verify", async request => {
-    await currentAdminUser(request);
+  const verifyScopedCodexAuth = async (options: {
+    getRecord: () => Promise<Awaited<ReturnType<typeof getCodexAuthRecord>>>;
+    getStatus: () => Promise<Awaited<ReturnType<typeof getCodexAuthStatus>>>;
+    setError: (message: unknown) => Promise<Awaited<ReturnType<typeof setCodexAuthError>>>;
+    storeTokens: (payload: {
+      accessToken: string;
+      refreshToken: string | null;
+      idToken: string | null;
+      accountId: string | null;
+    }) => Promise<Awaited<ReturnType<typeof storeCodexTokens>>>;
+  }) => {
     const config = getCodexAuthConfig();
     const deviceFlowUrls = resolveCodexDeviceFlowUrls(config);
-    const record = await getCodexAuthRecord();
+    const record = await options.getRecord();
     if (!record || record.status !== "pending" || !record.deviceCode || !record.userCode) {
-      return { auth: await getCodexAuthStatus() };
+      return { auth: await options.getStatus() };
     }
     const deviceAuthBody = JSON.stringify({
       device_auth_id: record.deviceCode,
@@ -510,22 +532,21 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
       cache: "no-store",
     });
     if (deviceAuthResponse.status === 403 || deviceAuthResponse.status === 404) {
-      return { auth: await getCodexAuthStatus() };
+      return { auth: await options.getStatus() };
     }
     if (!deviceAuthResponse.ok) {
       const message = await deviceAuthResponse.text();
-      return { auth: await setCodexAuthError(message || `Device auth polling failed: ${deviceAuthResponse.status}`) };
+      return { auth: await options.setError(message || `Device auth polling failed: ${deviceAuthResponse.status}`) };
     }
     const devicePayload = await deviceAuthResponse.json() as {
       authorization_code?: string;
-      code_challenge?: string;
       code_verifier?: string;
       error?: string;
       error_description?: string;
     };
     if (!devicePayload.authorization_code || !devicePayload.code_verifier) {
       const message = devicePayload.error_description ?? devicePayload.error ?? "Device auth response missing authorization code.";
-      return { auth: await setCodexAuthError(message) };
+      return { auth: await options.setError(message) };
     }
     const tokenBody = new URLSearchParams({
       grant_type: "authorization_code",
@@ -550,24 +571,156 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     };
     if (!tokenResponse.ok) {
       const message = payload.error_description ?? payload.error ?? `Token exchange failed: ${tokenResponse.status}`;
-      return { auth: await setCodexAuthError(message) };
+      return { auth: await options.setError(message) };
     }
     if (!payload.access_token) {
-      return { auth: await setCodexAuthError("Token exchange succeeded without an access token.") };
+      return { auth: await options.setError("Token exchange succeeded without an access token.") };
     }
-    const auth = await storeCodexTokens({
-      accessToken: payload.access_token,
-      refreshToken: payload.refresh_token ?? null,
-      idToken: payload.id_token ?? null,
-      accountId: payload.account_id ?? null,
+    return {
+      auth: await options.storeTokens({
+        accessToken: payload.access_token,
+        refreshToken: payload.refresh_token ?? null,
+        idToken: payload.id_token ?? null,
+        accountId: payload.account_id ?? null,
+      }),
+    };
+  };
+
+  app.get("/api/me/ai/auth/status", async request => {
+    const user = await currentUser(request);
+    return {
+      auth: await getUserCodexAuthStatus(user.id),
+    };
+  });
+
+  app.post("/api/me/ai/auth/device", async request => {
+    const user = await currentUser(request);
+    return {
+      auth: await startUserCodexDeviceFlow(user.id, await requestCodexDeviceStartPayload()),
+    };
+  });
+
+  app.post("/api/me/ai/auth/verify", async request => {
+    const user = await currentUser(request);
+    return verifyScopedCodexAuth({
+      getRecord: () => getUserCodexAuthRecord(user.id),
+      getStatus: () => getUserCodexAuthStatus(user.id),
+      setError: message => setUserCodexAuthError(user.id, message),
+      storeTokens: payload => storeUserCodexTokens(user.id, payload),
     });
-    return { auth };
+  });
+
+  app.post("/api/me/ai/auth/logout", async request => {
+    const user = await currentUser(request);
+    return {
+      auth: await clearUserCodexAuth(user.id),
+    };
+  });
+
+  app.post("/api/me/ai/auth/import-local", async request => {
+    const user = await currentUser(request);
+    return {
+      auth: await importUserCodexTokensFromLocalAuthFile(user.id),
+    };
+  });
+
+  app.get("/api/workspaces/:workspaceId/ai/auth/status", async request => {
+    const user = await currentUser(request);
+    const { workspaceId } = request.params as { workspaceId: string };
+    return {
+      auth: await getWorkspaceCodexAuthStatus(workspaceId, user.id),
+    };
+  });
+
+  app.get("/api/workspaces/:workspaceId/ai/auth-options", async request => {
+    const user = await currentUser(request);
+    const { workspaceId } = request.params as { workspaceId: string };
+    return {
+      selection: await getCodexAuthSelectionForWorkspace(workspaceId, user.id),
+    };
+  });
+
+  app.post("/api/workspaces/:workspaceId/ai/auth/device", async request => {
+    const user = await currentUser(request);
+    const { workspaceId } = request.params as { workspaceId: string };
+    return {
+      auth: await startWorkspaceCodexDeviceFlow(workspaceId, user.id, await requestCodexDeviceStartPayload()),
+    };
+  });
+
+  app.post("/api/workspaces/:workspaceId/ai/auth/verify", async request => {
+    const user = await currentUser(request);
+    const { workspaceId } = request.params as { workspaceId: string };
+    return verifyScopedCodexAuth({
+      getRecord: () => getWorkspaceCodexAuthRecord(workspaceId, user.id),
+      getStatus: () => getWorkspaceCodexAuthStatus(workspaceId, user.id),
+      setError: message => setWorkspaceCodexAuthError(workspaceId, user.id, message),
+      storeTokens: payload => storeWorkspaceCodexTokens(workspaceId, user.id, payload),
+    });
+  });
+
+  app.post("/api/workspaces/:workspaceId/ai/auth/logout", async request => {
+    const user = await currentUser(request);
+    const { workspaceId } = request.params as { workspaceId: string };
+    return {
+      auth: await clearWorkspaceCodexAuth(workspaceId, user.id),
+    };
+  });
+
+  app.post("/api/workspaces/:workspaceId/ai/auth/import-local", async request => {
+    const user = await currentUser(request);
+    const { workspaceId } = request.params as { workspaceId: string };
+    return {
+      auth: await importWorkspaceCodexTokensFromLocalAuthFile(workspaceId, user.id),
+    };
+  });
+
+  app.get("/api/admin/ai/auth/status", async request => {
+    await currentAdminUser(request);
+    return {
+      auth: await getCodexAuthStatus(),
+    };
+  });
+
+  app.post("/api/admin/ai/auth/device", async request => {
+    await currentAdminUser(request);
+    return {
+      auth: await startCodexDeviceFlow(await requestCodexDeviceStartPayload()),
+    };
+  });
+
+  app.post("/api/admin/ai/auth/verify", async request => {
+    await currentAdminUser(request);
+    return verifyScopedCodexAuth({
+      getRecord: () => getCodexAuthRecord(),
+      getStatus: () => getCodexAuthStatus(),
+      setError: message => setCodexAuthError(message),
+      storeTokens: payload => storeCodexTokens(payload),
+    });
   });
 
   app.post("/api/admin/ai/auth/logout", async request => {
     await currentAdminUser(request);
     return {
       auth: await clearCodexAuth(),
+    };
+  });
+
+  app.post("/api/admin/ai/auth/import-local", async request => {
+    await currentAdminUser(request);
+    return {
+      auth: await importCodexTokensFromLocalAuthFile(),
+    };
+  });
+
+  app.patch("/api/admin/ai/auth", async request => {
+    await currentAdminUser(request);
+    const body = request.body as { disabled?: unknown };
+    if (typeof body?.disabled !== "boolean") {
+      throw statusError(400, "disabled must be a boolean.");
+    }
+    return {
+      auth: await setGlobalCodexAuthDisabled(body.disabled),
     };
   });
 
@@ -1191,6 +1344,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         sourceId: taskInput.sourceId,
         companionSourceId: taskInput.companionSourceId,
         runtimeMode: taskInput.runtimeMode,
+        codexAuthScope: taskInput.codexAuthScope,
         secretRefs: taskInput.secretRefs,
       },
       { requestId: request.requestId },
@@ -1205,6 +1359,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         sourceId: job.job.sourceId,
         companionSourceId: job.job.companionSourceId,
         agentId: job.job.agentId,
+        codexAuthScope: job.job.codexAuthScope,
         submissionMode: "analysis-task",
       },
       requestId: request.requestId,
@@ -1447,8 +1602,8 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
   app.post("/api/billing/checkout", async request => {
     const user = await currentUser(request);
     const input = billingCheckoutInputSchema.parse(request.body ?? {});
-    const successUrl = process.env.STRIPE_SUCCESS_URL ?? buildConfiguredAppUrl("/portal", { billing: "success" });
-    const cancelUrl = process.env.STRIPE_CANCEL_URL ?? buildConfiguredAppUrl("/pricing", { billing: "cancelled" });
+    const successUrl = readOptionalUrlEnv(process.env.STRIPE_SUCCESS_URL) ?? buildConfiguredAppUrl("/portal", { billing: "success" });
+    const cancelUrl = readOptionalUrlEnv(process.env.STRIPE_CANCEL_URL) ?? buildConfiguredAppUrl("/pricing", { billing: "cancelled" });
     const priceConfig = process.env.STRIPE_PRICE_PRO_MONTHLY_USD ?? null;
     const liveStripe = hasLiveStripeConfig() && priceConfig;
     const remoteSession = liveStripe

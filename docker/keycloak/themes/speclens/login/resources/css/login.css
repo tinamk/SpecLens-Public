@@ -1,0 +1,660 @@
+/* SpecLens Keycloak theme — matches the marketing site design. */
+
+:root {
+  --bg: #f3efe6;
+  --bg-strong: #f8f4ec;
+  --surface: #ffffff;
+  --surface-strong: #fbf8f1;
+  --surface-muted: #f2ede3;
+  --text: #0f1820;
+  --text-2: #37434d;
+  --muted: #5e6a74;
+  --line: rgba(15, 24, 32, 0.09);
+  --line-strong: rgba(15, 24, 32, 0.16);
+  --accent: #0c7b6f;
+  --accent-strong: #0a5f56;
+  --accent-soft: rgba(12, 123, 111, 0.08);
+  --accent-alt: #b57437;
+  --radius-sm: 0.55rem;
+  --radius-md: 0.85rem;
+  --radius-lg: 1.1rem;
+  --radius-xl: 1.5rem;
+  --ring: 0 0 0 3px rgba(12, 123, 111, 0.25);
+  --panel-shadow: 0 1px 2px rgba(15, 22, 30, 0.04), 0 4px 12px -6px rgba(15, 22, 30, 0.08);
+  --float-shadow: 0 1px 2px rgba(15, 22, 30, 0.04), 0 20px 48px -24px rgba(15, 22, 30, 0.18);
+  --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html, body, .login-pf, .login-pf body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  font-family: var(--font-body) !important;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-image:
+    radial-gradient(ellipse 80% 40% at 50% -10%, var(--accent-soft), transparent 70%) !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+/* Center everything */
+.pf-v5-c-login {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  min-height: 100vh !important;
+  padding: clamp(3rem, 8vw, 6rem) 1.25rem 3rem !important;
+  background: transparent !important;
+}
+
+.pf-v5-c-login__container {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  max-width: 28rem !important;
+  margin: 0 auto !important;
+  gap: 1.25rem !important;
+}
+
+@media (min-width: 900px) {
+  .pf-v5-c-login__container {
+    max-width: 32rem !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  .pf-v5-c-login__container {
+    max-width: 36rem !important;
+  }
+}
+
+/* Header / brand */
+.pf-v5-c-login__header {
+  display: flex !important;
+  justify-content: center !important;
+  width: 100% !important;
+  margin: 0 0 0.5rem !important;
+  padding: 0 !important;
+}
+
+.pf-v5-c-brand,
+#kc-header-wrapper,
+.login-pf-brand {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.65rem !important;
+  background: transparent !important;
+  font-family: var(--font-display) !important;
+  font-size: 1.1rem !important;
+  font-weight: 700 !important;
+  color: var(--text) !important;
+  letter-spacing: -0.018em !important;
+  text-transform: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  border: none !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+}
+
+.pf-v5-c-brand::before,
+#kc-header-wrapper::before,
+.login-pf-brand::before {
+  content: "SL";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.55rem;
+  background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.pf-v5-c-brand img,
+#kc-header-wrapper img {
+  display: none !important;
+}
+
+/* Card */
+.pf-v5-c-login__main,
+.login-pf-page .card-pf,
+.login-pf-page-main {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 2.5rem !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--float-shadow) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+@media (min-width: 960px) {
+  .pf-v5-c-login__main,
+  .login-pf-page .card-pf,
+  .login-pf-page-main {
+    padding: 3rem !important;
+  }
+}
+
+.pf-v5-c-login__main::before,
+.login-pf-page .card-pf::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-alt));
+}
+
+/* Page title */
+.pf-v5-c-login__main-header,
+#kc-page-title {
+  display: block !important;
+  margin: 0 0 1.5rem !important;
+  padding: 0 !important;
+  font-family: var(--font-display) !important;
+  font-size: 1.75rem !important;
+  font-weight: 700 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.025em !important;
+  color: var(--text) !important;
+  text-align: left !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.pf-v5-c-login__main-header-title,
+.pf-v5-c-title {
+  font-family: var(--font-display) !important;
+  font-size: 1.6rem !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.025em !important;
+  color: var(--text) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.pf-v5-c-login__main-header-desc {
+  font-size: 0.95rem;
+  color: var(--text-2);
+  margin-top: 0.5rem;
+}
+
+.pf-v5-c-login__main-body {
+  padding: 0 !important;
+}
+
+/* Form */
+.pf-v5-c-form,
+#kc-form {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1rem !important;
+}
+
+.pf-v5-c-form__group {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.4rem !important;
+}
+
+.pf-v5-c-form__group-label,
+.pf-v5-c-form__label,
+label {
+  display: block !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  color: var(--text-2) !important;
+  letter-spacing: -0.005em !important;
+  padding: 0 !important;
+}
+
+.pf-v5-c-form__label-text {
+  color: var(--text-2) !important;
+}
+
+/* Inputs */
+.pf-v5-c-form-control,
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="tel"],
+input[type="url"],
+input[type="number"],
+.form-control {
+  display: block !important;
+  width: 100% !important;
+  padding: 0.7rem 0.85rem !important;
+  font-family: inherit !important;
+  font-size: 0.95rem !important;
+  color: var(--text) !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: var(--radius-sm) !important;
+  box-sizing: border-box !important;
+  transition: border-color 140ms ease, box-shadow 140ms ease !important;
+  outline: none !important;
+  box-shadow: none !important;
+  min-height: auto !important;
+  line-height: 1.35 !important;
+}
+
+.pf-v5-c-form-control input,
+.pf-v5-c-form-control > input {
+  all: unset;
+  display: block;
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+  min-height: auto;
+  line-height: 1.35;
+}
+
+/* Double-wrapped PF v5 form-control: the outer acts as a wrapper */
+.pf-v5-c-form-control {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.pf-v5-c-form-control > input {
+  border: 1px solid var(--line-strong) !important;
+}
+
+.pf-v5-c-form-control:focus-within {
+  box-shadow: none !important;
+}
+
+.pf-v5-c-form-control > input:focus,
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus {
+  border-color: var(--accent) !important;
+  box-shadow: var(--ring) !important;
+}
+
+input::placeholder {
+  color: var(--muted) !important;
+}
+
+/* Password input group (password + show-password button) */
+.pf-v5-c-input-group {
+  display: flex !important;
+  align-items: stretch !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: var(--radius-sm) !important;
+  overflow: hidden !important;
+  background: var(--surface) !important;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.pf-v5-c-input-group:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: var(--ring) !important;
+}
+
+.pf-v5-c-input-group__item {
+  flex: 1 !important;
+  display: flex !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.pf-v5-c-input-group__item .pf-v5-c-form-control,
+.pf-v5-c-input-group__item .pf-v5-c-form-control > input {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  width: 100% !important;
+}
+
+.pf-v5-c-input-group__item.pf-m-fill {
+  flex: 1 !important;
+}
+
+.pf-v5-c-input-group__item:last-child {
+  flex: 0 0 auto !important;
+}
+
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 2.75rem !important;
+  height: auto !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  border: 0 !important;
+  border-left: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  cursor: pointer;
+}
+
+.pf-v5-c-input-group .pf-v5-c-button.pf-m-control:hover {
+  color: var(--text);
+  background: var(--surface-muted) !important;
+}
+
+/* Helper text / row between input and button */
+.pf-v5-c-form__helper-text,
+.pf-v5-c-helper-text {
+  margin-top: 0.35rem !important;
+  font-size: 0.85rem !important;
+  color: var(--muted) !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.pf-v5-c-helper-text {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 0.75rem !important;
+  flex-wrap: wrap !important;
+}
+
+/* The inline row that holds "Remember me" + "Forgot password?" */
+#kc-form-options,
+.login-pf-settings {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 0.75rem !important;
+  margin: 0.2rem 0 0.75rem !important;
+  padding: 0 !important;
+  border: 0 !important;
+  text-align: left !important;
+}
+
+/* Checkbox (Remember me) */
+.pf-v5-c-check,
+.checkbox {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  font-size: 0.9rem !important;
+  color: var(--text-2) !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.pf-v5-c-check__input,
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+  margin: 0 !important;
+  cursor: pointer;
+}
+
+.pf-v5-c-check__label,
+.checkbox label {
+  color: var(--text-2) !important;
+  font-size: 0.9rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  cursor: pointer;
+}
+
+/* Primary submit button */
+.pf-v5-c-button.pf-m-primary,
+.pf-v5-c-button.pf-m-block.pf-m-primary,
+input[type="submit"],
+button[type="submit"],
+#kc-login,
+.btn-primary {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-height: 2.75rem !important;
+  padding: 0.65rem 1rem !important;
+  background: var(--accent) !important;
+  color: #fff !important;
+  border: 0 !important;
+  border-radius: var(--radius-sm) !important;
+  font-family: inherit !important;
+  font-size: 0.95rem !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.005em !important;
+  cursor: pointer !important;
+  transition: background 140ms ease, box-shadow 140ms ease !important;
+  box-shadow: none !important;
+}
+
+.pf-v5-c-button.pf-m-primary:hover,
+#kc-login:hover,
+input[type="submit"]:hover,
+button[type="submit"]:hover {
+  background: var(--accent-strong) !important;
+}
+
+.pf-v5-c-button.pf-m-primary:focus-visible,
+#kc-login:focus-visible {
+  outline: none !important;
+  box-shadow: var(--ring) !important;
+}
+
+.pf-v5-c-button.pf-m-secondary,
+.btn-default {
+  background: transparent !important;
+  color: var(--text-2) !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: var(--radius-sm) !important;
+  padding: 0.55rem 0.9rem !important;
+  font-weight: 500 !important;
+  font-size: 0.9rem !important;
+}
+
+.pf-v5-c-button.pf-m-link,
+.btn-link {
+  background: transparent !important;
+  color: var(--accent) !important;
+  border: 0 !important;
+  padding: 0 !important;
+  font-weight: 500 !important;
+  text-decoration: none !important;
+  font-size: 0.9rem !important;
+}
+
+.pf-v5-c-button.pf-m-link:hover,
+.btn-link:hover {
+  color: var(--accent-strong) !important;
+  text-decoration: underline !important;
+}
+
+/* Generic links */
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+
+/* Footer / registration: only the innermost content gets the separator.
+ * Parent wrappers stay invisible to avoid stacking multiple lines. */
+.pf-v5-c-login__main-footer,
+.pf-v5-c-login__main-footer-band,
+.pf-v5-c-login__main-footer-band-item {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  font-size: inherit !important;
+}
+
+.pf-v5-c-login__main-footer:empty,
+.pf-v5-c-login__main-footer-band:empty,
+.pf-v5-c-login__main-footer-band-item:empty {
+  display: none !important;
+}
+
+#kc-info,
+#kc-registration,
+#kc-registration-container {
+  display: block !important;
+  text-align: center !important;
+  font-size: 0.9rem !important;
+  color: var(--text-2) !important;
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+
+#kc-registration {
+  margin-top: 1.25rem !important;
+  padding-top: 1rem !important;
+  border-top: 1px solid var(--line) !important;
+}
+
+#kc-registration a,
+#kc-info a,
+.pf-v5-c-login__main-footer a {
+  color: var(--accent) !important;
+  font-weight: 500 !important;
+}
+
+/* Social providers */
+#kc-social-providers ul {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#kc-social-providers li {
+  display: block;
+}
+
+#kc-social-providers a {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.5rem !important;
+  width: 100% !important;
+  padding: 0.6rem 0.9rem !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--line-strong) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text) !important;
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
+}
+
+#kc-social-providers a:hover {
+  background: var(--surface-strong) !important;
+  text-decoration: none !important;
+}
+
+/* Alert messages */
+.alert,
+.pf-v5-c-alert,
+.kc-feedback-text {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 0.5rem !important;
+  padding: 0.75rem 0.9rem !important;
+  margin-bottom: 1rem !important;
+  border-radius: var(--radius-sm) !important;
+  font-size: 0.9rem !important;
+  border: 1px solid var(--line) !important;
+  background: var(--surface-muted) !important;
+  color: var(--text-2) !important;
+}
+
+.alert-error,
+.pf-v5-c-alert.pf-m-danger {
+  color: #c4453a !important;
+  background: rgba(196, 69, 58, 0.08) !important;
+  border-color: rgba(196, 69, 58, 0.22) !important;
+}
+
+.alert-success,
+.pf-v5-c-alert.pf-m-success {
+  color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent) !important;
+}
+
+.alert-warning,
+.pf-v5-c-alert.pf-m-warning {
+  color: #b57437 !important;
+  background: rgba(181, 116, 55, 0.1) !important;
+  border-color: rgba(181, 116, 55, 0.22) !important;
+}
+
+/* Required field asterisk */
+.required,
+.pf-v5-c-form__label-required {
+  color: #c4453a !important;
+}
+
+/* Eye icon visibility toggle */
+.fa-eye, .fa-eye-slash {
+  color: var(--muted);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 520px) {
+  .pf-v5-c-login {
+    padding: 2rem 1rem !important;
+  }
+  .pf-v5-c-login__main,
+  .login-pf-page .card-pf {
+    padding: 1.75rem !important;
+    border-radius: var(--radius-lg) !important;
+  }
+  .pf-v5-c-login__main-header,
+  #kc-page-title {
+    font-size: 1.4rem !important;
+  }
+}
+
+/* Hide browser autofill yellow background */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text) !important;
+  -webkit-box-shadow: 0 0 0 100px var(--surface) inset !important;
+  box-shadow: 0 0 0 100px var(--surface) inset !important;
+}

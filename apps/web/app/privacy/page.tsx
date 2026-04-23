@@ -10,8 +10,8 @@ export default function PrivacyPage() {
       <main className="legal-layout" data-testid="public-privacy-main">
         <MarketingPageHero
           eyebrow="Privacy"
-          title="SpecLens stores the hosted data needed to run workspaces, jobs, and reports - not more than that."
-          description="The hosted platform keeps the metadata, logs, and artifacts required for the service while relying on configured third-party processors for payments, identity, and source access."
+          title="What SpecLens stores, and why."
+          description="The hosted platform keeps the metadata, logs, and artifacts needed to run the service, and uses configured processors for payments, identity, and source access."
           asideLabel="Practical summary"
           asideValue="Store what keeps the product usable. Protect secrets. Retain artifacts by policy."
           actions={
@@ -26,22 +26,13 @@ export default function PrivacyPage() {
         <section className="legal-grid">
           <article className="legal-panel">
             <span className="tag tag--success">What is stored</span>
-            <p>
-              SpecLens stores workspace metadata, source references, job logs, and report artifacts needed to operate the
-              hosted service.
-            </p>
-            <p>
-              Artifacts may include logs, screenshots, exported reports, and analysis evidence generated during hosted runs.
-              Workspace secrets are stored encrypted at rest and are only used to perform the analysis you requested.
-            </p>
+            <p>Workspace metadata, source references, job logs, and report artifacts needed to operate the service.</p>
+            <p>Artifacts may include logs, screenshots, and exported reports. Workspace secrets are encrypted at rest and used only to perform the requested analysis.</p>
           </article>
           <article className="legal-panel">
             <span className="tag tag--info">Processors and retention</span>
-            <p>
-              SpecLens uses third-party processors for payments (Stripe), identity (Keycloak), and source access (GitHub
-              App). Object storage is S3-compatible and can be hosted internally or by a configured external provider.
-            </p>
-            <p>Retention settings determine how long logs and artifacts are kept before cleanup.</p>
+            <p>Payments via Stripe, identity via Keycloak, source access via GitHub App. Object storage is S3-compatible and can be internal or external.</p>
+            <p>Retention settings determine how long logs and artifacts are kept.</p>
           </article>
         </section>
       </main>

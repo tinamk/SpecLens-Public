@@ -14,7 +14,7 @@ import {
   updateSkill,
 } from "./helpers/admin-ai";
 import { createTimestampedName, resolveE2eMode, resolveE2eUser } from "./helpers/env";
-import { assertAnalysisTaskCatalogEntry, auditCompletedJobExecution, waitForJobSuccess } from "./helpers/runs";
+import { assertAnalysisTaskCatalogEntry, auditCompletedJobExecution, expectJobPlanVisible, waitForJobSuccess } from "./helpers/runs";
 import { addSource } from "./helpers/sources";
 import { createWorkspace } from "./helpers/workspaces";
 
@@ -98,6 +98,7 @@ test.describe.serial("admin AI local", () => {
     });
 
     await page.goto(`/portal/workspaces/${workspace.id}/runs/${jobId}`);
+    await expectJobPlanVisible(page, { expectedMinimumSteps: 2 });
     await waitForJobSuccess(page);
     await auditCompletedJobExecution(page, {
       jobId,

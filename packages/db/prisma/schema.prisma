@@ -368,6 +368,8 @@ model AiRoleDependency {
 
 model AiAuth {
   id                     String   @id
+  scopeKey               String   @unique
+  scopeType              String   @default("global")
   status                 String
   authMode               String?
   accountId              String?
@@ -382,6 +384,7 @@ model AiAuth {
   idTokenEncrypted       String?
   lastRefreshAt          DateTime?
   lastError              String?
+  disabled               Boolean  @default(false)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 }

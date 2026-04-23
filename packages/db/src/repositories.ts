@@ -20,6 +20,8 @@ import {
   aiSkillSchema,
   analysisTaskSchema,
   artifactReferenceSchema,
+  codexAuthOptionSchema,
+  codexAuthSelectionSchema,
   codexAuthStatusSchema,
   githubGatewayRegisterInputSchema,
   githubInstallIntentSchema,
@@ -46,7 +48,9 @@ import {
   type ArtifactReference,
   type BillingSubscription,
   type CommercialContactInput,
+  type CodexAuthOption,
   type CodexAuthStatus,
+  type CodexAuthSelection,
   type GithubGatewayRegisterInput,
   type GithubInstallIntent,
   type CreateAnalysisJobInput,
@@ -421,8 +425,14 @@ type PersistedRemediationMetadata = CreateRemediationTaskInput & {
   changeset: ChangesetSummary | null;
 };
 
+type PersistedCodexAuthBinding = {
+  scope: "user" | "workspace" | "global";
+  recordId: string;
+};
+
 type PersistedJobMetadata = {
   remediation?: PersistedRemediationMetadata | null;
+  codexAuth?: PersistedCodexAuthBinding | null;
 };
 
 export interface StatusError extends Error {
@@ -473,17 +483,37 @@ function parseJobMetadata(value: unknown): PersistedJobMetadata {
     return {};
   }
   const record = value as Record<string, unknown>;
+  const codexAuthValue = record.codexAuth;
+  const codexAuth = codexAuthValue && typeof codexAuthValue === "object" && !Array.isArray(codexAuthValue)
+    ? (() => {
+        const codexAuthRecord = codexAuthValue as Record<string, unknown>;
+        const scope = codexAuthRecord.scope;
+        const recordId = codexAuthRecord.recordId;
+        if (
+          (scope === "user" || scope === "workspace" || scope === "global")
+          && typeof recordId === "string"
+          && recordId.trim().length > 0
+        ) {
+          return {
+            scope,
+            recordId,
+          } satisfies PersistedCodexAuthBinding;
+        }
+        return null;
+      })()
+    : null;
   const remediationValue = record.remediation;
   if (!remediationValue || typeof remediationValue !== "object" || Array.isArray(remediationValue)) {
-    return {};
+    return codexAuth ? { codexAuth } : {};
   }
   const remediationRecord = remediationValue as Record<string, unknown>;
   const reportId = typeof remediationRecord.reportId === "string" ? remediationRecord.reportId : null;
   const sourceId = typeof remediationRecord.sourceId === "string" ? remediationRecord.sourceId : null;
   if (!reportId || !sourceId) {
-    return {};
+    return codexAuth ? { codexAuth } : {};
   }
   return {
+    ...(codexAuth ? { codexAuth } : {}),
     remediation: {
       reportId,
       sourceId,
@@ -992,6 +1022,13 @@ function mapJobRecord(job: {
   createdAt: Date;
 }): AnalysisJob {
   return analysisJobSchema.parse({
+    ...(() => {
+      const metadata = parseJobMetadata(job.metadataJson);
+      return {
+        codexAuthScope: metadata.codexAuth?.scope ?? null,
+        changeset: metadata.remediation?.changeset ?? null,
+      };
+    })(),
     id: job.id,
     workspaceId: job.workspaceId,
     sourceId: job.sourceId,
@@ -1018,7 +1055,6 @@ function mapJobRecord(job: {
     runtimeMode: job.runtimeMode,
     secretRefs: asJsonArray(job.secretRefsJson),
     requestedByUserId: job.requestedByUserId,
-    changeset: parseJobMetadata(job.metadataJson).remediation?.changeset ?? null,
     startedAt: job.startedAt?.toISOString() ?? null,
     finishedAt: job.finishedAt?.toISOString() ?? null,
     createdAt: job.createdAt.toISOString(),
@@ -1089,6 +1125,7 @@ function estimateJobDurationMs(job: {
         return total + (job.runtimeMode === "browser" ? 2_500 : 1_500);
       case "artifact-auditor":
       case "remediation-planner":
+      case "e2e-remediation-planner":
       case "release-gate-scorer":
         return total + 1_500;
       default:
@@ -1908,12 +1945,24 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       dependencyKeys: ["architecture-reviewer", "code-health-reviewer", "visual-qa-critic", "ux-friction-reviewer", "artifact-auditor"],
     },
     {
+      key: "e2e-remediation-planner",
+      id: "e2e-remediation-planner",
+      name: "E2E remediation planner",
+      description: "Synthesize remediation packs deterministically from prior findings for stable local E2E coverage.",
+      executorKind: "native",
+      nativeExecutorId: "deterministic-remediation-planning",
+      prompt: "Group the collected findings into remediation packs ordered by impact and dependency. Emit a section titled \"Remediation planning\" with pack candidates.",
+      order: 20,
+      skillKeys: ["evidence-discipline", "remediation-pack-formatting", "implementation-slicing", "test-plan-generation"],
+      dependencyKeys: ["source-topology-scout", "runtime-scout"],
+    },
+    {
       key: "fix-readiness-emitter",
       id: "fix-readiness-emitter",
       name: "Fix readiness emitter",
       description: "Prepare explicit handoff details for downstream fix agents.",
       prompt: "Emit explicit implementation handoff details, target files, tests, and rollback notes in a section titled \"Fix readiness handoff\".",
-      order: 20,
+      order: 21,
       skillKeys: ["evidence-discipline", "patch-readiness", "rollback-risk-notes", "test-plan-generation"],
       dependencyKeys: ["remediation-planner"],
     },
@@ -1923,9 +1972,9 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       name: "Release gate scorer",
       description: "Emit the final recommendation and severity rollup.",
       prompt: "Emit the final bundle-specific pass, warn, or fail recommendation with confidence, blockers, and rationale in a section titled \"Release gate recommendation\".",
-      order: 21,
+      order: 22,
       skillKeys: ["evidence-discipline", "severity-calibration", "artifact-validation"],
-      dependencyKeys: ["cross-surface-consistency-reviewer", "artifact-auditor", "remediation-planner"],
+      dependencyKeys: ["cross-surface-consistency-reviewer", "artifact-auditor", "remediation-planner", "e2e-remediation-planner"],
     },
     {
       key: "standardized-json-output",
@@ -1939,9 +1988,9 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
         "The section data must include a standardizedOutput object with these top-level keys: schemaVersion, auditBundleId, generatedBy, runtime, auth, playwright, detectedSurfaces, executionCoverage, artifactExpectations, remediationPacks, releaseGateDecision, blockers, recommendations.",
         "Keep commands, URLs, auth details, artifact expectations, and blockers evidence-backed and machine-readable.",
       ].join("\n"),
-      order: 22,
+      order: 23,
       skillKeys: ["evidence-discipline", "standardized-json", "artifact-validation", "remediation-pack-formatting"],
-      dependencyKeys: ["runtime-scout", "auth-cartographer", "navigation-qa-planner", "playwright-operator", "artifact-auditor", "remediation-planner", "release-gate-scorer"],
+      dependencyKeys: ["runtime-scout", "auth-cartographer", "navigation-qa-planner", "playwright-operator", "artifact-auditor", "remediation-planner", "e2e-remediation-planner", "release-gate-scorer"],
     },
     {
       key: "smoke-summary",
@@ -1950,7 +1999,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       description: "Produce a fast top-level smoke summary.",
       consoleVisibility: "quiet",
       prompt: "Inspect top-level repository evidence, derive stack hints, and emit one concise section titled \"Smoke analysis\" with the most obvious release risk.",
-      order: 23,
+      order: 24,
       skillKeys: ["smoke-summary", "evidence-discipline", "severity-calibration"],
       dependencyKeys: ["source-topology-scout"],
     },
@@ -1979,7 +2028,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
         "source-topology-scout",
         "runtime-scout",
         "smoke-summary",
-        "remediation-planner",
+        "e2e-remediation-planner",
         "release-gate-scorer",
         "standardized-json-output",
       ],
@@ -3428,6 +3477,7 @@ export async function createAnalysisJobForUser(
   const roles = requestedRoles.length > 0
     ? requestedRoles
     : (await getAiAgentExecutionPlan(resolvedAgentId)).roles.map(role => role.id);
+  const codexAuthBinding = await resolveCodexAuthBindingForJob(workspaceId, userId, input.codexAuthScope ?? null);
   const logs = [
     createLog(
       jobId,
@@ -3453,7 +3503,9 @@ export async function createAnalysisJobForUser(
         companionSourceType: companionSource?.type ?? null,
         companionSourceLocation: companionSource?.location ?? null,
         rolesJson: roles,
-        metadataJson: Prisma.JsonNull,
+        metadataJson: codexAuthBinding
+          ? ({ codexAuth: codexAuthBinding } as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
         runtimeMode,
         secretRefsJson: input.secretRefs ?? [],
         requestedByUserId: userId,
@@ -3494,6 +3546,7 @@ export async function createAgentJobForUser(
       agentId,
       roles: roleIds,
       runtimeMode: input.runtimeMode,
+      codexAuthScope: input.codexAuthScope,
       secretRefs: input.secretRefs,
     },
     {
@@ -3554,7 +3607,13 @@ export async function createRemediationJobForUser(
 
   const alternateSource = candidateSources.find(source => source.id !== selectedSource.id) ?? null;
   const jobId = createId("job");
+  const inheritedBinding = await resolveFollowOnCodexAuthBinding(
+    report.workspaceId,
+    userId,
+    parseJobMetadata(report.job.metadataJson).codexAuth ?? null,
+  );
   const metadata: PersistedJobMetadata = {
+    ...(inheritedBinding ? { codexAuth: inheritedBinding } : {}),
     remediation: {
       reportId,
       sourceId: input.sourceId,
@@ -4107,6 +4166,7 @@ export async function retryAnalysisJobForUser(jobId: string, userId: string): Pr
     sourceId: current.job.sourceId,
     companionSourceId: current.job.companionSourceId ?? undefined,
     runtimeMode: current.job.runtimeMode,
+    codexAuthScope: current.job.codexAuthScope ?? undefined,
     secretRefs: current.job.secretRefs,
   });
 }
@@ -5230,13 +5290,48 @@ function mapAiAgentRecord(agent: Prisma.AiAgentGetPayload<{
   });
 }
 
-function mapCodexAuthRecord(record: Prisma.AiAuthGetPayload<Record<string, never>> | null): CodexAuthStatus {
+type CodexAuthScopeTarget =
+  | { scope: "global" }
+  | { scope: "user"; userId: string }
+  | { scope: "workspace"; workspaceId: string };
+
+function buildCodexAuthScopeKey(target: CodexAuthScopeTarget): string {
+  switch (target.scope) {
+    case "global":
+      return "codex:global";
+    case "user":
+      return `codex:user:${target.userId}`;
+    case "workspace":
+      return `codex:workspace:${target.workspaceId}`;
+  }
+}
+
+function normalizeCodexAuthScope(value: string | null | undefined, scopeKey: string | null | undefined): CodexAuthStatus["scope"] {
+  if (value === "user" || value === "workspace" || value === "global") {
+    return value;
+  }
+  if (scopeKey?.startsWith("codex:user:")) {
+    return "user";
+  }
+  if (scopeKey?.startsWith("codex:workspace:")) {
+    return "workspace";
+  }
+  return "global";
+}
+
+function mapCodexAuthRecord(
+  record: Prisma.AiAuthGetPayload<Record<string, never>> | null,
+  scope: CodexAuthStatus["scope"] = "global",
+): CodexAuthStatus {
   if (!record) {
     return codexAuthStatusSchema.parse({
+      scope,
       status: "unauthenticated",
     });
   }
+  const resolvedScope = normalizeCodexAuthScope(record.scopeType, record.scopeKey ?? record.id);
   return codexAuthStatusSchema.parse({
+    scope: resolvedScope,
     status: record.status,
     authMode: record.authMode ?? null,
     accountId: record.accountId ?? null,
@@ -5247,6 +5342,7 @@ function mapCodexAuthRecord(record: Prisma.AiAuthGetPayload<Record<string, never
     intervalSeconds: record.intervalSeconds ?? null,
     lastError: record.lastError ?? null,
     lastRefresh: record.lastRefreshAt ? record.lastRefreshAt.toISOString() : null,
+    disabled: record.disabled === true,
   });
 }
 
@@ -5299,6 +5395,117 @@ function readCodexAuthFileFallback(): {
   return { tokens, lastRefresh };
 }
 
+function maskCodexAuthStatusForSelection(status: CodexAuthStatus): CodexAuthStatus {
+  return codexAuthStatusSchema.parse({
+    ...status,
+    accountId: null,
+    userCode: null,
+    verificationUri: null,
+    verificationUriComplete: null,
+    expiresAt: null,
+    intervalSeconds: null,
+    lastError: null,
+  });
+}
+
+function decodeJwtExpiryMs(token: string | null | undefined): number | null {
+  if (!token) {
+    return null;
+  }
+
+  const parts = token.split(".");
+  if (parts.length < 2 || !parts[1]) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as { exp?: unknown };
+    return typeof payload.exp === "number" && Number.isFinite(payload.exp) ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeIsoTimestampMs(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function selectPreferredCodexTokenSource(options: {
+  stored: {
+    tokens: {
+      accessToken: string;
+      refreshToken: string | null;
+      idToken: string | null;
+      accountId: string | null;
+    };
+    lastRefresh: string | null;
+  } | null;
+  fallback: {
+    tokens: {
+      accessToken: string;
+      refreshToken: string | null;
+      idToken: string | null;
+      accountId: string | null;
+    };
+    lastRefresh: string | null;
+  } | null;
+}): {
+  tokens: {
+    accessToken: string;
+    refreshToken: string | null;
+    idToken: string | null;
+    accountId: string | null;
+  };
+  source: "stored" | "fallback";
+} | null {
+  const { stored, fallback } = options;
+  if (!stored && !fallback) {
+    return null;
+  }
+  if (!stored) {
+    return { tokens: fallback!.tokens, source: "fallback" };
+  }
+  if (!fallback) {
+    return { tokens: stored.tokens, source: "stored" };
+  }
+
+  const storedAccessExpiry = decodeJwtExpiryMs(stored.tokens.accessToken);
+  const fallbackAccessExpiry = decodeJwtExpiryMs(fallback.tokens.accessToken);
+
+  if (storedAccessExpiry !== null || fallbackAccessExpiry !== null) {
+    if (storedAccessExpiry === null) {
+      return { tokens: fallback.tokens, source: "fallback" };
+    }
+    if (fallbackAccessExpiry === null) {
+      return { tokens: stored.tokens, source: "stored" };
+    }
+    if (fallbackAccessExpiry > storedAccessExpiry) {
+      return { tokens: fallback.tokens, source: "fallback" };
+    }
+    return { tokens: stored.tokens, source: "stored" };
+  }
+
+  const storedRefreshTime = decodeIsoTimestampMs(stored.lastRefresh);
+  const fallbackRefreshTime = decodeIsoTimestampMs(fallback.lastRefresh);
+  if (storedRefreshTime !== null || fallbackRefreshTime !== null) {
+    if (storedRefreshTime === null) {
+      return { tokens: fallback.tokens, source: "fallback" };
+    }
+    if (fallbackRefreshTime === null) {
+      return { tokens: stored.tokens, source: "stored" };
+    }
+    if (fallbackRefreshTime > storedRefreshTime) {
+      return { tokens: fallback.tokens, source: "fallback" };
+    }
+  }
+
+  return { tokens: stored.tokens, source: "stored" };
+}
+
 function normalizeCodexAuthErrorMessage(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -5329,6 +5536,571 @@ function normalizeCodexAuthErrorMessage(value: unknown): string {
     }
   }
   return String(value);
+}
+
+async function getCodexAuthRecordForTarget(
+  target: CodexAuthScopeTarget,
+): Promise<Prisma.AiAuthGetPayload<Record<string, never>> | null> {
+  return getPrismaClient().aiAuth.findUnique({
+    where: { id: buildCodexAuthScopeKey(target) },
+  });
+}
+
+function buildCodexAuthRecordSeed(target: CodexAuthScopeTarget) {
+  const key = buildCodexAuthScopeKey(target);
+  return {
+    id: key,
+    scopeKey: key,
+    scopeType: target.scope,
+  };
+}
+
+async function upsertCodexAuthRecord(
+  target: CodexAuthScopeTarget,
+  data: Prisma.AiAuthUncheckedUpdateInput,
+): Promise<Prisma.AiAuthGetPayload<Record<string, never>>> {
+  const prisma = getPrismaClient();
+  const seed = buildCodexAuthRecordSeed(target);
+  const existing = await prisma.aiAuth.findUnique({
+    where: { id: seed.id },
+    select: { id: true },
+  });
+  if (existing) {
+    return prisma.aiAuth.update({
+      where: { id: seed.id },
+      data,
+    });
+  }
+  return prisma.aiAuth.create({
+    data: {
+      ...(data as Prisma.AiAuthUncheckedCreateInput),
+      ...seed,
+    },
+  });
+}
+
+async function getCodexAuthStatusForTarget(
+  target: CodexAuthScopeTarget,
+  options: { allowGlobalLocalFallback?: boolean } = {},
+): Promise<CodexAuthStatus> {
+  const record = await getCodexAuthRecordForTarget(target);
+  if (!record) {
+    if (target.scope === "global" && options.allowGlobalLocalFallback !== false) {
+      const fallback = readCodexAuthFileFallback();
+      if (fallback) {
+        return codexAuthStatusSchema.parse({
+          scope: "global",
+          status: "ready",
+          authMode: "chatgpt",
+          accountId: fallback.tokens.accountId,
+          lastRefresh: fallback.lastRefresh,
+          disabled: false,
+        });
+      }
+    }
+    return codexAuthStatusSchema.parse({
+      scope: target.scope,
+      status: "unauthenticated",
+      disabled: false,
+    });
+  }
+  return mapCodexAuthRecord(record, target.scope);
+}
+
+function buildStoredCodexTokens(record: Prisma.AiAuthGetPayload<Record<string, never>>): {
+  tokens: {
+    accessToken: string;
+    refreshToken: string | null;
+    idToken: string | null;
+    accountId: string | null;
+  };
+  lastRefresh: string | null;
+} | null {
+  if (!record.accessTokenEncrypted) {
+    return null;
+  }
+  return {
+    tokens: {
+      accessToken: decryptSecretValue(record.accessTokenEncrypted),
+      refreshToken: record.refreshTokenEncrypted ? decryptSecretValue(record.refreshTokenEncrypted) : null,
+      idToken: record.idTokenEncrypted ? decryptSecretValue(record.idTokenEncrypted) : null,
+      accountId: record.accountId ?? null,
+    },
+    lastRefresh: record.lastRefreshAt ? record.lastRefreshAt.toISOString() : null,
+  };
+}
+
+async function getCodexTokensForTarget(
+  target: CodexAuthScopeTarget,
+  options: { allowGlobalLocalFallback?: boolean } = {},
+): Promise<{
+  accessToken: string;
+  refreshToken: string | null;
+  idToken: string | null;
+  accountId: string | null;
+} | null> {
+  const record = await getCodexAuthRecordForTarget(target);
+  if (record?.disabled) {
+    return null;
+  }
+
+  const fallback = target.scope === "global" && options.allowGlobalLocalFallback !== false
+    ? readCodexAuthFileFallback()
+    : null;
+  if (!record) {
+    return fallback?.tokens ?? null;
+  }
+
+  try {
+    const stored = buildStoredCodexTokens(record);
+    return selectPreferredCodexTokenSource({ stored, fallback })?.tokens ?? null;
+  } catch (error) {
+    if (fallback) {
+      console.warn(
+        `[codex-auth] Falling back to local auth file for ${buildCodexAuthScopeKey(target)} because stored Codex tokens could not be decrypted: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return fallback.tokens;
+    }
+    throw error;
+  }
+}
+
+function createCodexAuthOption(input: {
+  scope: CodexAuthOption["scope"];
+  label: string;
+  description: string;
+  status: CodexAuthStatus;
+}): CodexAuthOption {
+  return codexAuthOptionSchema.parse({
+    scope: input.scope,
+    label: input.label,
+    description: input.description,
+    status: maskCodexAuthStatusForSelection(input.status),
+    available: input.status.status === "ready" && input.status.disabled !== true,
+    selectable: input.status.status === "ready" && input.status.disabled !== true,
+  });
+}
+
+function buildCodexAuthBinding(target: CodexAuthScopeTarget): PersistedCodexAuthBinding {
+  return {
+    scope: target.scope,
+    recordId: buildCodexAuthScopeKey(target),
+  };
+}
+
+function parseCodexAuthBinding(recordId: string): CodexAuthScopeTarget | null {
+  if (recordId === "codex:global") {
+    return { scope: "global" };
+  }
+  if (recordId.startsWith("codex:user:")) {
+    return { scope: "user", userId: recordId.slice("codex:user:".length) };
+  }
+  if (recordId.startsWith("codex:workspace:")) {
+    return { scope: "workspace", workspaceId: recordId.slice("codex:workspace:".length) };
+  }
+  return null;
+}
+
+async function resolveDefaultCodexAuthBinding(
+  workspaceId: string,
+  userId: string,
+): Promise<PersistedCodexAuthBinding | null> {
+  const candidates: CodexAuthScopeTarget[] = [
+    { scope: "user", userId },
+    { scope: "workspace", workspaceId },
+    { scope: "global" },
+  ];
+  for (const candidate of candidates) {
+    const status = await getCodexAuthStatusForTarget(candidate);
+    if (status.status === "ready" && status.disabled !== true) {
+      return buildCodexAuthBinding(candidate);
+    }
+  }
+  return null;
+}
+
+async function resolveFollowOnCodexAuthBinding(
+  workspaceId: string,
+  userId: string,
+  inheritedBinding: PersistedCodexAuthBinding | null,
+): Promise<PersistedCodexAuthBinding | null> {
+  if (!inheritedBinding) {
+    return resolveDefaultCodexAuthBinding(workspaceId, userId);
+  }
+  if (inheritedBinding.scope !== "user") {
+    return inheritedBinding;
+  }
+
+  const inheritedTarget = parseCodexAuthBinding(inheritedBinding.recordId);
+  if (inheritedTarget?.scope === "user" && inheritedTarget.userId === userId) {
+    return inheritedBinding;
+  }
+
+  return resolveDefaultCodexAuthBinding(workspaceId, userId);
+}
+
+export async function getCodexAuthSelectionForWorkspace(
+  workspaceId: string,
+  userId: string,
+): Promise<CodexAuthSelection> {
+  await getAccessibleWorkspaceRecord(workspaceId, userId);
+  const [userStatus, workspaceStatus, globalStatus] = await Promise.all([
+    getCodexAuthStatusForTarget({ scope: "user", userId }, { allowGlobalLocalFallback: false }),
+    getCodexAuthStatusForTarget({ scope: "workspace", workspaceId }, { allowGlobalLocalFallback: false }),
+    getCodexAuthStatusForTarget({ scope: "global" }),
+  ]);
+  const selected = await resolveDefaultCodexAuthBinding(workspaceId, userId);
+  return codexAuthSelectionSchema.parse({
+    selectedScope: selected?.scope ?? null,
+    options: [
+      createCodexAuthOption({
+        scope: "user",
+        label: "My Codex auth",
+        description: "Use the Codex session stored on your own user account.",
+        status: userStatus,
+      }),
+      createCodexAuthOption({
+        scope: "workspace",
+        label: "Workspace Codex auth",
+        description: "Use the shared Codex session configured for this workspace.",
+        status: workspaceStatus,
+      }),
+      createCodexAuthOption({
+        scope: "global",
+        label: "Global Codex auth",
+        description: globalStatus.disabled
+          ? "Admin disabled the shared global Codex fallback."
+          : "Use the admin-managed global Codex fallback for this workspace run.",
+        status: globalStatus,
+      }),
+    ],
+  });
+}
+
+export async function resolveCodexAuthBindingForJob(
+  workspaceId: string,
+  userId: string,
+  requestedScope?: "user" | "workspace" | "global" | null,
+): Promise<PersistedCodexAuthBinding | null> {
+  await getAccessibleWorkspaceRecord(workspaceId, userId);
+  if (!requestedScope) {
+    return resolveDefaultCodexAuthBinding(workspaceId, userId);
+  }
+
+  const target: CodexAuthScopeTarget = requestedScope === "user"
+    ? { scope: "user", userId }
+    : requestedScope === "workspace"
+      ? { scope: "workspace", workspaceId }
+      : { scope: "global" };
+  const status = await getCodexAuthStatusForTarget(target, {
+    allowGlobalLocalFallback: target.scope === "global",
+  });
+  if (status.status !== "ready" || status.disabled === true) {
+    throw statusError(400, `${requestedScope} Codex auth is not available for this job.`);
+  }
+  return buildCodexAuthBinding(target);
+}
+
+export async function getCodexTokensForBinding(
+  binding: PersistedCodexAuthBinding | null,
+): Promise<{
+  accessToken: string;
+  refreshToken: string | null;
+  idToken: string | null;
+  accountId: string | null;
+} | null> {
+  if (!binding) {
+    return null;
+  }
+  const target = parseCodexAuthBinding(binding.recordId);
+  if (!target) {
+    return null;
+  }
+  return getCodexTokensForTarget(target, {
+    allowGlobalLocalFallback: target.scope === "global",
+  });
+}
+
+export async function getUserCodexAuthStatus(userId: string): Promise<CodexAuthStatus> {
+  return getCodexAuthStatusForTarget({ scope: "user", userId }, { allowGlobalLocalFallback: false });
+}
+
+export async function getWorkspaceCodexAuthStatus(workspaceId: string, userId: string): Promise<CodexAuthStatus> {
+  await requireWorkspaceRole(workspaceId, userId, "owner");
+  return getCodexAuthStatusForTarget({ scope: "workspace", workspaceId }, { allowGlobalLocalFallback: false });
+}
+
+export async function getCodexAuthStatus(): Promise<CodexAuthStatus> {
+  return getCodexAuthStatusForTarget({ scope: "global" });
+}
+
+export async function getCodexAuthRecord(): Promise<Prisma.AiAuthGetPayload<Record<string, never>> | null> {
+  return getCodexAuthRecordForTarget({ scope: "global" });
+}
+
+export async function getUserCodexAuthRecord(userId: string): Promise<Prisma.AiAuthGetPayload<Record<string, never>> | null> {
+  return getCodexAuthRecordForTarget({ scope: "user", userId });
+}
+
+export async function getWorkspaceCodexAuthRecord(
+  workspaceId: string,
+  userId: string,
+): Promise<Prisma.AiAuthGetPayload<Record<string, never>> | null> {
+  await requireWorkspaceRole(workspaceId, userId, "owner");
+  return getCodexAuthRecordForTarget({ scope: "workspace", workspaceId });
+}
+
+async function startCodexDeviceFlowForTarget(
+  target: CodexAuthScopeTarget,
+  payload: {
+    deviceCode: string;
+    userCode: string;
+    verificationUri: string;
+    verificationUriComplete?: string | null;
+    expiresAt: Date;
+    intervalSeconds?: number | null;
+  },
+): Promise<CodexAuthStatus> {
+  const record = await upsertCodexAuthRecord(target, {
+    status: "pending",
+    authMode: "chatgpt",
+    deviceCode: payload.deviceCode,
+    userCode: payload.userCode,
+    verificationUri: payload.verificationUri,
+    verificationUriComplete: payload.verificationUriComplete ?? null,
+    expiresAt: payload.expiresAt,
+    intervalSeconds: payload.intervalSeconds ?? null,
+    lastError: null,
+  });
+  return mapCodexAuthRecord(record, target.scope);
+}
+
+export async function startCodexDeviceFlow(payload: {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string | null;
+  expiresAt: Date;
+  intervalSeconds?: number | null;
+}): Promise<CodexAuthStatus> {
+  return startCodexDeviceFlowForTarget({ scope: "global" }, payload);
+}
+
+export async function startUserCodexDeviceFlow(
+  userId: string,
+  payload: {
+    deviceCode: string;
+    userCode: string;
+    verificationUri: string;
+    verificationUriComplete?: string | null;
+    expiresAt: Date;
+    intervalSeconds?: number | null;
+  },
+): Promise<CodexAuthStatus> {
+  return startCodexDeviceFlowForTarget({ scope: "user", userId }, payload);
+}
+
+export async function startWorkspaceCodexDeviceFlow(
+  workspaceId: string,
+  userId: string,
+  payload: {
+    deviceCode: string;
+    userCode: string;
+    verificationUri: string;
+    verificationUriComplete?: string | null;
+    expiresAt: Date;
+    intervalSeconds?: number | null;
+  },
+): Promise<CodexAuthStatus> {
+  await requireWorkspaceRole(workspaceId, userId, "owner");
+  return startCodexDeviceFlowForTarget({ scope: "workspace", workspaceId }, payload);
+}
+
+async function storeCodexTokensForTarget(
+  target: CodexAuthScopeTarget,
+  payload: {
+    accessToken: string;
+    refreshToken: string | null;
+    idToken: string | null;
+    accountId: string | null;
+  },
+): Promise<CodexAuthStatus> {
+  const record = await upsertCodexAuthRecord(target, {
+    status: "ready",
+    authMode: "chatgpt",
+    accountId: payload.accountId ?? null,
+    deviceCode: null,
+    userCode: null,
+    verificationUri: null,
+    verificationUriComplete: null,
+    expiresAt: null,
+    intervalSeconds: null,
+    accessTokenEncrypted: encryptSecretValue(payload.accessToken),
+    refreshTokenEncrypted: payload.refreshToken ? encryptSecretValue(payload.refreshToken) : null,
+    idTokenEncrypted: payload.idToken ? encryptSecretValue(payload.idToken) : null,
+    lastRefreshAt: new Date(),
+    lastError: null,
+  });
+  return mapCodexAuthRecord(record, target.scope);
+}
+
+export async function storeCodexTokens(payload: {
+  accessToken: string;
+  refreshToken: string | null;
+  idToken: string | null;
+  accountId: string | null;
+}): Promise<CodexAuthStatus> {
+  return storeCodexTokensForTarget({ scope: "global" }, payload);
+}
+
+export async function storeUserCodexTokens(
+  userId: string,
+  payload: {
+    accessToken: string;
+    refreshToken: string | null;
+    idToken: string | null;
+    accountId: string | null;
+  },
+): Promise<CodexAuthStatus> {
+  return storeCodexTokensForTarget({ scope: "user", userId }, payload);
+}
+
+export async function storeWorkspaceCodexTokens(
+  workspaceId: string,
+  userId: string,
+  payload: {
+    accessToken: string;
+    refreshToken: string | null;
+    idToken: string | null;
+    accountId: string | null;
+  },
+): Promise<CodexAuthStatus> {
+  await requireWorkspaceRole(workspaceId, userId, "owner");
+  return storeCodexTokensForTarget({ scope: "workspace", workspaceId }, payload);
+}
+
+export async function storeCodexTokensForBinding(
+  binding: PersistedCodexAuthBinding | null,
+  payload: {
+    accessToken: string;
+    refreshToken: string | null;
+    idToken: string | null;
+    accountId: string | null;
+  },
+): Promise<CodexAuthStatus> {
+  if (!binding) {
+    return storeCodexTokens(payload);
+  }
+  const target = parseCodexAuthBinding(binding.recordId);
+  if (!target) {
+    return storeCodexTokens(payload);
+  }
+  return storeCodexTokensForTarget(target, payload);
+}
+
+async function importCodexTokensFromLocalAuthFileForTarget(target: CodexAuthScopeTarget): Promise<CodexAuthStatus> {
+  const fallback = readCodexAuthFileFallback();
+  if (!fallback) {
+    throw statusError(404, "No local Codex auth file is available.");
+  }
+  return storeCodexTokensForTarget(target, fallback.tokens);
+}
+
+export async function importCodexTokensFromLocalAuthFile(): Promise<CodexAuthStatus> {
+  return importCodexTokensFromLocalAuthFileForTarget({ scope: "global" });
+}
+
+export async function importUserCodexTokensFromLocalAuthFile(userId: string): Promise<CodexAuthStatus> {
+  return importCodexTokensFromLocalAuthFileForTarget({ scope: "user", userId });
+}
+
+export async function importWorkspaceCodexTokensFromLocalAuthFile(
+  workspaceId: string,
+  userId: string,
+): Promise<CodexAuthStatus> {
+  await requireWorkspaceRole(workspaceId, userId, "owner");
+  return importCodexTokensFromLocalAuthFileForTarget({ scope: "workspace", workspaceId });
+}
+
+export async function getCodexTokens(): Promise<{
+  accessToken: string;
+  refreshToken: string | null;
+  idToken: string | null;
+  accountId: string | null;
+} | null> {
+  return getCodexTokensForTarget({ scope: "global" });
+}
+
+async function clearCodexAuthForTarget(target: CodexAuthScopeTarget): Promise<CodexAuthStatus> {
+  const record = await upsertCodexAuthRecord(target, {
+    status: "unauthenticated",
+    authMode: null,
+    accountId: null,
+    deviceCode: null,
+    userCode: null,
+    verificationUri: null,
+    verificationUriComplete: null,
+    expiresAt: null,
+    intervalSeconds: null,
+    accessTokenEncrypted: null,
+    refreshTokenEncrypted: null,
+    idTokenEncrypted: null,
+    lastRefreshAt: null,
+    lastError: null,
+  });
+  return mapCodexAuthRecord(record, target.scope);
+}
+
+export async function clearCodexAuth(): Promise<CodexAuthStatus> {
+  return clearCodexAuthForTarget({ scope: "global" });
+}
+
+export async function clearUserCodexAuth(userId: string): Promise<CodexAuthStatus> {
+  return clearCodexAuthForTarget({ scope: "user", userId });
+}
+
+export async function clearWorkspaceCodexAuth(workspaceId: string, userId: string): Promise<CodexAuthStatus> {
+  await requireWorkspaceRole(workspaceId, userId, "owner");
+  return clearCodexAuthForTarget({ scope: "workspace", workspaceId });
+}
+
+async function setCodexAuthErrorForTarget(target: CodexAuthScopeTarget, message: unknown): Promise<CodexAuthStatus> {
+  const normalizedMessage = normalizeCodexAuthErrorMessage(message);
+  const record = await upsertCodexAuthRecord(target, {
+    status: "error",
+    lastError: normalizedMessage,
+  });
+  return mapCodexAuthRecord(record, target.scope);
+}
+
+export async function setCodexAuthError(message: unknown): Promise<CodexAuthStatus> {
+  return setCodexAuthErrorForTarget({ scope: "global" }, message);
+}
+
+export async function setUserCodexAuthError(userId: string, message: unknown): Promise<CodexAuthStatus> {
+  return setCodexAuthErrorForTarget({ scope: "user", userId }, message);
+}
+
+export async function setWorkspaceCodexAuthError(
+  workspaceId: string,
+  userId: string,
+  message: unknown,
+): Promise<CodexAuthStatus> {
+  await requireWorkspaceRole(workspaceId, userId, "owner");
+  return setCodexAuthErrorForTarget({ scope: "workspace", workspaceId }, message);
+}
+
+export async function setGlobalCodexAuthDisabled(disabled: boolean): Promise<CodexAuthStatus> {
+  const existing = await getCodexAuthRecordForTarget({ scope: "global" });
+  const record = await upsertCodexAuthRecord({ scope: "global" }, existing
+    ? { disabled }
+    : {
+        status: "unauthenticated",
+        disabled,
+      });
+  return mapCodexAuthRecord(record, "global");
 }
 
 function normalizeRoleDependencies(roleId: string | null, dependsOnRoleIds: string[] | undefined): string[] {
@@ -5543,6 +6315,14 @@ export async function listAiAnalysisTasks(): Promise<AnalysisTask[]> {
       title: agent.name,
       description: agent.description ?? null,
       roleCount: agent.roles.length,
+      roles: agent.roles.map(link => ({
+        id: link.role.id,
+        name: link.role.name,
+        description: link.role.description ?? null,
+        order: link.order,
+        executorKind: link.role.executorKind,
+        nativeExecutorId: link.role.nativeExecutorId ?? null,
+      })),
       skillNames,
       toolCapabilities,
       createdAt: agent.createdAt.toISOString(),
@@ -5678,186 +6458,4 @@ export async function getAiAgentExecutionPlan(agentId: string): Promise<{
       };
     }),
   };
-}
-
-export async function getCodexAuthStatus(): Promise<CodexAuthStatus> {
-  const prisma = getPrismaClient();
-  const record = await prisma.aiAuth.findUnique({ where: { id: "codex" } });
-  if (!record) {
-    const fallback = readCodexAuthFileFallback();
-    if (fallback) {
-      return codexAuthStatusSchema.parse({
-        status: "ready",
-        authMode: "chatgpt",
-        accountId: fallback.tokens.accountId,
-        lastRefresh: fallback.lastRefresh,
-      });
-    }
-  }
-  return mapCodexAuthRecord(record);
-}
-
-export async function getCodexAuthRecord(): Promise<Prisma.AiAuthGetPayload<Record<string, never>> | null> {
-  const prisma = getPrismaClient();
-  return prisma.aiAuth.findUnique({ where: { id: "codex" } });
-}
-
-export async function startCodexDeviceFlow(payload: {
-  deviceCode: string;
-  userCode: string;
-  verificationUri: string;
-  verificationUriComplete?: string | null;
-  expiresAt: Date;
-  intervalSeconds?: number | null;
-}): Promise<CodexAuthStatus> {
-  const prisma = getPrismaClient();
-  const record = await prisma.aiAuth.upsert({
-    where: { id: "codex" },
-    update: {
-      status: "pending",
-      authMode: "chatgpt",
-      deviceCode: payload.deviceCode,
-      userCode: payload.userCode,
-      verificationUri: payload.verificationUri,
-      verificationUriComplete: payload.verificationUriComplete ?? null,
-      expiresAt: payload.expiresAt,
-      intervalSeconds: payload.intervalSeconds ?? null,
-      lastError: null,
-    },
-    create: {
-      id: "codex",
-      status: "pending",
-      authMode: "chatgpt",
-      deviceCode: payload.deviceCode,
-      userCode: payload.userCode,
-      verificationUri: payload.verificationUri,
-      verificationUriComplete: payload.verificationUriComplete ?? null,
-      expiresAt: payload.expiresAt,
-      intervalSeconds: payload.intervalSeconds ?? null,
-    },
-  });
-  return mapCodexAuthRecord(record);
-}
-
-export async function storeCodexTokens(payload: {
-  accessToken: string;
-  refreshToken: string | null;
-  idToken: string | null;
-  accountId: string | null;
-}): Promise<CodexAuthStatus> {
-  const prisma = getPrismaClient();
-  const record = await prisma.aiAuth.upsert({
-    where: { id: "codex" },
-    update: {
-      status: "ready",
-      authMode: "chatgpt",
-      accountId: payload.accountId ?? null,
-      deviceCode: null,
-      userCode: null,
-      verificationUri: null,
-      verificationUriComplete: null,
-      expiresAt: null,
-      intervalSeconds: null,
-      accessTokenEncrypted: encryptSecretValue(payload.accessToken),
-      refreshTokenEncrypted: payload.refreshToken ? encryptSecretValue(payload.refreshToken) : null,
-      idTokenEncrypted: payload.idToken ? encryptSecretValue(payload.idToken) : null,
-      lastRefreshAt: new Date(),
-      lastError: null,
-    },
-    create: {
-      id: "codex",
-      status: "ready",
-      authMode: "chatgpt",
-      accountId: payload.accountId ?? null,
-      deviceCode: null,
-      userCode: null,
-      verificationUri: null,
-      verificationUriComplete: null,
-      expiresAt: null,
-      intervalSeconds: null,
-      accessTokenEncrypted: encryptSecretValue(payload.accessToken),
-      refreshTokenEncrypted: payload.refreshToken ? encryptSecretValue(payload.refreshToken) : null,
-      idTokenEncrypted: payload.idToken ? encryptSecretValue(payload.idToken) : null,
-      lastRefreshAt: new Date(),
-    },
-  });
-  return mapCodexAuthRecord(record);
-}
-
-export async function getCodexTokens(): Promise<{
-  accessToken: string;
-  refreshToken: string | null;
-  idToken: string | null;
-  accountId: string | null;
-} | null> {
-  const prisma = getPrismaClient();
-  const record = await prisma.aiAuth.findUnique({ where: { id: "codex" } });
-  if (!record || !record.accessTokenEncrypted) {
-    return readCodexAuthFileFallback()?.tokens ?? null;
-  }
-  try {
-    return {
-      accessToken: decryptSecretValue(record.accessTokenEncrypted),
-      refreshToken: record.refreshTokenEncrypted ? decryptSecretValue(record.refreshTokenEncrypted) : null,
-      idToken: record.idTokenEncrypted ? decryptSecretValue(record.idTokenEncrypted) : null,
-      accountId: record.accountId ?? null,
-    };
-  } catch (error) {
-    const fallback = readCodexAuthFileFallback();
-    if (fallback) {
-      console.warn(
-        `[codex-auth] Falling back to local auth file because stored Codex tokens could not be decrypted: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      return fallback.tokens;
-    }
-    throw error;
-  }
-}
-
-export async function clearCodexAuth(): Promise<CodexAuthStatus> {
-  const prisma = getPrismaClient();
-  const record = await prisma.aiAuth.upsert({
-    where: { id: "codex" },
-    update: {
-      status: "unauthenticated",
-      authMode: null,
-      accountId: null,
-      deviceCode: null,
-      userCode: null,
-      verificationUri: null,
-      verificationUriComplete: null,
-      expiresAt: null,
-      intervalSeconds: null,
-      accessTokenEncrypted: null,
-      refreshTokenEncrypted: null,
-      idTokenEncrypted: null,
-      lastRefreshAt: null,
-      lastError: null,
-    },
-    create: {
-      id: "codex",
-      status: "unauthenticated",
-    },
-  });
-  return mapCodexAuthRecord(record);
-}
-
-export async function setCodexAuthError(message: unknown): Promise<CodexAuthStatus> {
-  const prisma = getPrismaClient();
-  const normalizedMessage = normalizeCodexAuthErrorMessage(message);
-  const record = await prisma.aiAuth.upsert({
-    where: { id: "codex" },
-    update: {
-      status: "error",
-      lastError: normalizedMessage,
-    },
-    create: {
-      id: "codex",
-      status: "error",
-      lastError: normalizedMessage,
-    },
-  });
-  return mapCodexAuthRecord(record);
 }

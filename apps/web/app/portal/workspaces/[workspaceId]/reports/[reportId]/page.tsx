@@ -103,7 +103,6 @@ export default async function WorkspaceReportPage({
       <PortalShell
         eyebrow="Workspace report"
         title={report.title}
-        lede="Review findings, artifacts, and remediation status for this analysis run in one place."
         pageTestId="workspace-report-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -111,9 +110,12 @@ export default async function WorkspaceReportPage({
         activeSecondaryNavKey="reports"
       >
         <section className="report-hero" data-testid="report-hero">
-          <span className="tag tag--info">Hosted report</span>
-          <h2 className="mt-4 text-white">{report.title}</h2>
-          <p>Use this report to understand what the run found, download evidence, and jump into remediation when needed.</p>
+          <p className="hero-eyebrow">Analysis report</p>
+          <h1>{report.title}</h1>
+          <p className="subtle-note">
+            Release gate {gateStatus ?? "n/a"} · {report.sections.length} section{report.sections.length === 1 ? "" : "s"} · {reportArtifactCount} artifact{reportArtifactCount === 1 ? "" : "s"}
+          </p>
+          <h2>Findings summary</h2>
           <div className="report-grid">
             <div className="report-summary-card" data-testid="report-summary-total"><strong>Total</strong><br />{report.summary.totalFindings}</div>
             <div className="report-summary-card" data-testid="report-summary-high"><strong>High</strong><br />{report.summary.high}</div>
@@ -127,22 +129,20 @@ export default async function WorkspaceReportPage({
             <article className="portal-stat" data-testid="report-stat-gate">
               <span className="portal-stat__label">Release gate</span>
               <span className="portal-stat__value">{gateStatus ?? "n/a"}</span>
-              <p>{report.summary.releaseGateDecision?.reason ?? "No release-gate decision was recorded for this report."}</p>
+              {report.summary.releaseGateDecision?.reason ? <p>{report.summary.releaseGateDecision.reason}</p> : null}
             </article>
             <article className="portal-stat" data-testid="report-stat-sections">
               <span className="portal-stat__label">Sections</span>
               <span className="portal-stat__value">{report.sections.length}</span>
-              <p>Normalized sections rendered from the hosted report payload.</p>
             </article>
             <article className="portal-stat" data-testid="report-stat-artifacts">
               <span className="portal-stat__label">Artifacts</span>
               <span className="portal-stat__value">{reportArtifactCount}</span>
-              <p>Analysis plus remediation artifacts currently available for download.</p>
             </article>
             <article className="portal-stat" data-testid="report-stat-remediation">
               <span className="portal-stat__label">Remediation</span>
               <span className="portal-stat__value">{report.summary.remediationPacks.length}</span>
-              <p>{latestRemediationJob ? `Latest remediation run is ${latestRemediationJob.job.status}.` : "No remediation run has been launched from this report yet."}</p>
+              {latestRemediationJob ? <p>Latest: {latestRemediationJob.job.status}</p> : null}
             </article>
           </section>
 
@@ -152,7 +152,6 @@ export default async function WorkspaceReportPage({
                 badgeLabel="Remediation"
                 badgeClassName="tag tag--warning"
                 title="Fix readiness"
-                description="Launch remediation from the report once you have enough evidence to turn findings into a scoped code change."
               />
               <PortalMetaList
                 items={[
@@ -198,21 +197,12 @@ export default async function WorkspaceReportPage({
                   </div>
                   <PortalMetaList
                     items={[
-                      { label: "Changeset branch", value: remediationBranchName ?? "not created" },
+                      { label: "Branch", value: remediationBranchName ?? "not created" },
                       { label: "Source", value: remediationSourceOption?.displayName ?? "unknown" },
                       { label: "Stop reason", value: report.summary.changeset.stopReason },
-                      {
-                        label: "Validation commands",
-                        value: report.summary.changeset.validationCommands.length > 0
-                          ? report.summary.changeset.validationCommands.join(", ")
-                          : "No validation commands recorded",
-                      },
-                      {
-                        label: "Pull/apply instructions",
-                        value: report.summary.changeset.pullInstructions.length > 0
-                          ? report.summary.changeset.pullInstructions.join(" · ")
-                          : "No pull/apply instructions recorded",
-                      },
+                      ...(report.summary.changeset.validationCommands.length > 0
+                        ? [{ label: "Validation", value: report.summary.changeset.validationCommands.join(", ") }]
+                        : []),
                     ]}
                   />
                   {report.summary.latestRemediationJobId ? (
@@ -236,7 +226,6 @@ export default async function WorkspaceReportPage({
                             })}
                             title={file}
                             eyebrow="changed file"
-                            description="Open this remediation result directly in the code review surface."
                             key={file}
                             tone="info"
                           />
@@ -270,7 +259,6 @@ export default async function WorkspaceReportPage({
               <PortalSectionHeader
                 badgeLabel="Sections"
                 title="Normalized sections"
-                description="Review the structured section narrative before dropping into raw artifacts or code."
               />
             </article>
             {report.sections.length === 0 ? (
@@ -295,8 +283,7 @@ export default async function WorkspaceReportPage({
               <PortalSectionHeader
                 badgeLabel="Findings"
                 badgeClassName={getWorkspaceReportFindingsEmptyStateTagClass(gateStatus)}
-                title="Findings and code follow-up"
-                description="Use report findings as the handoff point into code review and remediation."
+                title="Findings"
               />
             </article>
             {report.findings.length === 0 ? (
@@ -322,7 +309,9 @@ export default async function WorkspaceReportPage({
                   items={[
                     { label: "Role", value: roleLookup.get(finding.roleId) ?? finding.roleId },
                     { label: "Suggestion", value: finding.suggestion },
-                    { label: "Evidence", value: finding.evidence.length > 0 ? finding.evidence.join(", ") : "No explicit evidence links recorded" },
+                    ...(finding.evidence.length > 0
+                      ? [{ label: "Evidence", value: finding.evidence.join(", ") }]
+                      : []),
                   ]}
                 />
                 <div className="portal-record-card__actions">
@@ -361,7 +350,7 @@ export default async function WorkspaceReportPage({
                     </Link>
                   )) : (
                     <p className="subtle-note" data-testid={`report-finding-source-ambiguous-${finding.id}`}>
-                      Source attribution is ambiguous for this finding.
+                      Source ambiguous.
                     </p>
                   )}
                 </div>
@@ -373,7 +362,6 @@ export default async function WorkspaceReportPage({
               <PortalSectionHeader
                 badgeLabel="Artifacts"
                 title="Run artifacts"
-                description="Download the durable evidence bundle when you need the raw files behind the rendered report."
               />
               <ReportExportAction reportId={report.id} />
               {report.artifacts.length === 0 ? <p>No artifacts registered for this run.</p> : null}
@@ -444,10 +432,6 @@ export default async function WorkspaceReportPage({
         </div>
 
         <div className="portal-action-bar">
-          <div className="portal-action-copy">
-            <strong>Keep the review thread moving</strong>
-            <p>Open the originating analysis run for logs and artifacts, or return to report history to compare adjacent runs in the same workspace.</p>
-          </div>
           <div className="portal-inline-actions">
             {analysisJobHref ? (
               <Link className="button-secondary" data-testid="report-open-analysis-job" href={analysisJobHref}>Open analysis job</Link>
@@ -471,7 +455,7 @@ export default async function WorkspaceReportPage({
             actions={<Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/reports` as Route}>Back to reports</Link>}
             description="You do not have access to this report."
             descriptionTestId="report-access-denied"
-            title="This report is not available to your account"
+            title="Access denied"
           />
         </PortalShell>
       );

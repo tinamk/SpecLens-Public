@@ -17,7 +17,7 @@ export default async function AdminAiAgentsPage() {
           badgeLabel="Admin only"
           description="Administrator access is required."
           descriptionTestId="admin-ai-access-denied"
-          title="This area is reserved for portal administrators"
+          title="Admin only"
         />
       </PortalShell>
     );
@@ -29,7 +29,6 @@ export default async function AdminAiAgentsPage() {
     <PortalShell
       eyebrow="Admin AI"
       title="Agents"
-      lede="Agent composition and admin-triggered runs stay together in one route so agent CRUD and execution remain testable from the same surface."
       pageTestId="admin-ai-agents-page"
       primaryNav={buildPortalPrimaryNav(true)}
       activePrimaryNavKey="admin"

@@ -76,7 +76,7 @@ export function MarketingRoutePanel({
       <span className={badgeClassName}>{badgeLabel}</span>
       <h2>{title}</h2>
       <p>{description}</p>
-      {actions ? <div className="route-split__actions">{actions}</div> : null}
+      <div className="route-split__actions">{actions}</div>
     </article>
   );
 }
@@ -107,17 +107,27 @@ export function PricingCard({
   description,
   bullets,
   cta,
+  eyebrow,
+  tone = "default",
 }: {
   name: string;
   price: string;
   description: string;
   bullets: string[];
   cta: ReactNode;
+  eyebrow?: string;
+  tone?: "default" | "featured" | "contrast";
 }) {
+  const className = [
+    "pricing-card",
+    tone === "featured" ? "pricing-card--featured" : null,
+    tone === "contrast" ? "pricing-card--contrast" : null,
+  ].filter(Boolean).join(" ");
+  const eyebrowLabel = eyebrow ?? (tone === "contrast" ? "Contract path" : "Hosted plan");
   return (
-    <article className="pricing-card" data-plan={name.toLowerCase()}>
+    <article className={className} data-plan={name.toLowerCase()}>
       <div className="pricing-card__header">
-        <p className="pricing-card__eyebrow">{name === "Commercial" ? "Contract path" : "Hosted plan"}</p>
+        <p className="pricing-card__eyebrow">{eyebrowLabel}</p>
         <h3>{name}</h3>
         <p className="pricing-card__price">{price}</p>
         <p>{description}</p>

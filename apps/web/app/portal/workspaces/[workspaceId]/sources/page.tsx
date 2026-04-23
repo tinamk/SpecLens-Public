@@ -68,9 +68,8 @@ export default async function WorkspaceSourcesPage({
 
     return (
       <PortalShell
-        eyebrow="Workspace sources"
+        eyebrow="Sources"
         title={workspaceConsole.workspace.name}
-        lede="All source intake lives here: public Git repositories, Git-backed archive uploads, and GitHub-backed private repositories."
         pageTestId="workspace-sources-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -81,22 +80,19 @@ export default async function WorkspaceSourcesPage({
           <article className="portal-stat" data-testid="workspace-sources-stat-total">
             <span className="portal-stat__label">Sources</span>
             <span className="portal-stat__value">{sources.length}</span>
-            <p>Repository inputs currently matching this filter.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-sources-stat-verified">
-            <span className="portal-stat__label">Ready</span>
+            <span className="portal-stat__label">Verified</span>
             <span className="portal-stat__value">{verifiedSources}</span>
-            <p>Sources already verified and ready for queueing.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-sources-stat-pending">
-            <span className="portal-stat__label">Checks running</span>
+            <span className="portal-stat__label">Pending</span>
             <span className="portal-stat__value">{pendingSources}</span>
-            <p>{failedSources} source{failedSources === 1 ? "" : "s"} currently need repair.</p>
+            {failedSources > 0 ? <p>{failedSources} need repair</p> : null}
           </article>
           <article className="portal-stat" data-testid="workspace-sources-stat-learnables">
             <span className="portal-stat__label">Learnables</span>
             <span className="portal-stat__value">{totalLearnables}</span>
-            <p>Stored source-specific learnables available for future runs.</p>
           </article>
         </section>
 
@@ -106,13 +102,7 @@ export default async function WorkspaceSourcesPage({
               badgeLabel={workspaceConsole.workspace.entitlement}
               badgeClassName={getEntitlementTagClass(workspaceConsole.workspace.entitlement)}
               title="Add a source"
-              description="Keep repository intake here so source scope stays explicit before runs, reports, and billing decisions."
             />
-            <ul className="bullet-list">
-              <li>Use `public git` for direct hosted Git repository URLs over `https`.</li>
-              <li>Use `git repo archive upload` only for archives that retain `.git` metadata.</li>
-              <li>Use `private GitHub` after the workspace installation is linked in settings.</li>
-            </ul>
             {canManageWorkspace ? (
               <CreateSourceForm
                 workspaceId={workspaceId}
@@ -122,7 +112,7 @@ export default async function WorkspaceSourcesPage({
               />
             ) : (
               <p className="subtle-note" data-testid="workspace-sources-read-only">
-                This account can inspect sources and learnables, but only the workspace owner can add, rename, verify, or delete sources.
+                Owner only.
               </p>
             )}
           </article>
@@ -130,37 +120,33 @@ export default async function WorkspaceSourcesPage({
             <PortalSectionHeader
               badgeLabel="Readiness"
               badgeClassName="tag tag--info"
-              title="Use the right source type"
-              description="Source verification is the first guardrail for the rest of the workspace workflow."
+              title="Status"
             />
-            <PortalMetaList
-              items={[
-                { label: "Owner controls", value: canManageWorkspace ? "Enabled for this account" : "Workspace owner only" },
-                { label: "Visible private repositories", value: githubRepositories.length },
-                { label: "Attention needed", value: failedSources === 0 ? "No failed checks right now" : `${failedSources} source(s) need repair` },
-              ]}
-            />
+            {failedSources > 0 ? (
+              <PortalMetaList
+                items={[
+                  { label: "Attention needed", value: `${failedSources} source(s) need repair` },
+                ]}
+              />
+            ) : null}
             <PortalLinkGrid testId="workspace-sources-guide-grid">
               <PortalLinkCard
-                description="Review entitlement, billing, and GitHub installation inventory before changing private-source scope."
-                eyebrow="Owner controls"
+                eyebrow="Owner"
                 href={`/portal/workspaces/${workspaceId}/settings`}
                 testId="workspace-sources-open-settings"
-                title="Open workspace settings"
+                title="Settings"
                 tone="warning"
               />
               <PortalLinkCard
-                description="Move into the run surface once the sources here are verified and ready for queueing."
                 eyebrow="Execution"
                 href={`/portal/workspaces/${workspaceId}/runs`}
-                title="Open runs"
+                title="Runs"
                 tone="success"
               />
               <PortalLinkCard
-                description="Return to the overview for a workspace-wide summary of source, run, report, and access state."
                 eyebrow="Overview"
                 href={`/portal/workspaces/${workspaceId}`}
-                title="Open workspace overview"
+                title="Workspace"
               />
             </PortalLinkGrid>
           </article>
@@ -169,8 +155,7 @@ export default async function WorkspaceSourcesPage({
         <section className="portal-panel" data-testid="workspace-sources-list">
           <PortalSectionHeader
             badgeLabel="Inventory"
-            title="Workspace sources"
-            description="Review verification state, source location, and learnables before queueing analysis."
+            title="Sources"
           />
           <form className="stack-form form-shell" method="GET">
             <div className="form-grid">
@@ -214,16 +199,13 @@ export default async function WorkspaceSourcesPage({
                         <span className="tag tag--info">{source.visibility}</span>
                       </div>
                     </div>
-                    <PortalMetaList
-                      items={[
-                        { label: "Provider state", value: source.githubInstallationId ? "Linked GitHub installation" : "Direct source connection" },
-                        { label: "Learnables", value: learnables.length },
-                        {
-                          label: "Verification notes",
-                          value: source.verificationError ?? "No blocking verification errors recorded",
-                        },
-                      ]}
-                    />
+                    {source.verificationError ? (
+                      <PortalMetaList
+                        items={[
+                          { label: "Verification error", value: source.verificationError },
+                        ]}
+                      />
+                    ) : null}
                     {canManageWorkspace ? <SourceVerificationAction workspaceId={workspaceId} source={source} /> : null}
                     {learnables.length > 0 ? (
                       <p className="subtle-note">
@@ -263,7 +245,7 @@ export default async function WorkspaceSourcesPage({
             actions={<Link className="button-secondary" href={"/portal/workspaces" as Route}>Back to workspaces</Link>}
             description="You do not have access to this workspace."
             descriptionTestId="workspace-sources-access-denied"
-            title="This source workspace is not available to your account"
+            title="Access denied"
           />
         </PortalShell>
       );

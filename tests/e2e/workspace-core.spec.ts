@@ -9,6 +9,7 @@ import {
   assertAnalysisTaskCatalogEntry,
   auditCompletedJobExecution,
   deterministicE2eTaskLabel,
+  expectJobPlanVisible,
   queueAiTask,
   waitForJobSuccess,
 } from "./helpers/runs";
@@ -88,13 +89,16 @@ test.describe.serial("workspace core flows", () => {
     });
     assert.ok(primarySource);
 
+    await page.goto(`/portal/workspaces/${workspaceId}/settings`);
+    await expect(page.getByTestId("workspace-settings-secrets-panel")).toBeVisible();
+    await page.getByTestId("workspace-settings-secrets-name-input").fill("Preview login");
+    await page.getByTestId("workspace-settings-secrets-kind-select").selectOption("credential-pair");
+    await page.getByTestId("workspace-settings-secrets-value-input").fill("{\"username\":\"demo\",\"password\":\"secret\"}");
+    await page.getByTestId("workspace-settings-secrets-submit").click();
+    await expect(page.getByTestId("workspace-settings-secrets-panel")).toContainText("Preview login");
+
     await page.goto(`/portal/workspaces/${workspaceId}/runs`);
     await expect(page.getByTestId("workspace-runs-task-description")).toBeVisible();
-    await page.getByTestId("workspace-runs-secrets-name-input").fill("Preview login");
-    await page.getByTestId("workspace-runs-secrets-kind-select").selectOption("credential-pair");
-    await page.getByTestId("workspace-runs-secrets-value-input").fill("{\"username\":\"demo\",\"password\":\"secret\"}");
-    await page.getByTestId("workspace-runs-secrets-submit").click();
-    await expect(page.getByTestId("workspace-runs-secrets-panel")).toContainText("Preview login");
     await page.getByTestId("workspace-runs-secrets-fieldset").getByRole("checkbox", { name: /Preview login/ }).check();
     await assertAnalysisTaskCatalogEntry(page, {
       taskLabel: deterministicE2eTaskLabel,
@@ -108,6 +112,7 @@ test.describe.serial("workspace core flows", () => {
       taskLabel: deterministicE2eTaskLabel,
     });
     jobUrl = page.url();
+    await expectJobPlanVisible(page, { expectedMinimumSteps: 2 });
 
     reportUrl = await waitForJobSuccess(page);
     const executionAudit = await auditCompletedJobExecution(page, {
@@ -161,12 +166,12 @@ test.describe.serial("workspace core flows", () => {
     await page.getByTestId("workspace-access-add-member-submit").click();
     await expect(page.getByTestId("workspace-access-members-panel")).toContainText(memberUserEmail);
 
-    await page.goto(`/portal/workspaces/${workspaceId}/runs`);
+    await page.goto(`/portal/workspaces/${workspaceId}/settings`);
     page.once("dialog", async dialog => {
       await dialog.accept();
     });
-    await page.locator('[data-testid^="workspace-runs-secret-delete-"]').first().click();
-    await expect(page.getByTestId("workspace-runs-secrets-panel")).not.toContainText("Preview login");
+    await page.locator('[data-testid^="workspace-settings-secret-delete-"]').first().click();
+    await expect(page.getByTestId("workspace-settings-secrets-panel")).not.toContainText("Preview login");
     assert.ok(jobId);
   });
 

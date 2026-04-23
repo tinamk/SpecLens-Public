@@ -42,7 +42,7 @@ export function resolvePortalAuthEnv(env: NodeJS.ProcessEnv = process.env): Node
   }
   return {
     ...env,
-    PORTAL_SESSION_SECRET: portalSessionSecret || buildLocalDevFallbackSecret("session", env),
-    CSRF_SECRET: csrfSecret || buildLocalDevFallbackSecret("csrf", env),
+    PORTAL_SESSION_SECRET: portalSessionSecret || csrfSecret || buildLocalDevFallbackSecret("session", env),
+    CSRF_SECRET: csrfSecret || portalSessionSecret || buildLocalDevFallbackSecret("csrf", env),
   };
 }

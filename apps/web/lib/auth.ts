@@ -125,7 +125,12 @@ export function decodePortalSessionValue(sessionValue: string): PortalSession | 
 }
 
 export function getKeycloakConfig() {
-  const issuer = process.env.KEYCLOAK_ISSUER_URL ?? null;
+  const rawIssuer = process.env.KEYCLOAK_ISSUER_URL ?? null;
+  // KEYCLOAK_ISSUER_URL may be comma-separated when the app is reachable at
+  // multiple public origins (e.g. localhost + tailscale). The web app uses
+  // only the first entry to build login/redirect URLs; per-request host
+  // rewriting in `resolveConfiguredUrlForRequest` handles the others.
+  const issuer = rawIssuer ? rawIssuer.split(",")[0]!.trim() : null;
   const internalIssuer = process.env.KEYCLOAK_INTERNAL_ISSUER_URL ?? issuer;
   const clientId = process.env.KEYCLOAK_CLIENT_ID ?? null;
   const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET ?? null;
@@ -182,7 +187,12 @@ export function resolveConfiguredUrlForRequest(requestUrl: string, configuredUrl
   }
 
   const configured = new URL(configuredUrl);
-  const publicOrigin = resolveAuthBaseUrl(requestUrl, configured.origin);
+  const requestHost = new URL(requestUrl).hostname;
+  if (!isLoopbackHost(configured.hostname) || isLoopbackHost(requestHost)) {
+    return configured.toString();
+  }
+
+  const publicOrigin = new URL(requestUrl).origin;
   return new URL(`${configured.pathname}${configured.search}${configured.hash}`, `${publicOrigin}/`).toString();
 }
 

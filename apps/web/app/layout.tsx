@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
-import { Fraunces, Manrope } from "next/font/google";
+import { Archivo, IBM_Plex_Sans } from "next/font/google";
 import type { ReactNode } from "react";
 import "./globals.css";
 
-const bodyFont = Manrope({
+const bodyFont = IBM_Plex_Sans({
   subsets: ["latin"],
   variable: "--font-body",
   display: "swap",
+  weight: ["400", "500", "600", "700"],
 });
 
-const displayFont = Fraunces({
+const displayFont = Archivo({
   subsets: ["latin"],
   variable: "--font-display",
   display: "swap",
-  style: ["normal", "italic"],
-  weight: ["500", "600", "700"],
+  weight: ["600", "700"],
 });
 
 const themeScript = `

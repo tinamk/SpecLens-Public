@@ -53,7 +53,6 @@ export default async function WorkspaceAccessPage({
       <PortalShell
         eyebrow="Workspace access"
         title={workspaceConsole.workspace.name}
-        lede="Membership and access state live in their own route so collaboration and authorization are visible without mixing them into billing or run controls."
         pageTestId="workspace-access-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -64,22 +63,18 @@ export default async function WorkspaceAccessPage({
           <article className="portal-stat" data-testid="workspace-access-stat-members">
             <span className="portal-stat__label">Members</span>
             <span className="portal-stat__value">{workspaceConsole.members.length}</span>
-            <p>Total people with access to this workspace.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-access-stat-collaborators">
             <span className="portal-stat__label">Collaborators</span>
             <span className="portal-stat__value">{collaboratorCount}</span>
-            <p>Non-owner members currently sharing run and report visibility.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-access-stat-sources">
-            <span className="portal-stat__label">Shared sources</span>
+            <span className="portal-stat__label">Sources</span>
             <span className="portal-stat__value">{workspaceConsole.sources.length}</span>
-            <p>Repository inputs already visible to the workspace team.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-access-stat-runs">
-            <span className="portal-stat__label">Shared runs</span>
+            <span className="portal-stat__label">Runs</span>
             <span className="portal-stat__value">{workspaceConsole.jobs.length}</span>
-            <p>Run and report history governed by the same workspace membership.</p>
           </article>
         </section>
 
@@ -89,13 +84,12 @@ export default async function WorkspaceAccessPage({
               badgeLabel="Members"
               badgeClassName="tag tag--success"
               title="Workspace members"
-              description="Membership stays visible here so collaboration rules do not get buried inside run or billing screens."
             />
             {canManageWorkspace ? (
               <AddWorkspaceMemberForm workspaceId={workspaceId} />
             ) : (
               <p className="subtle-note" data-testid="workspace-access-read-only">
-                This account can review workspace membership, but only the workspace owner can add or remove members.
+                Owner only.
               </p>
             )}
             <form className="stack-form form-shell" method="GET">
@@ -128,13 +122,6 @@ export default async function WorkspaceAccessPage({
                         {member.userId === workspaceConsole.workspace.ownerUserId ? <span className="tag tag--info">workspace owner</span> : null}
                       </div>
                     </div>
-                    <div className="portal-record-card__body">
-                      <p>
-                        {member.userId === workspaceConsole.workspace.ownerUserId
-                          ? "Owns membership, billing, and workspace-scoped integration controls."
-                          : "Can review the shared sources, runs, reports, and code surfaces attached to this workspace."}
-                      </p>
-                    </div>
                     {canManageWorkspace && member.userId !== workspaceConsole.workspace.ownerUserId && member.role !== "owner" ? (
                       <div className="portal-record-card__actions">
                         <RemoveWorkspaceMemberButton
@@ -157,44 +144,35 @@ export default async function WorkspaceAccessPage({
             />
           </article>
           <article className="portal-panel" data-testid="workspace-access-state-panel">
-            <PortalSectionHeader
-              badgeLabel="State"
-              title="Access summary"
-              description="Workspace access governs reports, jobs, sources, and workspace-owned settings together."
-            />
+            <PortalSectionHeader badgeLabel="State" title="Access summary" />
             <PortalMetaList
               items={[
                 { label: "Owner", value: ownerMember ? `${ownerMember.displayName} (${ownerMember.email})` : workspaceConsole.workspace.ownerUserId },
-                { label: "Workspace entitlement", value: workspaceConsole.workspace.entitlement },
-                { label: "Member management", value: canManageWorkspace ? "This account can add or remove members" : "Workspace owner only" },
+                { label: "Entitlement", value: workspaceConsole.workspace.entitlement },
               ]}
             />
             <PortalLinkGrid>
               <PortalLinkCard
                 href={`/portal/workspaces/${workspaceId}`}
                 title="Workspace overview"
-                eyebrow="route hub"
-                description="Return to the summary route for navigation across this workspace."
+                eyebrow="hub"
               />
               <PortalLinkCard
                 href={`/portal/workspaces/${workspaceId}/settings`}
                 title="Workspace settings"
-                eyebrow="owner controls"
-                description="Review billing, entitlement, and GitHub installation state."
+                eyebrow="owner"
                 tone="warning"
               />
               <PortalLinkCard
                 href={`/portal/workspaces/${workspaceId}/runs`}
                 title="Run history"
-                eyebrow="shared execution"
-                description="Open the runs surface that the current membership can review."
+                eyebrow="execution"
                 tone="info"
               />
               <PortalLinkCard
                 href={`/portal/workspaces/${workspaceId}/reports`}
                 title="Report history"
-                eyebrow="shared review"
-                description="Open the generated reports visible to the current workspace members."
+                eyebrow="review"
                 tone="success"
               />
             </PortalLinkGrid>
@@ -216,7 +194,7 @@ export default async function WorkspaceAccessPage({
             actions={<Link className="button-secondary" href="/portal/workspaces">Back to workspaces</Link>}
             description="You do not have access to this workspace."
             descriptionTestId="workspace-access-denied"
-            title="This access surface is not available to your account"
+            title="Access denied"
           />
         </PortalShell>
       );

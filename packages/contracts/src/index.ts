@@ -573,7 +573,7 @@ export const jobTimingEstimateSchema = z.object({
 });
 export type JobTimingEstimate = z.infer<typeof jobTimingEstimateSchema>;
 
-export const analysisExecutionStepStatusSchema = z.enum(["running", "succeeded", "failed", "skipped"]);
+export const analysisExecutionStepStatusSchema = z.enum(["pending", "running", "succeeded", "failed", "skipped"]);
 export type AnalysisExecutionStepStatus = z.infer<typeof analysisExecutionStepStatusSchema>;
 
 export const analysisExecutionStepSchema = z.object({
@@ -652,6 +652,7 @@ export const analysisJobSchema = z.object({
   companionSourceLocation: z.string().nullable().default(null),
   roles: z.array(roleIdSchema),
   runtimeMode: analysisRuntimeModeSchema,
+  codexAuthScope: z.enum(["user", "workspace", "global"]).nullable().default(null),
   secretRefs: z.array(z.string()).default([]),
   requestedByUserId: z.string(),
   changeset: changesetSummarySchema.nullable().default(null),
@@ -770,6 +771,7 @@ export const createAnalysisJobInputSchema = z.object({
   agentId: z.string().optional(),
   roles: z.array(roleIdSchema).optional(),
   runtimeMode: analysisRuntimeModeSchema.optional(),
+  codexAuthScope: z.enum(["user", "workspace", "global"]).optional(),
   secretRefs: z.array(z.string()).optional(),
 });
 export type CreateAnalysisJobInput = z.infer<typeof createAnalysisJobInputSchema>;
@@ -778,6 +780,7 @@ export const createAgentJobInputSchema = z.object({
   sourceId: z.string(),
   companionSourceId: z.string().optional(),
   runtimeMode: analysisRuntimeModeSchema.optional(),
+  codexAuthScope: z.enum(["user", "workspace", "global"]).optional(),
   secretRefs: z.array(z.string()).optional(),
 });
 export type CreateAgentJobInput = z.infer<typeof createAgentJobInputSchema>;
@@ -983,6 +986,14 @@ export const analysisTaskSchema = z.object({
   title: z.string(),
   description: z.string().nullable().default(null),
   roleCount: z.number().int().nonnegative().default(0),
+  roles: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().default(null),
+    order: z.number().int().nonnegative().default(0),
+    executorKind: aiRoleExecutorKindSchema.nullable().default(null),
+    nativeExecutorId: z.string().nullable().default(null),
+  })).default([]),
   skillNames: z.array(z.string()).default([]),
   toolCapabilities: z.array(aiToolCapabilitySchema).default([]),
   createdAt: z.string(),
@@ -1241,6 +1252,7 @@ export const createAiAgentInputSchema = z.object({
 export type CreateAiAgentInput = z.infer<typeof createAiAgentInputSchema>;
 
 export const codexAuthStatusSchema = z.object({
+  scope: z.enum(["user", "workspace", "global"]).default("global"),
   status: z.enum(["unauthenticated", "pending", "ready", "error"]),
   authMode: z.enum(["chatgpt", "api-key"]).nullable().default(null),
   accountId: z.string().nullable().default(null),
@@ -1251,8 +1263,25 @@ export const codexAuthStatusSchema = z.object({
   intervalSeconds: z.number().int().nonnegative().nullable().default(null),
   lastError: z.string().nullable().default(null),
   lastRefresh: z.string().nullable().default(null),
+  disabled: z.boolean().default(false),
 });
 export type CodexAuthStatus = z.infer<typeof codexAuthStatusSchema>;
+
+export const codexAuthOptionSchema = z.object({
+  scope: z.enum(["user", "workspace", "global"]),
+  label: z.string(),
+  description: z.string(),
+  status: codexAuthStatusSchema,
+  available: z.boolean().default(false),
+  selectable: z.boolean().default(false),
+});
+export type CodexAuthOption = z.infer<typeof codexAuthOptionSchema>;
+
+export const codexAuthSelectionSchema = z.object({
+  selectedScope: z.enum(["user", "workspace", "global"]).nullable().default(null),
+  options: z.array(codexAuthOptionSchema).default([]),
+});
+export type CodexAuthSelection = z.infer<typeof codexAuthSelectionSchema>;
 
 export const sandboxSecretSchema = z.object({
   id: z.string(),

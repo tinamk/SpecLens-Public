@@ -22,7 +22,7 @@ export default async function AdminAiAuthPage() {
           badgeLabel="Admin only"
           description="Administrator access is required."
           descriptionTestId="admin-ai-access-denied"
-          title="This area is reserved for portal administrators"
+          title="Admin only"
         />
       </PortalShell>
     );
@@ -34,7 +34,6 @@ export default async function AdminAiAuthPage() {
     <PortalShell
       eyebrow="Admin AI"
       title="Codex auth"
-      lede="Device-flow authentication is isolated from skill, role, and agent management so admin-state transitions stay explicit and testable."
       pageTestId="admin-ai-auth-page"
       primaryNav={buildPortalPrimaryNav(true)}
       activePrimaryNavKey="admin"

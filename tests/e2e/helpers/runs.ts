@@ -562,6 +562,23 @@ export async function waitForJobStarted(
   return refreshedEnvelope;
 }
 
+export async function expectJobPlanVisible(
+  page: Page,
+  options: {
+    prefix?: string;
+    expectedMinimumSteps?: number;
+  } = {},
+): Promise<void> {
+  const prefix = options.prefix ?? "workspace-runs-job";
+  const steps = page.locator(`[data-testid^="${prefix}-step-"]`);
+  await expect(steps.first()).toBeVisible();
+  const count = await steps.count();
+  assert.ok(
+    count >= (options.expectedMinimumSteps ?? 1),
+    `Expected at least ${options.expectedMinimumSteps ?? 1} visible execution step card(s), found ${count}.`,
+  );
+}
+
 export async function expectJobConsoleControls(page: Page, prefix = "workspace-runs-job"): Promise<void> {
   await expect(page.getByTestId(`${prefix}-verbosity-default`)).toBeVisible();
   await expect(page.getByTestId(`${prefix}-verbosity-verbose`)).toBeVisible();

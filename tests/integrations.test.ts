@@ -209,6 +209,7 @@ test("web GitHub callback route links an installation and redirects back to the 
   }) as typeof fetch;
 
   process.env.GITHUB_GATEWAY_REGISTRATION_TOKEN = "gateway-secret";
+  delete process.env.APP_URL;
   const githubService = await import("../apps/api/src/services/github");
   const state = githubService.createSignedGithubInstallState({
     intentId: "ghintent_demo",

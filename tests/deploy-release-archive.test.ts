@@ -35,9 +35,66 @@ function createTempRepo(): { repoPath: string; cleanup: () => void } {
   };
 }
 
+function writeMinimalReleaseProject(repoPath: string): void {
+  fs.mkdirSync(path.join(repoPath, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repoPath, "package.json"),
+    JSON.stringify({
+      name: "speclens-release-archive-test",
+      version: "1.0.0",
+      private: true,
+      scripts: {
+        "db:generate": "node scripts/db-generate.mjs",
+        "web:build": "node scripts/web-build.mjs",
+      },
+    }, null, 2),
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(repoPath, "package-lock.json"),
+    JSON.stringify({
+      name: "speclens-release-archive-test",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": {
+          name: "speclens-release-archive-test",
+          version: "1.0.0",
+        },
+      },
+    }, null, 2),
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(repoPath, "scripts", "db-generate.mjs"),
+    [
+      "import fs from 'node:fs';",
+      "fs.mkdirSync('node_modules/.bin', { recursive: true });",
+      "fs.mkdirSync('node_modules/.prisma/client', { recursive: true });",
+      "fs.writeFileSync('node_modules/.bin/tsx', '#!/usr/bin/env node\\n');",
+      "fs.writeFileSync('node_modules/.bin/prisma', '#!/usr/bin/env node\\n');",
+    ].join("\n"),
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(repoPath, "scripts", "web-build.mjs"),
+    [
+      "import fs from 'node:fs';",
+      "fs.mkdirSync('apps/web/.next/static', { recursive: true });",
+      "fs.writeFileSync('apps/web/.next/BUILD_ID', 'test-build\\n');",
+    ].join("\n"),
+    "utf8",
+  );
+}
+
 function runArchiveBuilder(repoPath: string, archivePath: string) {
   return spawnSync("bash", [scriptPath, repoPath, archivePath], {
     encoding: "utf8",
+    env: {
+      ...process.env,
+      SPECLENS_RELEASE_BUILD_MODE: "local",
+    },
   });
 }
 
@@ -46,14 +103,15 @@ test("deploy archive builder packages committed HEAD content from a clean repo",
   t.after(cleanup);
 
   fs.writeFileSync(path.join(repoPath, "tracked.txt"), "committed\n", "utf8");
-  runGit(repoPath, ["add", "tracked.txt"]);
+  writeMinimalReleaseProject(repoPath);
+  runGit(repoPath, ["add", "tracked.txt", "package.json", "package-lock.json", "scripts"]);
   runGit(repoPath, ["commit", "--quiet", "-m", "initial"]);
 
   const archivePath = path.join(repoPath, "..", "release.tar.gz");
   const result = runArchiveBuilder(repoPath, archivePath);
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const extracted = spawnSync("tar", ["-xOzf", archivePath, "tracked.txt"], {
+  const extracted = spawnSync("tar", ["-xOzf", archivePath, "./tracked.txt"], {
     encoding: "utf8",
   });
   assert.equal(extracted.status, 0, extracted.stderr || extracted.stdout);

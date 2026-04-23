@@ -53,6 +53,7 @@ export default async function WorkspaceJobPage({
     const isWorkspaceOwner = currentUser.id === workspaceConsole.workspace.ownerUserId;
     const canManageLifecycle = canManageWorkspaceJobLifecycle(envelope.job.jobKind, isWorkspaceOwner);
     const sourceLearnables = await getSourceLearnables(envelope.job.workspaceId, envelope.job.sourceId);
+    const selectedTask = envelope.job.agentId ? tasks.find(task => task.agentId === envelope.job.agentId) ?? null : null;
     const executionLabel = formatJobLabel(envelope.job, tasks);
     const changesetBranchName = envelope.job.changeset ? getChangesetBranchName({
       branchName: envelope.job.changeset.branchName,
@@ -73,7 +74,6 @@ export default async function WorkspaceJobPage({
       <PortalShell
         eyebrow="Workspace run"
         title={envelope.job.id}
-        lede="Live logs stay visible from the run route while report review remains a separate report surface."
         pageTestId="workspace-runs-job-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -84,22 +84,19 @@ export default async function WorkspaceJobPage({
           <article className="portal-stat" data-testid="workspace-runs-job-stat-status">
             <span className="portal-stat__label">Status</span>
             <span className="portal-stat__value">{envelope.job.status}</span>
-            <p>{envelope.report ? "Report output is available for this run." : "Stay on the run surface until the report is written."}</p>
+            {envelope.report ? <p>Report ready</p> : null}
           </article>
           <article className="portal-stat" data-testid="workspace-runs-job-stat-artifacts">
             <span className="portal-stat__label">Artifacts</span>
             <span className="portal-stat__value">{artifactCount}</span>
-            <p>Durable files stored for this job so far.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-runs-job-stat-learnables">
             <span className="portal-stat__label">Learnables</span>
             <span className="portal-stat__value">{learnableCount}</span>
-            <p>Source-specific learnables available while reviewing this run.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-runs-job-stat-lifecycle">
             <span className="portal-stat__label">Lifecycle</span>
             <span className="portal-stat__value">{canManageLifecycle ? "Owner" : "Read-only"}</span>
-            <p>{canManageLifecycle ? "This session can cancel or retry this job when allowed." : "Only the workspace owner can manage this job lifecycle."}</p>
           </article>
         </section>
 
@@ -107,8 +104,7 @@ export default async function WorkspaceJobPage({
           <article className="portal-panel xl:col-span-2" data-testid="workspace-runs-job-console-panel">
             <PortalSectionHeader
               badgeLabel="Console"
-              title="Job stream"
-              description="Monitor the durable queue output here while the hosted sandbox job continues or settles."
+              title="Live job stream"
             />
             <JobLogConsole
               jobId={envelope.job.id}
@@ -116,6 +112,11 @@ export default async function WorkspaceJobPage({
               initialStatus={envelope.job.status}
               initialExecutionSteps={envelope.executionSteps}
               initialTiming={envelope.timing}
+              agentId={envelope.job.agentId}
+              agentName={selectedTask?.title ?? null}
+              jobRoleIds={envelope.job.roles}
+              plannedRoles={selectedTask?.roles ?? []}
+              includeMaterializeStage={envelope.job.jobKind === "audit"}
               testIdPrefix="workspace-runs-job"
             />
           </article>
@@ -124,7 +125,6 @@ export default async function WorkspaceJobPage({
               badgeLabel="Metadata"
               badgeClassName="tag tag--info"
               title="Run details"
-              description="Use this panel to understand execution mode, ownership, and where to go next."
             />
             <div className="status-cluster">
               <span className={getJobStatusTagClass(envelope.job.status)}>{envelope.job.status}</span>
@@ -154,7 +154,7 @@ export default async function WorkspaceJobPage({
             />
             {!canManageLifecycle ? (
               <p className="subtle-note" data-testid="workspace-runs-job-lifecycle-read-only">
-                This account can review run logs and artifacts, but only the workspace owner can cancel or retry jobs.
+                Owner only.
               </p>
             ) : null}
             <JobLifecycleActions
@@ -195,14 +195,6 @@ export default async function WorkspaceJobPage({
               </article>
             ) : null}
             <div className="portal-action-bar">
-              <div className="portal-action-copy">
-                <strong>Move from execution to review</strong>
-                <p>
-                  {envelope.report
-                    ? "Open the generated report for normalized findings and release-gate review, or jump straight into code review when you already know the branch context you need."
-                    : "The report link appears here once this queued job reaches a terminal state. Until then, use code review or the parent report to keep the remediation thread moving."}
-                </p>
-              </div>
               <div className="portal-inline-actions">
                 {envelope.report ? (
                   <Link
@@ -239,8 +231,7 @@ export default async function WorkspaceJobPage({
           <PortalSectionHeader
             badgeLabel="Learnables"
             badgeClassName="tag tag--success"
-            title="Active source learnables"
-            description="Use source learnables as the current repository context while you interpret this job."
+            title="Source learnables"
           />
           {sourceLearnables.length === 0 ? <p className="subtle-note" data-testid="workspace-runs-job-learnables-empty">No learnables stored for this source yet.</p> : null}
           {sourceLearnables.length > 0 ? (
@@ -257,11 +248,6 @@ export default async function WorkspaceJobPage({
                       <span className="tag tag--info">{learnable.evidence.length} evidence note{learnable.evidence.length === 1 ? "" : "s"}</span>
                     </div>
                   </div>
-                  {learnable.evidence.length > 0 ? (
-                    <div className="portal-record-card__body">
-                      <p>{learnable.evidence.join(" · ")}</p>
-                    </div>
-                  ) : null}
                 </article>
               ))}
             </div>
@@ -272,7 +258,6 @@ export default async function WorkspaceJobPage({
           <PortalSectionHeader
             badgeLabel="Artifacts"
             title="Job artifacts"
-            description="Download the durable files captured by the hosted run when you need raw evidence outside the browser."
           />
           {envelope.artifacts.length === 0 ? <p className="subtle-note">No artifacts registered for this job yet.</p> : null}
           {envelope.artifacts.length > 0 ? (
@@ -290,12 +275,6 @@ export default async function WorkspaceJobPage({
                       <span className="tag tag--neutral">{formatBytes(artifact.sizeBytes)}</span>
                     </div>
                   </div>
-                  <PortalMetaList
-                    items={[
-                      { label: "Delivery", value: artifact.signedUrl ? "Signed download URL" : "Portal proxy download" },
-                      { label: "Evidence size", value: formatBytes(artifact.sizeBytes) },
-                    ]}
-                  />
                   <div className="portal-record-card__actions">
                     <a
                       className="button-ghost"
@@ -326,7 +305,7 @@ export default async function WorkspaceJobPage({
             actions={<Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/runs` as Route}>Back to runs</Link>}
             description="You do not have access to this job."
             descriptionTestId="workspace-runs-job-access-denied"
-            title="This job is not available to your account"
+            title="Access denied"
           />
         </PortalShell>
       );

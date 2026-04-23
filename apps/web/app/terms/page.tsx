@@ -10,8 +10,8 @@ export default function TermsPage() {
       <main className="legal-layout" data-testid="public-terms-main">
         <MarketingPageHero
           eyebrow="Terms"
-          title="Hosted terms focus on safe usage of the managed service and the evidence it produces."
-          description="Hosted Free and Pro plans apply to the managed SpecLens SaaS. Commercial licensing for the codebase is handled separately."
+          title="Terms for the hosted service."
+          description="Hosted Free and Pro apply to the managed SaaS. Commercial codebase licensing is handled separately."
           asideLabel="Plain-language rule"
           asideValue="Use the service responsibly, respect access controls, and expect hosted artifacts to follow retention policy."
           actions={
@@ -27,19 +27,16 @@ export default function TermsPage() {
           <article className="legal-panel">
             <span className="tag tag--neutral">Service usage</span>
             <p>
-              By submitting a run you authorize SpecLens to execute the analysis in an isolated sandbox and to store the
+              By submitting a run you authorize SpecLens to execute the analysis in an isolated sandbox and store the
               resulting logs, artifacts, and reports needed to present results in the portal.
             </p>
-            <p>
-              These artifacts are retained according to the configured retention policy and may be removed after the
-              retention window expires.
-            </p>
+            <p>Artifacts follow the configured retention policy and may be removed after the window expires.</p>
           </article>
           <article className="legal-panel">
             <span className="tag tag--warning">Access and billing</span>
             <p>
-              Payment access, private repository access, and hosted execution are subject to plan entitlements. Abuse,
-              unauthorized access, or attempts to bypass authentication and billing checks may result in access revocation.
+              Payment access, private repository access, and hosted execution are subject to plan entitlements. Abuse or
+              attempts to bypass authentication and billing may result in access revocation.
             </p>
           </article>
         </section>

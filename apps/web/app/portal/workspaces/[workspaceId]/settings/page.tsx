@@ -1,22 +1,29 @@
 import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { CodexAuthCard } from "../../../../../components/codex-auth-card";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import {
   BillingPortalButton,
   CheckoutButton,
+  CreateWorkspaceSecretForm,
+  DeleteWorkspaceSecretButton,
   GithubInstallationUnlinkButton,
   GithubInstallButton,
+  UpdateWorkspaceSecretForm,
 } from "../../../../../components/portal-actions";
 import {
   ApiResponseError,
   getCurrentUser,
   getGithubRepositoriesPage,
+  getWorkspaceCodexAuthStatus,
   getWorkspaceConsole,
+  getWorkspaceSecretsPage,
 } from "../../../../../lib/api";
 import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
+  isWorkspaceScopedEntityPage,
   isWorkspaceScopedGithubRepositoriesPage,
   isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
@@ -66,7 +73,12 @@ export default async function WorkspaceSettingsPage({
       page: typeof query.page === "string" ? Number.parseInt(query.page, 10) || 1 : 1,
       pageSize: 25,
     };
-    const [workspaceConsole, { items: githubRepositories, pageInfo }, currentUser] = await Promise.all([
+    const secretQuery = {
+      q: typeof query.secretQ === "string" ? query.secretQ : "",
+      page: typeof query.secretPage === "string" ? Number.parseInt(query.secretPage, 10) || 1 : 1,
+      pageSize: 25,
+    };
+    const [workspaceConsole, { items: githubRepositories, pageInfo }, { items: secrets, pageInfo: secretsPageInfo }, currentUser] = await Promise.all([
       getWorkspaceConsole(workspaceId),
       getGithubRepositoriesPage(workspaceId, {
         page: repositoryQuery.page,
@@ -74,11 +86,20 @@ export default async function WorkspaceSettingsPage({
         ...(repositoryQuery.installationId ? { installationId: repositoryQuery.installationId } : {}),
         ...(repositoryQuery.q ? { q: repositoryQuery.q } : {}),
       }),
+      getWorkspaceSecretsPage(workspaceId, {
+        page: secretQuery.page,
+        pageSize: secretQuery.pageSize,
+        ...(secretQuery.q ? { q: secretQuery.q } : {}),
+      }),
       getCurrentUser(),
     ]);
     const canManageWorkspace = currentUser.id === workspaceConsole.workspace.ownerUserId;
+    const workspaceCodexAuth = canManageWorkspace
+      ? await getWorkspaceCodexAuthStatus(workspaceId)
+      : null;
     if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)
-      || !isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations, githubRepositories)) {
+      || !isWorkspaceScopedGithubRepositoriesPage(workspaceConsole.installations, githubRepositories)
+      || !isWorkspaceScopedEntityPage(workspaceId, secrets)) {
       throw new ApiResponseError(404, `Workspace settings payload does not belong to workspace ${workspaceId}.`);
     }
     const privateRepositories = githubRepositories.filter(repository => repository.private).length;
@@ -98,7 +119,6 @@ export default async function WorkspaceSettingsPage({
       <PortalShell
         eyebrow="Workspace settings"
         title={workspaceConsole.workspace.name}
-        lede="Workspace entitlement, billing entrypoints, and GitHub installation state are owned by the workspace and live here."
         pageTestId="workspace-settings-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -111,22 +131,23 @@ export default async function WorkspaceSettingsPage({
           <article className="portal-stat" data-testid="workspace-settings-stat-entitlement">
             <span className="portal-stat__label">Entitlement</span>
             <span className="portal-stat__value">{workspaceConsole.workspace.entitlement}</span>
-            <p>Controls private repository access, billing entrypoints, and archive upload rights.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-settings-stat-installations">
             <span className="portal-stat__label">GitHub installs</span>
             <span className="portal-stat__value">{workspaceConsole.installations.length}</span>
-            <p>Linked installations attached to this workspace.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-settings-stat-repositories">
             <span className="portal-stat__label">Visible repos</span>
             <span className="portal-stat__value">{githubRepositories.length}</span>
-            <p>{privateRepositories} private repos currently available for source intake.</p>
+            <p>{privateRepositories} private</p>
+          </article>
+          <article className="portal-stat" data-testid="workspace-settings-stat-secrets">
+            <span className="portal-stat__label">Run secrets</span>
+            <span className="portal-stat__value">{secretsPageInfo.total}</span>
           </article>
           <article className="portal-stat" data-testid="workspace-settings-stat-owner">
             <span className="portal-stat__label">Controls</span>
             <span className="portal-stat__value">{canManageWorkspace ? "Owner" : "Member"}</span>
-            <p>Only the workspace owner can change billing or link GitHub installs.</p>
           </article>
         </section>
 
@@ -136,12 +157,10 @@ export default async function WorkspaceSettingsPage({
               badgeLabel="Billing"
               badgeClassName="tag tag--warning"
               title="Entitlement and billing"
-              description="Workspace-owned billing lives here so plan changes stay tied to the right repository scope."
             />
             <PortalMetaList
               items={[
                 { label: "Current entitlement", value: <span data-testid="workspace-settings-entitlement">{workspaceConsole.workspace.entitlement}</span> },
-                { label: "Billing authority", value: canManageWorkspace ? "This account can manage billing" : "Workspace owner only" },
               ]}
             />
             {canManageWorkspace ? (
@@ -155,7 +174,7 @@ export default async function WorkspaceSettingsPage({
               </div>
             ) : (
               <p className="subtle-note" data-testid="workspace-settings-billing-read-only">
-                Only the workspace owner can change billing. Members can review entitlement state here.
+                Owner only.
               </p>
             )}
           </article>
@@ -164,13 +183,6 @@ export default async function WorkspaceSettingsPage({
               badgeLabel="GitHub"
               badgeClassName="tag tag--info"
               title="GitHub App link"
-              description="Request the real install URL from SpecLens, then attach or refresh the workspace installation from this screen."
-            />
-            <PortalMetaList
-              items={[
-                { label: "Linked installations", value: workspaceConsole.installations.length },
-                { label: "Visible repositories", value: githubRepositories.length },
-              ]}
             />
             {canManageWorkspace ? (
               <GithubInstallButton
@@ -180,44 +192,134 @@ export default async function WorkspaceSettingsPage({
               />
             ) : (
               <p className="subtle-note" data-testid="workspace-settings-github-read-only">
-                Only the workspace owner can link or unlink GitHub installations for this workspace.
+                Owner only.
               </p>
             )}
           </article>
           <article className="portal-panel" data-testid="workspace-settings-guide-panel">
             <PortalSectionHeader
-              badgeLabel="Readiness"
-              title="Private repo readiness"
-              description="Use the installation and repository lists below to confirm what the workspace can actually add as private sources."
-            />
-            <PortalMetaList
-              items={[
-                { label: "Private repositories visible", value: privateRepositories },
-                { label: "Grouped by install", value: "Repository inventory stays partitioned by linked installation" },
-              ]}
+              badgeLabel="Jump to"
+              title="Related"
             />
             <PortalLinkGrid>
               <PortalLinkCard
                 href={`/portal/workspaces/${workspaceId}/sources`}
-                title="Source intake"
-                eyebrow="next step"
-                description="Open the sources route to add a verified public, private, or archive-backed repository."
+                title="Sources"
+                eyebrow="intake"
                 tone="info"
               />
               <PortalLinkCard
                 href={`/portal/workspaces/${workspaceId}/access`}
-                title="Access controls"
-                eyebrow="collaboration"
-                description="Review who can see the private repositories and reports attached to this workspace."
+                title="Access"
+                eyebrow="members"
               />
               <PortalLinkCard
                 href="/portal/settings"
                 title="Portal settings"
-                eyebrow="global context"
-                description="Move back to account-level settings when you need portal-wide context."
+                eyebrow="global"
                 tone="warning"
               />
             </PortalLinkGrid>
+          </article>
+        </section>
+
+        <section className="portal-grid">
+          <div className="xl:col-span-2">
+            {workspaceCodexAuth ? (
+              <CodexAuthCard
+                title="Workspace Codex auth"
+                description="Register a shared Codex session for this workspace. Members can choose it when queueing runs, but it remains isolated to this workspace."
+                initialAuth={workspaceCodexAuth}
+                devicePath={`/api/workspaces/${workspaceId}/ai/auth/device`}
+                verifyPath={`/api/workspaces/${workspaceId}/ai/auth/verify`}
+                logoutPath={`/api/workspaces/${workspaceId}/ai/auth/logout`}
+                importLocalPath={`/api/workspaces/${workspaceId}/ai/auth/import-local`}
+                testId="workspace-settings-codex-auth"
+              />
+            ) : (
+              <PortalNoticePanel
+                badgeLabel="Owner only"
+                title="Workspace Codex auth"
+                description="Only the workspace owner can register or replace the shared workspace-level Codex session."
+                descriptionTestId="workspace-settings-codex-auth-read-only"
+              />
+            )}
+          </div>
+        </section>
+
+        <section className="portal-grid">
+          <article className="portal-panel xl:col-span-2" data-testid="workspace-settings-secrets-panel">
+            <PortalSectionHeader
+              badgeLabel="Secrets"
+              badgeClassName="tag tag--warning"
+              title="Workspace run secrets"
+              description="Store reusable credentials for queued analysis runs. Values are masked after save and remain scoped to this workspace."
+            />
+            <form className="stack-form form-shell" method="GET">
+              <div className="form-grid">
+                <label className="field field--full">
+                  <span>Search secrets</span>
+                  <input
+                    autoComplete="off"
+                    data-testid="workspace-settings-secrets-search-input"
+                    defaultValue={secretQuery.q}
+                    name="secretQ"
+                    placeholder="Filter by name, kind, or preview..."
+                  />
+                </label>
+              </div>
+              <input name="installationId" type="hidden" value={repositoryQuery.installationId} />
+              <input name="q" type="hidden" value={repositoryQuery.q} />
+              <input name="page" type="hidden" value={String(repositoryQuery.page)} />
+              <button className="button-ghost" data-testid="workspace-settings-secrets-search-submit" type="submit">Apply secret filter</button>
+            </form>
+            {canManageWorkspace ? (
+              <CreateWorkspaceSecretForm workspaceId={workspaceId} testIdPrefix="workspace-settings-secrets" />
+            ) : (
+              <p className="subtle-note" data-testid="workspace-settings-secrets-read-only">
+                Owner only.
+              </p>
+            )}
+            {secrets.length === 0 ? <p className="subtle-note">No workspace secrets stored yet.</p> : null}
+            {secrets.length > 0 ? (
+              <div className="portal-record-grid">
+                {secrets.map(secret => (
+                  <article className="portal-record-card" data-testid={`workspace-settings-secret-row-${secret.id}`} key={secret.id}>
+                    <div className="portal-record-card__header">
+                      <div className="portal-record-card__title">
+                        <strong>{secret.name}</strong>
+                        <p>{secret.valuePreview}</p>
+                      </div>
+                      <div className="portal-record-card__meta">
+                        <span className="tag tag--neutral">{secret.kind}</span>
+                      </div>
+                    </div>
+                    {canManageWorkspace ? (
+                      <div className="portal-record-card__actions">
+                        <UpdateWorkspaceSecretForm
+                          workspaceId={workspaceId}
+                          secret={secret}
+                          testIdPrefix="workspace-settings-secrets"
+                        />
+                        <DeleteWorkspaceSecretButton
+                          workspaceId={workspaceId}
+                          secretId={secret.id}
+                          secretName={secret.name}
+                          testId={`workspace-settings-secret-delete-${secret.id}`}
+                        />
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : null}
+            <PaginationLinks
+              pathname={`/portal/workspaces/${workspaceId}/settings`}
+              searchParams={query}
+              pageInfo={secretsPageInfo}
+              pageParamKey="secretPage"
+              testIdPrefix="workspace-settings-secrets"
+            />
           </article>
         </section>
 
@@ -227,17 +329,15 @@ export default async function WorkspaceSettingsPage({
               badgeLabel="Installations"
               badgeClassName="tag tag--warning"
               title="GitHub installations"
-              description="Each linked installation remains workspace-owned and can be detached here."
             />
             {workspaceConsole.installations.length === 0 ? <p className="subtle-note">No installations registered yet.</p> : null}
             {workspaceConsole.installations.length > 0 ? (
               <div className="portal-record-grid">
-                {repositoriesByInstallation.map(({ installation, repositories, privateRepositoryCount }) => (
+                {repositoriesByInstallation.map(({ installation, repositories }) => (
                   <article className="portal-record-card" data-testid={`workspace-settings-installation-${installation.id}`} key={installation.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
                         <strong>{installation.githubAccountLogin}</strong>
-                        <p>Workspace-owned GitHub App installation ready for private source intake.</p>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className="tag tag--success">linked</span>
@@ -247,8 +347,6 @@ export default async function WorkspaceSettingsPage({
                     <PortalMetaList
                       items={[
                         { label: "Installation id", value: installation.githubInstallationId },
-                        { label: "Visible repos", value: repositories.length },
-                        { label: "Private repos", value: privateRepositoryCount },
                       ]}
                     />
                     {canManageWorkspace ? (
@@ -271,7 +369,6 @@ export default async function WorkspaceSettingsPage({
               badgeLabel="Repositories"
               badgeClassName="tag tag--success"
               title="Available GitHub repositories"
-              description="Filter repository visibility by linked installation before adding a private source."
             />
             <form className="stack-form form-shell" method="GET">
               <div className="form-grid">
@@ -301,6 +398,8 @@ export default async function WorkspaceSettingsPage({
                   </select>
                 </label>
               </div>
+              <input name="secretQ" type="hidden" value={secretQuery.q} />
+              <input name="secretPage" type="hidden" value={String(secretQuery.page)} />
               <button className="button-ghost" data-testid="workspace-settings-github-search-submit" type="submit">Apply repository filter</button>
             </form>
             {githubRepositories.length === 0 ? <p className="subtle-note">No installation repositories available yet.</p> : null}
@@ -310,7 +409,7 @@ export default async function WorkspaceSettingsPage({
                   <div className="portal-record-card__header">
                     <div className="portal-record-card__title">
                       <strong>{installation.githubAccountLogin}</strong>
-                      <p>Repository inventory available through installation {installation.githubInstallationId}.</p>
+                      <p>Installation {installation.githubInstallationId}</p>
                     </div>
                     <div className="portal-record-card__meta">
                       <span className="tag tag--neutral">{repositories.length} visible</span>
@@ -336,13 +435,6 @@ export default async function WorkspaceSettingsPage({
                             <span className={repository.private ? "tag tag--warning" : "tag tag--neutral"}>{repository.private ? "private" : "public"}</span>
                             <span className="tag tag--info">default {repository.defaultBranch}</span>
                           </div>
-                        </div>
-                        <div className="portal-record-card__body">
-                          <p>
-                            {repository.private
-                              ? "Available for private-source intake through this linked workspace installation."
-                              : "Public repository visible through the linked GitHub App installation."}
-                          </p>
                         </div>
                       </article>
                     ))}
@@ -374,7 +466,7 @@ export default async function WorkspaceSettingsPage({
             actions={<Link className="button-secondary" href="/portal/workspaces">Back to workspaces</Link>}
             description="You do not have access to this workspace."
             descriptionTestId="workspace-settings-access-denied"
-            title="This settings surface is not available to your account"
+            title="Access denied"
           />
         </PortalShell>
       );

@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
+import { analysisReportSummarySchema } from "@speclens/contracts";
 import {
+  addWorkspaceMember,
   createAgentJobForUser,
+  createRemediationJobForUser,
   createSourceForUser,
   createWorkspaceForUser,
   getPrismaClient,
+  getJobEnvelopeById,
   getWorkspaceDetailForUser,
   initializeDatabase,
+  storeCodexTokens,
+  storeUserCodexTokens,
   upsertUserIdentity,
 } from "@speclens/db";
 import { createHomeTempDirSync } from "@speclens/core";
@@ -317,6 +323,126 @@ test("workspace detail filters historical jobs with invalid persisted companion 
 
     const detail = await getWorkspaceDetailForUser(workspace.id, user.id);
     assert.equal(detail.jobs.length, 0);
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test("remediation jobs do not inherit another user's personal Codex auth binding", async () => {
+  const databaseUrl = await preparePrismaTestDatabase(createTestDatabaseName("jobrouting"));
+  const originalEnv = { ...process.env };
+  process.env.DATABASE_URL = databaseUrl;
+  Object.assign(process.env, { NODE_ENV: "test" });
+  process.env.OBJECT_STORAGE_PROVIDER = "local";
+  process.env.APP_STATE_PATH = path.join(createHomeTempDirSync("speclens-job-routing-remediation-auth-"), "state.json");
+  process.env.APP_STATE_ENCRYPTION_KEY = "speclens-job-routing-remediation-auth-secret";
+
+  try {
+    await initializeDatabase();
+    const prisma = getPrismaClient();
+    const owner = await upsertUserIdentity({
+      provider: "local-dev",
+      subject: "job-routing-remediation-owner",
+      email: "job-routing-remediation-owner@speclens.dev",
+      displayName: "Job Routing Remediation Owner",
+    });
+    const member = await upsertUserIdentity({
+      provider: "local-dev",
+      subject: "job-routing-remediation-member",
+      email: "job-routing-remediation-member@speclens.dev",
+      displayName: "Job Routing Remediation Member",
+    });
+    const workspace = await createWorkspaceForUser(owner, {
+      name: "Job Routing Remediation Auth Workspace",
+    });
+    await addWorkspaceMember(workspace.id, owner.id, { email: member.email });
+    const source = await createSourceForUserForTests(workspace.id, owner.id, {
+      type: "git-public",
+      displayName: "Remediation Auth Fixture",
+      location: staticFixtureRepoUrl,
+    });
+
+    await storeUserCodexTokens(member.id, {
+      accessToken: "member.header.payload.signature",
+      refreshToken: null,
+      idToken: null,
+      accountId: "member-account",
+    });
+    await storeCodexTokens({
+      accessToken: "global.header.payload.signature",
+      refreshToken: null,
+      idToken: null,
+      accountId: "global-account",
+    });
+
+    const memberJob = await createAgentJobForUser(workspace.id, member.id, "agent-universal-standard", {
+      sourceId: source.id,
+      codexAuthScope: "user",
+    });
+    assert.equal(memberJob.job.codexAuthScope, "user");
+
+    const reportId = "report_remediation_auth_scope";
+    await prisma.analysisJob.update({
+      where: { id: memberJob.job.id },
+      data: {
+        reportId,
+        status: "succeeded",
+      },
+    });
+    await prisma.analysisReport.create({
+      data: {
+        id: reportId,
+        workspaceId: workspace.id,
+        jobId: memberJob.job.id,
+        status: "ready",
+        rolesJson: [],
+        runtimeMode: "static",
+        title: "Remediation auth scope report",
+        summaryJson: analysisReportSummarySchema.parse({
+          totalFindings: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+        }),
+        findingsJson: [],
+        sectionsJson: [],
+      },
+    });
+
+    const remediationJob = await createRemediationJobForUser(reportId, owner.id, {
+      sourceId: source.id,
+      baseRef: "HEAD",
+      selectionMode: "auto-priority",
+      selectedFindingIds: [],
+      maxIterations: 2,
+      outputMode: "changeset",
+      publishRemote: false,
+    });
+    assert.equal(remediationJob.job.codexAuthScope, "global");
+
+    const persisted = await getJobEnvelopeById(remediationJob.job.id);
+    assert.equal(persisted.job.codexAuthScope, "global");
+    const remediationRecord = await prisma.analysisJob.findUnique({
+      where: { id: remediationJob.job.id },
+      select: { metadataJson: true },
+    });
+    assert.deepEqual(remediationRecord?.metadataJson, {
+      codexAuth: {
+        scope: "global",
+        recordId: "codex:global",
+      },
+      remediation: {
+        reportId,
+        sourceId: source.id,
+        baseRef: "HEAD",
+        selectionMode: "auto-priority",
+        selectedFindingIds: [],
+        maxIterations: 2,
+        outputMode: "changeset",
+        publishRemote: false,
+        changeset: null,
+      },
+    });
   } finally {
     process.env = originalEnv;
   }

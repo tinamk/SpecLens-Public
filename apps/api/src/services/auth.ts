@@ -52,11 +52,19 @@ async function verifyKeycloakToken(token: string): Promise<{
     throw new Error("Keycloak is not configured for bearer-token validation.");
   }
 
+  const allowedIssuers = config.keycloakIssuerUrl
+    .split(",")
+    .map(entry => entry.trim())
+    .filter(entry => entry.length > 0);
+  const issuerOption: string | string[] = allowedIssuers.length > 1
+    ? allowedIssuers
+    : (allowedIssuers[0] ?? config.keycloakIssuerUrl);
+
   const jwks = getRemoteJwkSet(config.keycloakInternalIssuerUrl);
   let payload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
   try {
     ({ payload } = await jwtVerify(token, jwks, {
-      issuer: config.keycloakIssuerUrl,
+      issuer: issuerOption,
       ...(config.keycloakClientId ? { audience: config.keycloakClientId } : {}),
     }));
   } catch (error) {

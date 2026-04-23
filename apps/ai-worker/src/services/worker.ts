@@ -34,7 +34,7 @@ import {
   finalizeAnalysisJobFailure,
   finalizeAnalysisJobSuccess,
   getAiAgentExecutionPlan,
-  getCodexTokens,
+  getCodexTokensForBinding,
   initializeDatabase,
   isCancellationRequested,
   listActiveSourceLearnables,
@@ -45,7 +45,7 @@ import {
   renderCodexAuthFile,
   storeReportChangeset,
   storeRemediationJobChangeset,
-  storeCodexTokens,
+  storeCodexTokensForBinding,
   workAgentJobs,
   type JobExecutionRecord,
   type ObjectStorageConfig,
@@ -160,6 +160,7 @@ type NativeExecutorId =
   | "native-ui-label-scan"
   | "native-browser-suite"
   | "native-visual-inspection"
+  | "deterministic-remediation-planning"
   | "deterministic-standardized-handoff";
 
 type RuntimeExecutionTarget = {
@@ -223,6 +224,7 @@ const findingCategoryByRoleId: Record<string, z.infer<typeof findingCategorySche
   "cross-surface-consistency-reviewer": "consistency",
   "artifact-auditor": "artifact",
   "remediation-planner": "ops",
+  "e2e-remediation-planner": "ops",
   "fix-readiness-emitter": "ops",
   "release-gate-scorer": "ops",
   "standardized-json-output": "ops",
@@ -274,6 +276,8 @@ function summarizeExecutionStep(step: AnalysisExecutionStep): string {
     : "unknown";
   const detail = step.detail ? ` ${step.detail}` : "";
   switch (step.status) {
+    case "pending":
+      return `${agent} -> ${owner} pending via ${executor}.${detail}`;
     case "running":
       return `${agent} -> ${owner} started via ${executor}.${detail}`;
     case "succeeded":
@@ -2069,6 +2073,42 @@ function buildRemediationPacks(findings: AnalysisReport["findings"]): z.infer<ty
   });
 }
 
+function buildDeterministicRemediationPlannerOutput(options: {
+  priorOutputs: PriorRoleOutput[];
+}): RoleOutput {
+  const syntheticFindings = collectSyntheticFindings(options.priorOutputs);
+  const remediationPacks = buildRemediationPacks(syntheticFindings);
+  const prioritizedFindings = syntheticFindings
+    .filter(finding => finding.severity === "high" || finding.severity === "medium")
+    .slice(0, 8)
+    .map(finding => ({
+      id: finding.id,
+      severity: finding.severity,
+      title: finding.title,
+      category: finding.category,
+    }));
+  const summary = remediationPacks.length > 0
+    ? `${remediationPacks.length} remediation pack(s) were synthesized deterministically from ${syntheticFindings.length} collected finding(s).`
+    : syntheticFindings.length > 0
+      ? `No remediation packs were synthesized from ${syntheticFindings.length} collected finding(s).`
+      : "No remediation planning was needed because the prior roles produced no findings.";
+
+  return roleOutputSchema.parse({
+    summary,
+    sections: [{
+      title: "Remediation planning",
+      status: "ready",
+      summary,
+      data: {
+        remediationPacks,
+        prioritizedFindings,
+        findingCount: syntheticFindings.length,
+      },
+    }],
+    findings: [],
+  });
+}
+
 function attachRemediationPackIds(
   findings: AnalysisReport["findings"],
   remediationPacks: z.infer<typeof remediationPackSchema>[],
@@ -2766,8 +2806,13 @@ function isRetryableCodexFailure(result: CodexRunResult): boolean {
   ].some(fragment => combined.includes(fragment));
 }
 
-async function stageCodexAuth(tempDir: string): Promise<string | null> {
-  const tokens = await getCodexTokens();
+async function stageCodexAuth(tempDir: string, execution: JobExecutionRecord): Promise<string | null> {
+  const tokens = await getCodexTokensForBinding(
+    execution.metadata.codexAuth ?? {
+      scope: "global",
+      recordId: "codex:global",
+    },
+  );
   if (!tokens) {
     return null;
   }
@@ -2779,7 +2824,7 @@ async function stageCodexAuth(tempDir: string): Promise<string | null> {
   return authPath;
 }
 
-async function syncCodexAuth(authPath: string | null): Promise<void> {
+async function syncCodexAuth(authPath: string | null, execution: JobExecutionRecord): Promise<void> {
   if (!authPath || !fs.existsSync(authPath)) {
     return;
   }
@@ -2789,7 +2834,13 @@ async function syncCodexAuth(authPath: string | null): Promise<void> {
     return;
   }
 
-  await storeCodexTokens(tokens);
+  await storeCodexTokensForBinding(
+    execution.metadata.codexAuth ?? {
+      scope: "global",
+      recordId: "codex:global",
+    },
+    tokens,
+  );
 }
 
 function isIgnoredRepoDir(name: string): boolean {
@@ -4276,6 +4327,7 @@ function estimateRoleDurationMs(roleId: string, runtimeMode: JobExecutionRecord[
       return runtimeMode === "browser" ? 7_500 : 3_000;
     case "artifact-auditor":
     case "remediation-planner":
+    case "e2e-remediation-planner":
     case "release-gate-scorer":
       return 1_500;
     case "standardized-json-output":
@@ -4347,6 +4399,16 @@ function pickRoleOutput(priorOutputs: PriorRoleOutput[], roleId: string): PriorR
   return null;
 }
 
+function pickRoleOutputFromIds(priorOutputs: PriorRoleOutput[], roleIds: string[]): PriorRoleOutput | null {
+  for (const roleId of roleIds) {
+    const candidate = pickRoleOutput(priorOutputs, roleId);
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function pickSectionData(
   priorOutputs: PriorRoleOutput[],
   roleId: string,
@@ -4363,6 +4425,41 @@ function pickSectionData(
     }
   }
   return roleOutput.output.sections[0]?.data ?? {};
+}
+
+function pickSectionDataFromRoleIds(
+  priorOutputs: PriorRoleOutput[],
+  roleIds: string[],
+  preferredTitles: string[] = [],
+): Record<string, unknown> {
+  const roleOutput = pickRoleOutputFromIds(priorOutputs, roleIds);
+  if (!roleOutput) {
+    return {};
+  }
+  for (const title of preferredTitles) {
+    const matchingSection = roleOutput.output.sections.find(section => section.title === title);
+    if (matchingSection?.data) {
+      return matchingSection.data;
+    }
+  }
+  return roleOutput.output.sections[0]?.data ?? {};
+}
+
+function collectSyntheticFindings(priorOutputs: PriorRoleOutput[]): AnalysisReport["findings"] {
+  return priorOutputs.flatMap(output => output.output.findings.map(finding => ({
+    id: finding.id ?? createId("finding"),
+    roleId: output.roleId,
+    category: normalizeFindingCategory(finding.category, output.roleId),
+    severity: finding.severity,
+    title: finding.title,
+    message: finding.message,
+    suggestion: finding.suggestion,
+    evidence: finding.evidence,
+    evidenceRefs: [],
+    sourceIds: finding.sourceIds ?? [],
+    paths: finding.paths ?? [],
+    remediationPackIds: [],
+  })));
 }
 
 function combineUniqueStrings(...valueSets: unknown[]): string[] {
@@ -4513,27 +4610,18 @@ function buildDeterministicStandardizedHandoff(options: {
   const browserData = pickSectionData(options.priorOutputs, "browser-executor", ["Browser execution plan"]);
   const playwrightData = pickSectionData(options.priorOutputs, "playwright-operator", ["Playwright operator plan", "Playwright preflight"]);
   const artifactData = pickSectionData(options.priorOutputs, "artifact-auditor", ["Artifact expectations"]);
-  const remediationData = pickSectionData(options.priorOutputs, "remediation-planner", ["Remediation planning"]);
+  const remediationData = pickSectionDataFromRoleIds(
+    options.priorOutputs,
+    ["remediation-planner", "e2e-remediation-planner"],
+    ["Remediation planning"],
+  );
   const fixReadinessData = pickSectionData(options.priorOutputs, "fix-readiness-emitter", ["Fix readiness handoff"]);
   const releaseData = pickSectionData(options.priorOutputs, "release-gate-scorer", ["Release gate recommendation"]);
   const liveSurfaceData = pickSectionData(options.priorOutputs, "live-surface-resolver", ["Live surface resolution"]);
   const topologyData = pickSectionData(options.priorOutputs, "source-topology-scout", ["Source topology", "Repository inventory"]);
   const preflightPlan = detectPlaywrightPreflight(options.repoPath);
   const runtimeFallback = inferRuntimeFallback(options.repoPath);
-  const syntheticFindings = options.priorOutputs.flatMap(output => output.output.findings.map(finding => ({
-    id: finding.id ?? createId("finding"),
-    roleId: output.roleId,
-    category: normalizeFindingCategory(finding.category, output.roleId),
-    severity: finding.severity,
-    title: finding.title,
-    message: finding.message,
-    suggestion: finding.suggestion,
-    evidence: finding.evidence,
-    evidenceRefs: [],
-    sourceIds: finding.sourceIds ?? [],
-    paths: finding.paths ?? [],
-    remediationPackIds: [],
-  })));
+  const syntheticFindings = collectSyntheticFindings(options.priorOutputs);
   const remediationPacks = normalizeRemediationPacks(
     remediationData.remediationPacks
     ?? remediationData.packCandidates
@@ -4921,6 +5009,13 @@ async function executeNativeRole(options: {
           logs: result.logs,
         };
       }
+    case "deterministic-remediation-planning":
+      return {
+        output: buildDeterministicRemediationPlannerOutput({
+          priorOutputs: options.priorOutputs,
+        }),
+        logs: [],
+      };
     case "deterministic-standardized-handoff":
       return {
         output: buildDeterministicStandardizedHandoff({
@@ -4961,6 +5056,7 @@ async function executeRole(options: {
   logs: AnalysisLogEvent[];
   priorOutputs: PriorRoleOutput[];
   learnables: Learnable[];
+  execution: JobExecutionRecord;
   primarySource: JobExecutionRecord["source"];
   companionSource?: JobExecutionRecord["source"] | null;
   secrets: JobExecutionRecord["secrets"];
@@ -5221,7 +5317,9 @@ async function executeRole(options: {
       onStderrLine: line => appendLog(options.jobId, options.logs, "codex", `${options.role.name}: ${line}`, "warn", undefined, "verbose"),
       ...(outputSchemaPath ? { outputSchemaPath } : {}),
     });
-    await syncCodexAuth(options.authPath);
+    if (!run.timedOut && run.exitCode === 0) {
+      await syncCodexAuth(options.authPath, options.execution);
+    }
 
     if (!run.timedOut && run.exitCode === 0) {
       break;
@@ -5306,7 +5404,26 @@ async function executeRole(options: {
     throw new Error(`${options.role.name} failed${detail ? `: ${detail}` : "."}`);
   }
 
-  const baseOutput = readRoleOutput(outputPath);
+  let baseOutput: RoleOutput;
+  try {
+    baseOutput = readRoleOutput(outputPath);
+  } catch (error) {
+    if (options.role.executorKind === "hybrid" && nativeOutput) {
+      const detail = error instanceof Error ? error.message : "Codex emitted invalid JSON.";
+      await appendLog(
+        options.jobId,
+        options.logs,
+        "agent",
+        `Role ${options.role.name} produced invalid Codex JSON; using deterministic native output instead. ${truncateLogMessage(detail, 240)}`,
+        "warn",
+        undefined,
+        defaultVisibility,
+      );
+      baseOutput = nativeOutput;
+    } else {
+      throw error;
+    }
+  }
   const withExecutionEvidence = options.role.id === "playwright-operator"
     ? await augmentWithPlaywrightPreflight({
         jobId: options.jobId,
@@ -5543,7 +5660,7 @@ async function runAgentJob(
       });
       throw error;
     }
-    const authPath = await stageCodexAuth(tempDir);
+    const authPath = await stageCodexAuth(tempDir, execution);
     const primaryLearnables = await listActiveSourceLearnables(execution.source.id);
     const companionLearnables = execution.companionSource
       ? (await listActiveSourceLearnables(execution.companionSource.id)).map(learnable => ({
@@ -5588,6 +5705,7 @@ async function runAgentJob(
         logs,
         priorOutputs,
         learnables,
+        execution,
         primarySource: execution.source,
         companionSource: execution.companionSource,
         secrets: execution.secrets,
@@ -5809,7 +5927,7 @@ async function runRemediationJob(
   const tempDir = createRemediationTempDir();
   const exportDir = path.join(tempDir, "exports");
   const repoDir = path.join(tempDir, "repo");
-  const authPath = await stageCodexAuth(tempDir);
+  const authPath = await stageCodexAuth(tempDir, execution);
   const requestId = execution.job.queueMessageId ?? undefined;
   const stepBase = `${jobId}-remediation`;
 
@@ -5904,6 +6022,7 @@ async function runRemediationJob(
           lastValidationOutput ? `Previous validation output:\n${lastValidationOutput}` : "",
         ].filter(Boolean).join("\n");
         await runCodexRemediation({ repoPath, prompt, outputPath, authPath });
+        await syncCodexAuth(authPath, execution);
         const changedFilesAfterEdit = (await runGit(["status", "--short"], repoPath))
           .split("\n")
           .map(line => line.trim())

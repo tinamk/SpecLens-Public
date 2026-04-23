@@ -5,6 +5,7 @@ import type {
   AnalysisTask,
   CodeReviewPayload,
   AnalysisReport,
+  CodexAuthSelection,
   CodexAuthStatus,
   GithubInstallation,
   GithubRepository,
@@ -274,6 +275,21 @@ export async function runReportRemediation(reportId: string, input: {
 export async function getAdminAiAuthStatus(): Promise<CodexAuthStatus> {
   const payload = await apiFetch<{ auth: CodexAuthStatus }>("/api/admin/ai/auth/status");
   return payload.auth;
+}
+
+export async function getMyCodexAuthStatus(): Promise<CodexAuthStatus> {
+  const payload = await apiFetch<{ auth: CodexAuthStatus }>("/api/me/ai/auth/status");
+  return payload.auth;
+}
+
+export async function getWorkspaceCodexAuthStatus(workspaceId: string): Promise<CodexAuthStatus> {
+  const payload = await apiFetch<{ auth: CodexAuthStatus }>(`/api/workspaces/${workspaceId}/ai/auth/status`);
+  return payload.auth;
+}
+
+export async function getWorkspaceCodexAuthSelection(workspaceId: string): Promise<CodexAuthSelection> {
+  const payload = await apiFetch<{ selection: CodexAuthSelection }>(`/api/workspaces/${workspaceId}/ai/auth-options`);
+  return payload.selection;
 }
 
 export async function getAdminAiSkills(): Promise<AiSkill[]> {

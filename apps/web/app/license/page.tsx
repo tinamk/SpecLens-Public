@@ -10,11 +10,10 @@ export default function LicensePage() {
       <main className="legal-layout" data-testid="public-license-main">
         <MarketingPageHero
           eyebrow="Dual licensing"
-          title="Hosted SpecLens plans and commercial codebase rights are separate decisions."
-          description="Use Free or Pro when you want the managed SpecLens SaaS. Use the commercial path when your company needs rights to self-host, modify, redistribute, or otherwise use the SpecLens codebase beyond the default non-commercial license."
+          title="Hosted plans and codebase rights are separate decisions."
+          description="Hosted Free and Pro cover the managed SaaS. Commercial is a separate contract path for self-hosting, redistribution, or company use of the codebase."
           asideLabel="Quick rule"
           asideValue="Buy hosted access on Pricing. Ask for codebase rights on Commercial."
-          asideDescription="This page is the routing guide for teams that need the distinction spelled out clearly."
           testId="public-license-hero"
         />
 
@@ -22,46 +21,54 @@ export default function LicensePage() {
           <MarketingRoutePanel
             badgeLabel="Hosted SaaS"
             badgeClassName="tag tag--success"
-            description="Free and Pro cover hosted repo analysis, shared workspaces, and the self-serve SaaS workflow. You do not need a separate commercial code license just to buy hosted access."
+            description="Hosted Free and Pro do not require a separate code license."
             title="Choose Pricing if you only need the managed service."
-            actions={<Link className="button-secondary" data-testid="public-license-pricing-cta" href="/pricing">View hosted plans</Link>}
+            actions={
+              <>
+                <Link className="button" data-testid="public-license-pricing-cta" href="/pricing">View hosted plans</Link>
+                <Link className="button-ghost" href="/api/auth/login">Try hosted</Link>
+              </>
+            }
           />
           <MarketingRoutePanel
             badgeLabel="Commercial rights"
             badgeClassName="tag tag--warning"
-            description="Commercial conversations cover company usage of the codebase, self-hosted deployment, redistribution questions, procurement review, and tailored contract terms."
+            description="Self-hosting, redistribution, and company codebase use need a commercial agreement."
             title="Choose Commercial if you need codebase rights or self-hosting."
             tone="commercial"
             actions={
-              <Link className="button-ghost" data-testid="public-license-commercial-cta" href="/commercial">
-                Talk commercial licensing
-              </Link>
+              <>
+                <Link className="button" data-testid="public-license-commercial-cta" href="/commercial">
+                  Talk commercial licensing
+                </Link>
+                <Link className="button-ghost" href="/pricing">Compare plans</Link>
+              </>
             }
           />
         </MarketingRouteSplit>
 
         <p className="subtle-note" data-testid="public-license-rights-note">
-          Hosted Free and Pro plans govern SaaS usage only. Commercial codebase rights and self-hosting stay on a separate path.
+          Hosted Free and Pro plans govern SaaS usage only. Codebase rights stay on the commercial path.
         </p>
 
         <section className="legal-grid legal-grid--balanced">
           <article className="legal-panel">
             <span className="tag tag--warning">Common scenarios</span>
-            <h2>Use this page as the quick routing guide.</h2>
+            <h2>Quick routing guide</h2>
             <ul className="bullet-list" data-testid="public-license-scenarios">
-              <li>I want to sign up and use SpecLens in the cloud - go to Pricing.</li>
-              <li>I need hosted access to private repositories - choose Pro on Pricing.</li>
+              <li>I want hosted access in the cloud - go to Pricing.</li>
+              <li>I need private repositories - choose Pro on Pricing.</li>
               <li>I need to self-host SpecLens in my own environment - contact Commercial.</li>
               <li>I need company rights to modify, redistribute, or review the codebase - contact Commercial.</li>
             </ul>
           </article>
           <aside className="legal-panel">
-            <span className="tag tag--success">What the default license means</span>
-            <h3>Code access is source-available by default, but not sold under a permissive commercial open-source model.</h3>
+            <span className="tag tag--success">Default license</span>
+            <h3>Source-available, not permissive open-source.</h3>
             <ul className="bullet-list">
-              <li>Hosted Free and Pro plans govern usage of the managed SpecLens SaaS.</li>
-              <li>The repository code itself is not offered under a permissive commercial open-source license.</li>
-              <li>Commercial self-hosted or company redistribution rights require a separate agreement.</li>
+              <li>Hosted plans govern use of the managed SaaS.</li>
+              <li>The codebase is not offered under a permissive commercial open-source license.</li>
+              <li>Self-hosting and company redistribution require a commercial agreement.</li>
             </ul>
           </aside>
         </section>

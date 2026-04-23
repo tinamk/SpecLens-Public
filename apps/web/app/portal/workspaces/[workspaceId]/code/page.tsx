@@ -68,7 +68,6 @@ export default async function WorkspaceCodePage({
         <PortalShell
           eyebrow="Workspace code"
           title={workspaceConsole.workspace.name}
-          lede="Select a Git source before reviewing files, diffs, changesets, or pull requests."
           pageTestId="workspace-code-page"
           primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
           activePrimaryNavKey="workspaces"
@@ -79,17 +78,14 @@ export default async function WorkspaceCodePage({
             <article className="portal-stat" data-testid="workspace-code-stat-sources">
               <span className="portal-stat__label">Sources</span>
               <span className="portal-stat__value">{workspaceConsole.sources.length}</span>
-              <p>Choose one source before loading code review state.</p>
             </article>
             <article className="portal-stat" data-testid="workspace-code-stat-private-sources">
               <span className="portal-stat__label">GitHub-backed</span>
               <span className="portal-stat__value">{privateSources}</span>
-              <p>Sources that can expose GitHub PR metadata inside this route.</p>
             </article>
             <article className="portal-stat" data-testid="workspace-code-stat-archives">
               <span className="portal-stat__label">Archives</span>
               <span className="portal-stat__value">{archiveSources}</span>
-              <p>Uploaded Git repository archives retained for review.</p>
             </article>
           </section>
 
@@ -99,7 +95,6 @@ export default async function WorkspaceCodePage({
                 badgeLabel="Source"
                 badgeClassName="tag tag--info"
                 title="Select a repository"
-                description="Pick the exact Git source you want to inspect before branches, diffs, or PR metadata load."
               />
               <PortalLinkGrid>
                 {workspaceConsole.sources.map(source => (
@@ -120,12 +115,10 @@ export default async function WorkspaceCodePage({
                 badgeLabel="Permissions"
                 badgeClassName="tag tag--warning"
                 title="Mutation policy"
-                description="Code review stays readable for all members, but mutation controls remain intentionally restricted."
               />
               <PortalMetaList
                 items={[
-                  { label: "Current mode", value: canMutate ? "Can launch remediation and remote publish flows" : "read-only for code review and remediation" },
-                  { label: "Why this route exists", value: "Keep tree browsing, diffs, and remediation context separate from queueing and reports" },
+                  { label: "Mode", value: canMutate ? "Owner" : "read-only" },
                 ]}
               />
             </article>
@@ -166,7 +159,6 @@ export default async function WorkspaceCodePage({
       <PortalShell
         eyebrow="Workspace code"
         title={workspaceConsole.workspace.name}
-        lede="Browse the source tree, inspect file content or diffs, and review PR and remediation context without leaving the workspace."
         pageTestId="workspace-code-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -177,22 +169,19 @@ export default async function WorkspaceCodePage({
           <article className="portal-stat" data-testid="workspace-code-stat-refs">
             <span className="portal-stat__label">Refs</span>
             <span className="portal-stat__value">{review.refs.length}</span>
-            <p>{review.compareRef ? `Comparing ${review.compareRef} against ${review.selectedRef}.` : `Currently inspecting ${review.selectedRef}.`}</p>
+            <p>{review.compareRef ? `${review.compareRef} vs ${review.selectedRef}` : review.selectedRef}</p>
           </article>
           <article className="portal-stat" data-testid="workspace-code-stat-tree">
-            <span className="portal-stat__label">Tree entries</span>
+            <span className="portal-stat__label">Entries</span>
             <span className="portal-stat__value">{review.tree.length}</span>
-            <p>Available files and directories for the selected ref and source.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-code-stat-findings">
             <span className="portal-stat__label">Findings</span>
             <span className="portal-stat__value">{totalFindings}</span>
-            <p>{review.activeReportId ? "Report-linked findings and fix guidance are available below." : "Open a report-linked view for focused fix context."}</p>
           </article>
           <article className="portal-stat" data-testid="workspace-code-stat-changesets">
             <span className="portal-stat__label">Changesets</span>
             <span className="portal-stat__value">{review.changesets.length}</span>
-            <p>{review.prSupport === "available" ? "GitHub PR metadata is available for this source." : "This source does not expose GitHub PR metadata."}</p>
           </article>
         </section>
 
@@ -202,14 +191,6 @@ export default async function WorkspaceCodePage({
               badgeLabel="Source"
               badgeClassName="tag tag--info"
               title={review.source.displayName}
-              description="Switch between workspace sources without leaving the code review surface."
-            />
-            <PortalMetaList
-              items={[
-                { label: "Source type", value: formatSourceType(review.source.type) },
-                { label: "Location", value: review.source.location },
-                { label: "PR metadata", value: review.prSupport === "available" ? "Available for this source" : "Unavailable for this source" },
-              ]}
             />
             <PortalLinkGrid>
               {workspaceConsole.sources.map(source => (
@@ -230,13 +211,12 @@ export default async function WorkspaceCodePage({
             <PortalSectionHeader
               badgeLabel="Ref"
               title="Branches and refs"
-              description="Move between branches or compare against another ref without leaving the current workspace source."
             />
             <PortalMetaList
               items={[
                 { label: "Selected ref", value: review.selectedRef },
-                { label: "Diff base", value: review.compareRef ?? "No comparison loaded" },
-                { label: "Report context", value: review.activeReportId ?? "No report-linked focus" },
+                ...(review.compareRef ? [{ label: "Diff base", value: review.compareRef }] : []),
+                ...(review.activeReportId ? [{ label: "Report context", value: review.activeReportId }] : []),
               ]}
             />
             <PortalLinkGrid>
@@ -252,7 +232,7 @@ export default async function WorkspaceCodePage({
                   }) as Route}
                   title={gitRef.name}
                   eyebrow={gitRef.isHead ? "head ref" : "available ref"}
-                  description={review.compareRef === gitRef.name ? "Current diff base" : "Open this ref in the code review surface"}
+                  {...(review.compareRef === gitRef.name ? { description: "current diff base" } : {})}
                   active={gitRef.name === review.selectedRef}
                   testId={`workspace-code-ref-${gitRef.name.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
                   tone={gitRef.name === review.selectedRef ? "success" : "neutral"}
@@ -265,12 +245,11 @@ export default async function WorkspaceCodePage({
               badgeLabel="Permissions"
               badgeClassName="tag tag--warning"
               title="Mutation policy"
-              description="Review stays visible here even when mutation controls are intentionally restricted."
             />
             <PortalMetaList
               items={[
-                { label: "Current mode", value: canMutate ? "Can launch remediation and remote publish workflows" : "read-only for code review and remediation" },
-                { label: "Selected path", value: review.selectedPath ?? "No file selected yet" },
+                { label: "Mode", value: canMutate ? "Owner" : "read-only" },
+                ...(review.selectedPath ? [{ label: "Selected path", value: review.selectedPath }] : []),
               ]}
             />
           </article>
@@ -281,7 +260,6 @@ export default async function WorkspaceCodePage({
             <PortalSectionHeader
               badgeLabel="Tree"
               title="Repository tree"
-              description="Use the tree to pivot quickly into changed files or finding-linked paths."
             />
             <PortalLinkGrid>
               {review.tree.map(entry => (
@@ -297,13 +275,13 @@ export default async function WorkspaceCodePage({
                   }) as Route}
                   title={entry.path}
                   eyebrow={entry.kind === "directory" ? "directory" : "file"}
-                  description={entry.changed && entry.hasFindings
-                    ? "Changed in the current comparison and referenced by findings"
+                  {...(entry.changed && entry.hasFindings
+                    ? { description: "changed · has findings" }
                     : entry.changed
-                      ? "Changed in the current comparison"
+                      ? { description: "changed" }
                       : entry.hasFindings
-                        ? "Referenced by report findings"
-                        : "Open in the current source and ref"}
+                        ? { description: "has findings" }
+                        : {})}
                   active={entry.path === review.selectedPath}
                   testId={`workspace-code-tree-entry-${entry.path.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
                   tone={entry.hasFindings ? "warning" : entry.changed ? "info" : "neutral"}
@@ -318,7 +296,6 @@ export default async function WorkspaceCodePage({
               badgeLabel="Viewer"
               badgeClassName="tag tag--success"
               title={review.selectedPath ?? "Select a file to inspect"}
-              description={review.compareRef ? `Diffing ${review.compareRef} against ${review.selectedRef}.` : `Inspecting ${review.selectedRef} in the selected source.`}
             />
             {review.compareRef ? <p data-testid="workspace-code-diff-header"><strong>Diff:</strong> {review.compareRef} {"->"} {review.selectedRef}</p> : null}
             {review.diff ? <pre className="data-preview" data-testid="workspace-code-diff">{review.diff}</pre> : null}
@@ -342,7 +319,6 @@ export default async function WorkspaceCodePage({
               badgeLabel="Changesets"
               badgeClassName="tag tag--warning"
               title="Latest remediation jobs"
-              description="Review the latest generated branches, validation state, and publish handoff here."
             />
             {review.changesets.length === 0 ? <p className="subtle-note">No remediation changesets are available for this source yet.</p> : null}
             {review.changesets.length > 0 ? (
@@ -355,7 +331,7 @@ export default async function WorkspaceCodePage({
                           branchName: changeset.branchName,
                           pullInstructions: changeset.pullInstructions,
                         }) ?? "No branch created"}</strong>
-                        <p>Remediation run {changeset.jobId.slice(0, 8)} generated this candidate handoff.</p>
+                        <p>Run {changeset.jobId.slice(0, 8)}</p>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className={changeset.validationPassed ? "tag tag--success" : "tag tag--warning"}>
@@ -367,18 +343,9 @@ export default async function WorkspaceCodePage({
                     <PortalMetaList
                       items={[
                         { label: "Changed files", value: changeset.changedFiles.length },
-                        {
-                          label: "Validation",
-                          value: changeset.validationCommands.length > 0
-                            ? changeset.validationCommands.join(", ")
-                            : "No validation commands captured",
-                        },
-                        {
-                          label: "Pull/apply",
-                          value: changeset.pullInstructions.length > 0
-                            ? changeset.pullInstructions.join(" | ")
-                            : "No pull instructions recorded",
-                        },
+                        ...(changeset.validationCommands.length > 0
+                          ? [{ label: "Validation", value: changeset.validationCommands.join(", ") }]
+                          : []),
                       ]}
                     />
                     <div className="portal-record-card__actions">
@@ -395,7 +362,6 @@ export default async function WorkspaceCodePage({
             <PortalSectionHeader
               badgeLabel="Audit context"
               title="Findings and fix guidance"
-              description="Keep report-linked findings, remediation packs, and fix handoff context visible while you inspect code."
             />
             <PortalMetaList
               items={[
@@ -463,7 +429,6 @@ export default async function WorkspaceCodePage({
                         </div>
                       </div>
                       {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
-                      <p className="subtle-note">This finding is not mapped to a specific source yet.</p>
                       <div className="portal-record-card__actions">
                         <Link
                           className="button-ghost"
@@ -543,18 +508,18 @@ export default async function WorkspaceCodePage({
                 : error.status === 400
                 ? error.message
                 : error.status === 404
-                  ? "The requested source, report, or finding is not available for this code review surface."
-                  : "You do not have access to this workspace code review surface."
+                  ? "The requested target is unavailable."
+                  : "You do not have access to this code review surface."
             }
             descriptionTestId="workspace-code-access-denied"
             title={
               error.status === 409
-                ? "Refresh the code review surface"
+                ? "Refresh code review"
                 : error.status === 400
-                  ? "This code review route cannot open the requested target"
+                  ? "Cannot open target"
                   : error.status === 404
-                    ? "The requested review target is no longer available"
-                    : "This workspace code review surface is restricted"
+                    ? "Target not found"
+                    : "Access denied"
             }
           />
         </PortalShell>

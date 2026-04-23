@@ -19,13 +19,13 @@ import {
   downloadObjectToFile,
   finalizeAnalysisJobFailure,
   finalizeAnalysisJobSuccess,
-  getCodexTokens,
+  getCodexTokensForBinding,
   initializeDatabase,
   isCancellationRequested,
   mirrorArtifactsToObjectStorage,
   parseCodexAuthFile,
   renderCodexAuthFile,
-  storeCodexTokens,
+  storeCodexTokensForBinding,
   type ObjectStorageConfig,
   putObjectFromFile,
   workRunnerJobs,
@@ -402,8 +402,16 @@ function buildSandboxRequest(
   return { request, requestPath, outputRoot };
 }
 
-async function stageCodexAuth(tempDir: string): Promise<{ sandboxAuthPath: string | null }> {
-  const tokens = await getCodexTokens();
+async function stageCodexAuth(
+  tempDir: string,
+  execution: JobExecutionRecord,
+): Promise<{ sandboxAuthPath: string | null }> {
+  const tokens = await getCodexTokensForBinding(
+    execution.metadata.codexAuth ?? {
+      scope: "global",
+      recordId: "codex:global",
+    },
+  );
   if (!tokens) {
     return { sandboxAuthPath: null };
   }
@@ -415,7 +423,7 @@ async function stageCodexAuth(tempDir: string): Promise<{ sandboxAuthPath: strin
   return { sandboxAuthPath };
 }
 
-async function syncCodexAuth(tempDir: string): Promise<void> {
+async function syncCodexAuth(tempDir: string, execution: JobExecutionRecord): Promise<void> {
   const authPath = path.join(tempDir, "codex", "auth.json");
   if (!fs.existsSync(authPath)) {
     return;
@@ -426,7 +434,13 @@ async function syncCodexAuth(tempDir: string): Promise<void> {
     return;
   }
 
-  await storeCodexTokens(tokens);
+  await storeCodexTokensForBinding(
+    execution.metadata.codexAuth ?? {
+      scope: "global",
+      recordId: "codex:global",
+    },
+    tokens,
+  );
 }
 
 function pipeOutput(stream: NodeJS.ReadableStream, filePath: string): void {
@@ -444,7 +458,7 @@ async function runSandboxContainer(
   const config = loadRunnerConfig();
   const mountRoot = "/speclens-run";
   const containerName = `speclens-${safeSegment(execution.job.id)}-${safeSegment(config.runnerId)}`.slice(0, 63);
-  const { sandboxAuthPath } = await stageCodexAuth(tempDir);
+  const { sandboxAuthPath } = await stageCodexAuth(tempDir, execution);
   const dockerArgs = [
     "run",
     "--rm",
@@ -735,11 +749,13 @@ async function executeQueuedJob(jobId: string, queueMessageId?: string): Promise
     const sandboxStartedAt = Date.now();
     const sandboxResult = await runSandboxContainer(execution, requestPath, tempDir, stdoutPath, stderrPath);
     recordSandboxDuration(sandboxResult.cancelled ? "cancelled" : sandboxResult.timedOut || sandboxResult.exitCode !== 0 ? "failed" : "succeeded", Date.now() - sandboxStartedAt);
-    try {
-      await syncCodexAuth(tempDir);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to sync Codex auth after sandbox run.";
-      await appendLog(jobId, "sandbox", message, "warn", requestId);
+    if (!sandboxResult.cancelled && !sandboxResult.timedOut && sandboxResult.exitCode === 0) {
+      try {
+        await syncCodexAuth(tempDir, execution);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to sync Codex auth after sandbox run.";
+        await appendLog(jobId, "sandbox", message, "warn", requestId);
+      }
     }
     const rawLogArtifacts = await uploadRawLogArtifacts(jobId, stdoutPath, stderrPath);
 

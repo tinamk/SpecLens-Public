@@ -170,6 +170,7 @@ export const mockReport: AnalysisReport = {
 };
 
 export const mockCodexAuthStatus: CodexAuthStatus = {
+  scope: "global",
   status: "unauthenticated",
   authMode: null,
   accountId: null,
@@ -180,6 +181,7 @@ export const mockCodexAuthStatus: CodexAuthStatus = {
   intervalSeconds: null,
   lastError: null,
   lastRefresh: null,
+  disabled: false,
 };
 
 export const mockAiSkills: AiSkill[] = [

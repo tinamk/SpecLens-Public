@@ -18,11 +18,10 @@ export default function PricingPage() {
       <main data-testid="public-pricing-main">
         <MarketingPageHero
           eyebrow="Pricing"
-          title="Choose hosted access when you need the managed service. Choose commercial when you need company rights."
-          description="Free and Pro are for the hosted SpecLens product. Commercial is the separate contract path for self-hosting, procurement review, or rights to use the codebase beyond the default license."
-          asideLabel="Decision rule"
-          asideValue="Service access and codebase rights are not the same purchase."
-          asideDescription="Use this page to route quickly instead of decoding licensing language after the fact."
+          title="Hosted plans for specification-driven QA."
+          description="Free for public repos. Pro for private repos and archive uploads. Commercial is a separate contract path for codebase rights."
+          asideLabel="Quick rule"
+          asideValue="Hosted plans cover execution. Commercial covers rights and self-hosting."
           testId="public-pricing-hero"
         />
 
@@ -30,76 +29,76 @@ export default function PricingPage() {
           <MarketingRoutePanel
             badgeLabel="Hosted SaaS"
             badgeClassName="tag tag--success"
-            description="Free covers public GitHub analysis. Pro unlocks private GitHub repositories, archive uploads, and ongoing hosted use."
+            description="Public GitHub on Free. Private GitHub and archive uploads on Pro."
             title="Choose Pro if you need hosted access to private repos."
+            actions={
+              <>
+                <Link className="button" href="/api/auth/login">Start hosted</Link>
+                <Link className="button-ghost" href="#pricing-plans">Compare plans</Link>
+              </>
+            }
           />
           <MarketingRoutePanel
             badgeLabel="Commercial rights"
             badgeClassName="tag tag--warning"
-            description="Commercial conversations cover codebase rights, internal deployment, procurement review, and tailored terms."
-            title="Choose Commercial if you need company usage rights or self-hosting."
+            description="Codebase rights, self-hosting, and procurement review live on a separate contract path."
+            title="Choose Commercial for company rights or self-hosting."
             tone="commercial"
+            actions={
+              <>
+                <Link className="button" href="/commercial">Contact us</Link>
+                <Link className="button-ghost" href="/license">License details</Link>
+              </>
+            }
           />
         </MarketingRouteSplit>
 
-        <p className="subtle-note" data-testid="public-pricing-rights-note">
+        <p className="subtle-note pricing-note" data-testid="public-pricing-rights-note">
           Free and Pro cover hosted SaaS usage only. They do not include commercial codebase rights.
         </p>
 
-        <section className="section">
+        <section className="section" id="pricing-plans">
           <MarketingSectionHeading
-            kicker="Hosted SaaS plans"
-            title="Choose the self-serve plan for your hosted workflow."
-            copy="The hosted product is intentionally simple to buy. Rights to deploy or commercially use the codebase stay on the separate commercial path."
+            kicker="Hosted plans"
+            title="Pick the plan that matches your source access."
           />
           <div className="pricing-grid">
             <PricingCard
               name="Free"
               price="$0"
-              description="Hosted evaluation and public-repo analysis."
+              description="For public-repository QA."
               bullets={[
-                "Public GitHub repositories only",
+                "Public GitHub repositories",
                 "Shared workspaces",
-                "Hosted report rendering",
-                "Live job console",
+                "Hosted reports and logs",
               ]}
-              cta={<Link className="button-ghost" data-testid="public-pricing-free-cta" href="/api/auth/login">Use Free</Link>}
+              cta={<Link className="button-secondary" data-testid="public-pricing-free-cta" href="/api/auth/login">Use Free</Link>}
             />
-            <div className="pricing-card--featured">
-              <div className="pricing-card--featured-banner">
-                <span className="tag tag--success">Recommended for private repos</span>
-              </div>
-              <PricingCard
-                name="Pro"
-                price="$19.99/month"
-                description="Hosted access for private repositories and Git repo archive uploads."
-                bullets={[
-                  "Private GitHub repos",
-                  "ZIP/TAR Git repo uploads",
-                  "Keycloak sign-in and shared workspaces",
-                  "Approx. 200 NOK, billed monthly in USD",
-                ]}
-                cta={<CheckoutButton label="Start Pro" testId="public-pricing-pro-checkout" />}
-              />
-            </div>
-            <article className="pricing-contrast">
-              <span className="tag tag--warning">Commercial path</span>
-              <h3>Commercial rights & self-hosting</h3>
-              <p className="subtle-note">Need company usage rights, self-hosting, or procurement review?</p>
-              <p>
-                Commercial agreements cover codebase rights beyond the non-commercial source-available license, internal
-                deployment discussions, and tailored commercial terms.
-              </p>
-              <ul className="pricing-card__list">
-                <li>Commercial rights for company usage of the codebase</li>
-                <li>Self-hosted and internal deployment discussions</li>
-                <li>Procurement-friendly commercial agreement path</li>
-                <li>Direct contact for tailored terms</li>
-              </ul>
-              <div>
-                <Link className="button-secondary" data-testid="public-pricing-commercial-cta" href="/commercial">Contact us</Link>
-              </div>
-            </article>
+            <PricingCard
+              name="Pro"
+              price="$19.99"
+              description="per month, for private-repository QA and archive uploads."
+              bullets={[
+                "Private GitHub repos",
+                "ZIP/TAR Git repo uploads",
+                "Shared workspaces",
+                "Approx. 200 NOK billed monthly in USD",
+              ]}
+              cta={<CheckoutButton label="Start Pro" testId="public-pricing-pro-checkout" />}
+              tone="featured"
+            />
+            <PricingCard
+              name="Commercial rights & self-hosting"
+              price="Talk to us"
+              description="Company usage rights, self-hosting, or procurement review."
+              bullets={[
+                "Commercial rights for company usage of the codebase",
+                "Self-hosted deployment discussions",
+                "Procurement-friendly agreement path",
+              ]}
+              cta={<Link className="button-secondary" data-testid="public-pricing-commercial-cta" href="/commercial">Contact us</Link>}
+              tone="contrast"
+            />
           </div>
         </section>
 
@@ -107,7 +106,6 @@ export default function PricingPage() {
           <MarketingSectionHeading
             kicker="Comparison"
             title="Hosted plans vs. commercial licensing"
-            copy="Use the hosted tiers when you want the managed workflow. Use commercial when the question is rights or deployment."
           />
           <div className="comparison-table">
             <div className="comparison-row comparison-row--head">
@@ -118,27 +116,27 @@ export default function PricingPage() {
             </div>
             <div className="comparison-row">
               <div className="comparison-cell comparison-cell--plan">Repository access</div>
-              <div className="comparison-cell">Public GitHub repositories</div>
-              <div className="comparison-cell">Public and private repositories through the hosted product</div>
-              <div className="comparison-cell">Depends on the commercial agreement and deployment model</div>
+              <div className="comparison-cell">Public GitHub</div>
+              <div className="comparison-cell">Public + private GitHub</div>
+              <div className="comparison-cell">Per agreement</div>
             </div>
             <div className="comparison-row">
               <div className="comparison-cell comparison-cell--plan">Source intake</div>
-              <div className="comparison-cell">Direct public Git URLs</div>
-              <div className="comparison-cell">Public Git, private GitHub, and ZIP/TAR Git repo uploads</div>
-              <div className="comparison-cell">Tailored for internal or self-hosted usage</div>
+              <div className="comparison-cell">Public Git URLs</div>
+              <div className="comparison-cell">Git URLs + ZIP/TAR uploads</div>
+              <div className="comparison-cell">Self-hosted / internal</div>
             </div>
             <div className="comparison-row">
-              <div className="comparison-cell comparison-cell--plan">Billing path</div>
-              <div className="comparison-cell">No charge</div>
-              <div className="comparison-cell">Self-serve Stripe subscription</div>
-              <div className="comparison-cell">Direct contact and procurement flow</div>
+              <div className="comparison-cell comparison-cell--plan">Billing</div>
+              <div className="comparison-cell">Free</div>
+              <div className="comparison-cell">Self-serve Stripe</div>
+              <div className="comparison-cell">Contract + procurement</div>
             </div>
             <div className="comparison-row">
               <div className="comparison-cell comparison-cell--plan">Codebase rights</div>
-              <div className="comparison-cell">No commercial code rights</div>
-              <div className="comparison-cell">No commercial code rights</div>
-              <div className="comparison-cell">Commercial rights and self-hosting terms are negotiated here</div>
+              <div className="comparison-cell">—</div>
+              <div className="comparison-cell">—</div>
+              <div className="comparison-cell">Negotiated</div>
             </div>
           </div>
         </section>

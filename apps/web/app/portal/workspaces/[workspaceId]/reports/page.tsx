@@ -1,6 +1,6 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import { ApiResponseError, getPortalAnalysisTasks, getWorkspaceConsole, getWorkspaceJobsPage } from "../../../../../lib/api";
 import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
@@ -58,7 +58,6 @@ export default async function WorkspaceReportsPage({
       <PortalShell
         eyebrow="Workspace reports"
         title={workspaceConsole.workspace.name}
-        lede="Completed report output stays separate from run queueing so review flows and durable history are easier to test and navigate."
         pageTestId="workspace-reports-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
@@ -67,33 +66,26 @@ export default async function WorkspaceReportsPage({
       >
         <section className="portal-stat-grid">
           <article className="portal-stat" data-testid="workspace-reports-stat-total">
-            <span className="portal-stat__label">Report-backed runs</span>
+            <span className="portal-stat__label">Reports</span>
             <span className="portal-stat__value">{totalReports}</span>
-            <p>Completed jobs with durable report output across the workspace.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-reports-stat-sources">
             <span className="portal-stat__label">Sources covered</span>
             <span className="portal-stat__value">{uniqueSourcesWithReports}</span>
-            <p>Distinct sources that already have report history.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-reports-stat-visible">
-            <span className="portal-stat__label">Visible now</span>
+            <span className="portal-stat__label">Visible</span>
             <span className="portal-stat__value">{jobsWithReports.length}</span>
-            <p>Reports on the current page after the active filter is applied.</p>
           </article>
           <article className="portal-stat" data-testid="workspace-reports-stat-in-flight">
-            <span className="portal-stat__label">Still running</span>
+            <span className="portal-stat__label">Running</span>
             <span className="portal-stat__value">{inFlightRuns}</span>
-            <p>Open the runs view when you need logs before the report exists.</p>
           </article>
         </section>
 
         <section className="portal-panel" data-testid="workspace-reports-list">
           <PortalSectionHeader
-            badgeLabel="Reports"
-            badgeClassName="tag tag--success"
-            title="Available reports"
-            description="Use the reports route for review and the runs route for execution-state troubleshooting."
+            title="Reports"
           />
           <form className="stack-form form-shell" method="GET">
             <div className="form-grid">
@@ -133,16 +125,9 @@ export default async function WorkspaceReportsPage({
                         <span className="tag tag--neutral">{formatJobLabel(job.job, tasks)}</span>
                       </div>
                     </div>
-                    <PortalMetaList
-                      items={[
-                        { label: "Runtime mode", value: job.job.runtimeMode },
-                        { label: "Source", value: job.job.sourceLocation },
-                        { label: "Review handoff", value: reportHref ? "Report detail is ready" : "Open the job for logs and artifacts" },
-                      ]}
-                    />
                     {!reportHref ? (
                       <p className="subtle-note" data-testid={`workspace-reports-missing-report-${job.job.id}`}>
-                        Report details are temporarily unavailable. Open the job to review logs and artifacts.
+                        Report details unavailable.
                       </p>
                     ) : null}
                     <div className="portal-record-card__actions">
@@ -191,7 +176,7 @@ export default async function WorkspaceReportsPage({
             actions={<Link className="button-secondary" href={`/portal/workspaces/${workspaceId}` as Route}>Back to workspace</Link>}
             description="You do not have access to this workspace."
             descriptionTestId="workspace-reports-access-denied"
-            title="This report surface is not available to your account"
+            title="Access denied"
           />
         </PortalShell>
       );

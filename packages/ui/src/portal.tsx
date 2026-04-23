@@ -143,7 +143,7 @@ export function PortalMetaList({
 export function PortalShell({
   title,
   eyebrow,
-  lede = "Hosted workspaces, queued runs, live logs, and parity reports all stay reviewable here.",
+  lede,
   pageTestId,
   primaryNav = [],
   activePrimaryNavKey,
@@ -170,17 +170,13 @@ export function PortalShell({
               <Link className="portal-shell__brand" href="/">
                 <span className="logo-mark">SL</span>
                 <span>
-                  <span className="brand-kicker">Hosted control plane</span>
-                  <strong className="brand-name">SpecLens portal</strong>
+                  <span className="brand-name">SpecLens portal</span>
                 </span>
               </Link>
-              <p className="portal-shell__context">
-                Queue runs, inspect evidence, and review reports without losing the thread.
-              </p>
             </div>
             <div className="portal-shell__actions">
               <ThemeSwitcher compact />
-              <Link className="button-ghost" href="/">Marketing site</Link>
+              <Link className="button-ghost" href="/">Marketing</Link>
               <a className="button-secondary" href="/api/auth/logout">Log out</a>
             </div>
           </div>
@@ -207,7 +203,7 @@ export function PortalShell({
               <p className="portal-shell__eyebrow">{eyebrow}</p>
               <h1>{title}</h1>
             </div>
-            <p className="portal-shell__lede">{lede}</p>
+            {lede ? <p className="portal-shell__lede">{lede}</p> : null}
           </div>
           {secondaryNav.length > 0 ? (
             <nav aria-label="Section navigation" className="portal-shell__subnav">

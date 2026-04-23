@@ -441,18 +441,6 @@ export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
       label: "Admin",
     });
   }
-  items.push(
-    {
-      key: "pricing",
-      href: "/pricing",
-      label: "Pricing",
-    },
-    {
-      key: "commercial",
-      href: "/commercial",
-      label: "Commercial",
-    },
-  );
   return items;
 }
 
@@ -469,11 +457,6 @@ export function buildWorkspaceNav(workspaceId: string): PortalNavItem[] {
       label: "Sources",
     },
     {
-      key: "code",
-      href: `/portal/workspaces/${workspaceId}/code`,
-      label: "Code",
-    },
-    {
       key: "runs",
       href: `/portal/workspaces/${workspaceId}/runs`,
       label: "Runs",
@@ -482,6 +465,11 @@ export function buildWorkspaceNav(workspaceId: string): PortalNavItem[] {
       key: "reports",
       href: `/portal/workspaces/${workspaceId}/reports`,
       label: "Reports",
+    },
+    {
+      key: "code",
+      href: `/portal/workspaces/${workspaceId}/code`,
+      label: "Code",
     },
     {
       key: "access",

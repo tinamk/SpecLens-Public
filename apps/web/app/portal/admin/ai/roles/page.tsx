@@ -17,7 +17,7 @@ export default async function AdminAiRolesPage() {
           badgeLabel="Admin only"
           description="Administrator access is required."
           descriptionTestId="admin-ai-access-denied"
-          title="This area is reserved for portal administrators"
+          title="Admin only"
         />
       </PortalShell>
     );
@@ -29,7 +29,6 @@ export default async function AdminAiRolesPage() {
     <PortalShell
       eyebrow="Admin AI"
       title="Roles"
-      lede="Role prompts and dependencies are separated from auth and agents so prompt-layer changes remain easy to review and test."
       pageTestId="admin-ai-roles-page"
       primaryNav={buildPortalPrimaryNav(true)}
       activePrimaryNavKey="admin"

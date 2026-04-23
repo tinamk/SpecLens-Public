@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type CodexAuthSelection,
   type GithubRepository,
   parseAnalysisExecutionStepEvent,
   type AnalysisExecutionStep,
@@ -87,6 +88,75 @@ function applyExecutionStep(
   return [...next.values()].sort((left, right) => left.order - right.order);
 }
 
+function buildPlannedExecutionSteps(options: {
+  agentId?: string | null;
+  agentName?: string | null;
+  jobRoleIds?: string[] | undefined;
+  plannedRoles?: PortalAnalysisTask["roles"] | undefined;
+  includeMaterializeStage?: boolean;
+}): AnalysisExecutionStep[] {
+  const roleDefinitions = new Map((options.plannedRoles ?? []).map(role => [role.id, role] as const));
+  const orderedRoleIds = options.jobRoleIds && options.jobRoleIds.length > 0
+    ? options.jobRoleIds
+    : [...roleDefinitions.values()].sort((left, right) => left.order - right.order).map(role => role.id);
+  const steps: AnalysisExecutionStep[] = [];
+
+  if (options.includeMaterializeStage) {
+    steps.push({
+      id: "stage:materialize-source",
+      order: 0,
+      title: "Materialize source",
+      stepType: "stage",
+      agentId: options.agentId ?? null,
+      agentName: options.agentName ?? null,
+      roleId: null,
+      roleName: null,
+      executorKind: null,
+      nativeExecutorId: null,
+      status: "pending",
+      detail: null,
+      startedAt: null,
+      finishedAt: null,
+      durationMs: null,
+    });
+  }
+
+  orderedRoleIds.forEach((roleId, index) => {
+    const role = roleDefinitions.get(roleId);
+    steps.push({
+      id: roleId,
+      order: index + (options.includeMaterializeStage ? 1 : 0),
+      title: role?.name ?? roleId,
+      stepType: "role",
+      agentId: options.agentId ?? null,
+      agentName: options.agentName ?? null,
+      roleId,
+      roleName: role?.name ?? roleId,
+      executorKind: role?.executorKind ?? null,
+      nativeExecutorId: role?.nativeExecutorId ?? null,
+      status: "pending",
+      detail: role?.description ?? null,
+      startedAt: null,
+      finishedAt: null,
+      durationMs: null,
+    });
+  });
+
+  return steps;
+}
+
+function mergeExecutionPlan(
+  plannedSteps: AnalysisExecutionStep[],
+  currentSteps: AnalysisExecutionStep[],
+): AnalysisExecutionStep[] {
+  const merged = new Map(plannedSteps.map(step => [step.id, step] as const));
+  for (const step of currentSteps) {
+    const previous = merged.get(step.id);
+    merged.set(step.id, previous ? { ...previous, ...step } : step);
+  }
+  return [...merged.values()].sort((left, right) => left.order - right.order);
+}
+
 async function readErrorMessage(response: Response): Promise<string> {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
@@ -161,7 +231,7 @@ async function postFormData<T>(pathname: string, payload: FormData): Promise<T> 
 
 function getJobStatusTone(status: string): string {
   if (status === "succeeded") return "status-pill status-pill--ready";
-  if (status === "queued" || status === "running") return "status-pill status-pill--pending";
+  if (status === "pending" || status === "queued" || status === "running") return "status-pill status-pill--pending";
   if (status === "failed" || status === "cancelled") return "status-pill status-pill--error";
   return "status-pill status-pill--idle";
 }
@@ -493,6 +563,7 @@ export function QueueAnalysisForm({
   workspaceId,
   tasks,
   sources,
+  codexAuthSelection,
   secrets = [],
   canUseSecrets = true,
   jobPathTemplate = "/portal/workspaces/{workspaceId}/runs/{jobId}",
@@ -501,6 +572,7 @@ export function QueueAnalysisForm({
   workspaceId: string;
   tasks: PortalAnalysisTask[];
   sources: Array<{ id: string; displayName: string; visibility: string; type: string; location: string; verificationStatus: string; verificationError: string | null }>;
+  codexAuthSelection?: CodexAuthSelection | null;
   secrets?: WorkspaceSecret[];
   canUseSecrets?: boolean;
   jobPathTemplate?: string;
@@ -523,9 +595,12 @@ export function QueueAnalysisForm({
     () => tasks.find(task => task.agentId === selectedTaskId) ?? tasks[0] ?? null,
     [tasks, selectedTaskId],
   );
-  const verifiedSourceCount = useMemo(
-    () => sources.filter(isVerifiedSource).length,
-    [sources],
+  const selectableCodexAuthOptions = useMemo(
+    () => (codexAuthSelection?.options ?? []).filter(option => option.selectable),
+    [codexAuthSelection],
+  );
+  const [selectedCodexAuthScope, setSelectedCodexAuthScope] = useState<"" | "user" | "workspace" | "global">(
+    codexAuthSelection?.selectedScope ?? "",
   );
 
   useEffect(() => {
@@ -551,6 +626,19 @@ export function QueueAnalysisForm({
     setSelectedRuntimeMode(taskSupportsBrowserRuntime(selectedTask) ? "browser" : "static");
   }, [selectedTask]);
 
+  useEffect(() => {
+    const selectedScope = codexAuthSelection?.selectedScope ?? "";
+    if (!selectedScope) {
+      setSelectedCodexAuthScope("");
+      return;
+    }
+    if (selectableCodexAuthOptions.some(option => option.scope === selectedScope)) {
+      setSelectedCodexAuthScope(selectedScope);
+      return;
+    }
+    setSelectedCodexAuthScope(selectableCodexAuthOptions[0]?.scope ?? "");
+  }, [codexAuthSelection?.selectedScope, selectableCodexAuthOptions]);
+
   return (
     <form
       className="stack-form form-shell"
@@ -562,6 +650,7 @@ export function QueueAnalysisForm({
         const companionSourceId = String(formData.get("companionSourceId") ?? "");
         const agentId = String(formData.get("agentId") ?? "");
         const runtimeMode = String(formData.get("runtimeMode") ?? "static");
+        const codexAuthScope = String(formData.get("codexAuthScope") ?? "").trim();
         const secretRefs = formData.getAll("secretRefs").map(value => String(value)).filter(Boolean);
         setError(null);
 
@@ -572,6 +661,7 @@ export function QueueAnalysisForm({
               ...(companionSourceId ? { companionSourceId } : {}),
               agentId,
               ...(runtimeMode === "browser" || runtimeMode === "static" ? { runtimeMode } : {}),
+              ...(codexAuthScope === "user" || codexAuthScope === "workspace" || codexAuthScope === "global" ? { codexAuthScope } : {}),
               ...(secretRefs.length > 0 ? { secretRefs } : {}),
             });
             router.push(jobPathTemplate
@@ -584,15 +674,6 @@ export function QueueAnalysisForm({
         });
       }}
     >
-      <div className="form-summary">
-        <PortalMetaList
-          items={[
-            { label: "Verified sources", value: verifiedSourceCount },
-            { label: "Available AI tasks", value: tasks.length },
-            { label: "Secrets", value: canUseSecrets ? `${secrets.length} selectable` : "owner-only attachment" },
-          ]}
-        />
-      </div>
       <div className="form-grid">
         <label className="field">
           <span>Source</span>
@@ -657,37 +738,52 @@ export function QueueAnalysisForm({
             </option>
           </select>
         </label>
+        {codexAuthSelection ? (
+          <label className="field">
+            <span>Codex auth</span>
+            <select
+              data-testid={scopedTestId(testIdPrefix, "codex-auth-select")}
+              name="codexAuthScope"
+              value={selectedCodexAuthScope}
+              onChange={event => setSelectedCodexAuthScope(event.target.value as "" | "user" | "workspace" | "global")}
+            >
+              <option value="">Auto ({codexAuthSelection.selectedScope ?? "none ready"})</option>
+              {codexAuthSelection.options.map(option => (
+                <option
+                  disabled={!option.selectable}
+                  key={option.scope}
+                  value={option.scope}
+                >
+                  {option.label} ({option.status.disabled ? "disabled" : option.status.status})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
-      {sources.length > 0 ? (
-        <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "source-detail")}>
-          Selected source details are shown in the workspace source list below. Use Git-backed source types only: `public git`,
-          `private GitHub`, or `git repo archive upload`.
-        </p>
-      ) : null}
-      {sources.length > 1 ? (
-        <p className="subtle-note">
-          Pair a deployed site with a code source to analyze both together in one run. The primary source becomes `primary/`,
-          and the companion source becomes `companion/` inside the runtime bundle.
-        </p>
-      ) : null}
       {selectedTask ? (
         <div className="form-summary" data-testid={scopedTestId(testIdPrefix, "task-description")}>
           <PortalMetaList
             items={[
-              { label: "Selected task", value: selectedTask.title },
               { label: "Description", value: selectedTask.description ?? "AI-defined analysis task." },
-              { label: "Roles", value: selectedTask.roleCount },
-              { label: "Skills", value: selectedTask.skillNames.join(", ") || "None listed" },
               { label: "Tool grants", value: selectedTask.toolCapabilities.join(", ") || "repo-read" },
+              ...(codexAuthSelection ? [{
+                label: "Codex auth",
+                value: selectedCodexAuthScope
+                  ? codexAuthSelection.options.find(option => option.scope === selectedCodexAuthScope)?.description ?? selectedCodexAuthScope
+                  : codexAuthSelection.selectedScope
+                    ? `Auto selects ${codexAuthSelection.options.find(option => option.scope === codexAuthSelection.selectedScope)?.label ?? codexAuthSelection.selectedScope}.`
+                    : "No Codex auth is connected yet.",
+              }] : []),
             ]}
           />
         </div>
       ) : null}
-      <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "runtime-mode-detail")}>
-        {taskSupportsBrowserRuntime(selectedTask)
-          ? "Browser mode asks the selected task to gather runtime and route-level evidence when the repo can boot safely."
-          : "This task is currently static-only, so the run will collect repository and report evidence without runtime execution."}
-      </p>
+      {codexAuthSelection ? (
+        <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "codex-auth-note")}>
+          User auth stays private to your account. Workspace auth is shared only inside this workspace. Global auth is the admin-managed fallback.
+        </p>
+      ) : null}
       {secrets.length > 0 && canUseSecrets ? (
         <fieldset className="field selection-list" data-testid={scopedTestId(testIdPrefix, "secrets-fieldset")}>
           <span>Workspace secrets</span>
@@ -702,12 +798,11 @@ export function QueueAnalysisForm({
               <span>{secret.name} ({secret.kind} · {secret.valuePreview})</span>
             </label>
           ))}
-          <p className="subtle-note">Secret values stay write-only. Selecting one only passes its reference into the run.</p>
         </fieldset>
       ) : null}
       {secrets.length > 0 && !canUseSecrets ? (
         <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "secrets-owner-only")}>
-          Only the workspace owner can attach stored workspace secrets to new runs.
+          Owner only.
         </p>
       ) : null}
       <button className="button" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending || sources.length === 0 || tasks.length === 0}>
@@ -784,7 +879,6 @@ export function CreateWorkspaceSecretForm({
           />
         </label>
       </div>
-      <p className="subtle-note">Secret values are stored write-only. You will only see metadata and a safe preview after saving.</p>
       <button className="button-secondary" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending}>
         {pending ? "Saving..." : "Save secret"}
       </button>
@@ -1439,6 +1533,11 @@ export function JobLogConsole({
   initialStatus,
   initialExecutionSteps,
   initialTiming,
+  agentId = null,
+  agentName = null,
+  jobRoleIds,
+  plannedRoles,
+  includeMaterializeStage = false,
   testIdPrefix = "workspace-runs-job",
 }: {
   jobId: string;
@@ -1446,19 +1545,38 @@ export function JobLogConsole({
   initialStatus: string;
   initialExecutionSteps: JobEnvelope["executionSteps"];
   initialTiming: JobEnvelope["timing"];
+  agentId?: string | null;
+  agentName?: string | null;
+  jobRoleIds?: string[];
+  plannedRoles?: PortalAnalysisTask["roles"];
+  includeMaterializeStage?: boolean;
   testIdPrefix?: string;
 }) {
   const [logs, setLogs] = useState(getVisibleLogs(initialLogs));
   const [status, setStatus] = useState(initialStatus);
-  const [executionSteps, setExecutionSteps] = useState(initialExecutionSteps);
   const [timing, setTiming] = useState(initialTiming);
   const [verbosity, setVerbosity] = useState<"default" | "verbose">("default");
   const [loadingLogs, setLoadingLogs] = useState(false);
   const router = useRouter();
+  const plannedExecutionSteps = useMemo(
+    () => buildPlannedExecutionSteps({
+      agentId,
+      agentName,
+      jobRoleIds,
+      plannedRoles,
+      includeMaterializeStage,
+    }),
+    [agentId, agentName, includeMaterializeStage, jobRoleIds, plannedRoles],
+  );
+  const [executionSteps, setExecutionSteps] = useState(() => mergeExecutionPlan(plannedExecutionSteps, initialExecutionSteps));
   const activeStep = useMemo(
     () => executionSteps.find(step => step.status === "running") ?? null,
     [executionSteps],
   );
+
+  useEffect(() => {
+    setExecutionSteps(current => mergeExecutionPlan(plannedExecutionSteps, current));
+  }, [plannedExecutionSteps]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1481,7 +1599,7 @@ export function JobLogConsole({
         }
         setLogs(getVisibleLogs(payload.job.logs));
         setStatus(payload.job.job.status);
-        setExecutionSteps(payload.job.executionSteps);
+        setExecutionSteps(mergeExecutionPlan(plannedExecutionSteps, payload.job.executionSteps));
         setTiming(payload.job.timing);
 
         if (
@@ -1498,7 +1616,7 @@ export function JobLogConsole({
           const streamPayload = JSON.parse((event as MessageEvent<string>).data) as AnalysisLogEvent;
           const stepEvent = parseAnalysisExecutionStepEvent(streamPayload.message);
           if (stepEvent) {
-            setExecutionSteps(current => applyExecutionStep(current, stepEvent));
+            setExecutionSteps(current => mergeExecutionPlan(plannedExecutionSteps, applyExecutionStep(current, stepEvent)));
             return;
           }
           setLogs(current => current.some(log => log.id === streamPayload.id) ? current : [...current, streamPayload]);
@@ -1521,7 +1639,7 @@ export function JobLogConsole({
         if (!cancelled) {
           setLogs(getVisibleLogs(initialLogs));
           setStatus(initialStatus);
-          setExecutionSteps(initialExecutionSteps);
+          setExecutionSteps(mergeExecutionPlan(plannedExecutionSteps, initialExecutionSteps));
           setTiming(initialTiming);
         }
       } finally {
@@ -1537,7 +1655,7 @@ export function JobLogConsole({
       cancelled = true;
       source?.close();
     };
-  }, [initialExecutionSteps, initialLogs, initialStatus, initialTiming, jobId, router, verbosity]);
+  }, [initialExecutionSteps, initialLogs, initialStatus, initialTiming, jobId, plannedExecutionSteps, router, verbosity]);
 
   return (
     <>
@@ -1552,7 +1670,9 @@ export function JobLogConsole({
               label: "Execution steps",
               value: activeStep
                 ? `${activeStep.agentName ?? activeStep.agentId ?? "Agent"} is running ${activeStep.roleName ?? activeStep.title}.`
-                : "Showing the latest persisted agent step timeline.",
+                : executionSteps.length > 0
+                  ? "Full execution plan is visible from queue time and updates live as each step advances."
+                  : "No execution steps recorded yet.",
             },
             {
               label: "Elapsed",
