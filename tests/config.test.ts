@@ -12,6 +12,7 @@ test("API config supports Keycloak and portable object storage settings", async 
   process.env.OBJECT_STORAGE_PUBLIC_ENDPOINT = "http://localhost:9000";
   process.env.OBJECT_STORAGE_REGION = "us-east-1";
   process.env.OBJECT_STORAGE_FORCE_PATH_STYLE = "true";
+  process.env.UPLOAD_ARCHIVE_MAX_BYTES = "33554432";
 
   const { loadApiConfig } = await import("../apps/api/src/services/config");
   const config = loadApiConfig();
@@ -21,6 +22,7 @@ test("API config supports Keycloak and portable object storage settings", async 
   assert.equal(config.objectStorageProvider, "s3-compatible");
   assert.equal(config.objectStoragePublicEndpoint, "http://localhost:9000");
   assert.equal(config.objectStorageForcePathStyle, true);
+  assert.equal(config.uploadArchiveMaxBytes, 33_554_432);
 
   process.env = originalEnv;
 });

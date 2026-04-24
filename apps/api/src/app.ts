@@ -141,6 +141,7 @@ async function createApiApp() {
   const app = Fastify({
     logger: false,
     trustProxy: config.trustProxy,
+    bodyLimit: config.uploadArchiveMaxBytes,
   });
   app.decorateRequest("rawBody", null);
   app.decorateRequest("requestId", "");
@@ -150,7 +151,14 @@ async function createApiApp() {
     origin: buildCorsOriginResolver(config),
     credentials: true,
   });
-  await app.register(multipart);
+  await app.register(multipart, {
+    limits: {
+      fileSize: config.uploadArchiveMaxBytes,
+      files: 1,
+      fields: 10,
+      parts: 11,
+    },
+  });
   if (config.rateLimitEnabled) {
     await app.register(rateLimit, {
       max: config.rateLimitMax,

@@ -64,7 +64,7 @@ flowchart LR
 | `apps/web` | Marketing pages, portal, auth handoff, admin UI, report rendering |
 | `apps/api` | Product API, job creation, billing/webhook surfaces, auth/session enforcement, admin AI controls |
 | `apps/runner` | Isolated deterministic sandbox support for internal execution helpers |
-| `apps/ai-worker` | Unified hosted audit/remediation runtime with Codex roles and native executors |
+| `apps/ai-worker` | Unified hosted audit/remediation controller that runs repo work inside one-shot agent sandboxes |
 | `packages/core` | Shared analysis logic, browser/runtime helpers, and archived parity reference behavior |
 | `packages/db` | Prisma schema, repositories, queue helpers, token persistence |
 | `packages/contracts` | Zod-based DTOs and report/job contracts |

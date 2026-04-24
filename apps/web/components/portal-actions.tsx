@@ -1555,7 +1555,7 @@ export function JobLogConsole({
   const [logs, setLogs] = useState(getVisibleLogs(initialLogs));
   const [status, setStatus] = useState(initialStatus);
   const [timing, setTiming] = useState(initialTiming);
-  const [verbosity, setVerbosity] = useState<"default" | "verbose">("default");
+  const [verbosity, setVerbosity] = useState<"default" | "all">("default");
   const [loadingLogs, setLoadingLogs] = useState(false);
   const router = useRouter();
   const plannedExecutionSteps = useMemo(
@@ -1730,10 +1730,10 @@ export function JobLogConsole({
             Concise
           </button>
           <button
-            className={verbosity === "verbose" ? "button-secondary" : "button-ghost"}
+            className={verbosity === "all" ? "button-secondary" : "button-ghost"}
             type="button"
             data-testid={scopedTestId(testIdPrefix, "verbosity-verbose")}
-            onClick={() => setVerbosity("verbose")}
+            onClick={() => setVerbosity("all")}
             disabled={loadingLogs}
           >
             Verbose trace
@@ -1743,7 +1743,7 @@ export function JobLogConsole({
       <section className="terminal-shell" data-testid={scopedTestId(testIdPrefix, "log-console")}>
         <div className="terminal-shell__header">
           <span>speclens/job/{jobId}</span>
-          <span>{verbosity === "verbose" ? "verbose trace" : "live log stream"}</span>
+          <span>{verbosity === "all" ? "verbose trace" : "live log stream"}</span>
         </div>
         <div className="terminal-shell__body">
           {logs.length === 0 ? (
@@ -1869,12 +1869,12 @@ export function ReportRemediationForm({
           </select>
         </label>
       </div>
-      <fieldset className="field selection-list">
+      <fieldset className="field selection-list selection-list--bounded">
         <span>Selected findings</span>
-        {findingOptions.map(finding => (
-          <label className="selection-item" key={finding.id}>
+        {findingOptions.map((finding, index) => (
+          <label className="selection-item" key={`${finding.id}:${index}`}>
             <input
-              data-testid={scopedTestId(testIdPrefix, `finding-${finding.id}`)}
+              data-testid={scopedTestId(testIdPrefix, `finding-${finding.id}-${index + 1}`)}
               name="selectedFindingIds"
               type="checkbox"
               value={finding.id}

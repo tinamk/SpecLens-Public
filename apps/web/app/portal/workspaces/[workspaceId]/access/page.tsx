@@ -74,7 +74,7 @@ export default async function WorkspaceAccessPage({
           </article>
           <article className="portal-stat" data-testid="workspace-access-stat-runs">
             <span className="portal-stat__label">Runs</span>
-            <span className="portal-stat__value">{workspaceConsole.jobs.length}</span>
+            <span className="portal-stat__value">{workspaceConsole.stats.totalJobs}</span>
           </article>
         </section>
 

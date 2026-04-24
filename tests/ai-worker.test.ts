@@ -64,10 +64,10 @@ function writeCodexStub(stubPath: string): void {
     "      data: {",
     "        installCommands: [{ label: 'install', command: 'npm install', workingDirectory: '.', purpose: 'deps' }],",
     "        buildCommands: [],",
-    "        startCommands: [{ label: 'web', command: 'npm run start', workingDirectory: '.', purpose: 'start web' }],",
+    "        startCommands: [{ label: 'compose stack', command: 'npm run dev:compose', workingDirectory: '.', purpose: 'start full stack' }, { label: 'web', command: 'npm run start', workingDirectory: '.', purpose: 'start web' }],",
     "        verificationCommands: [{ label: 'typecheck', command: 'npm run typecheck', workingDirectory: '.', purpose: 'verify' }],",
     "        packageManagers: ['npm'],",
-    "        targets: [{ label: 'web', kind: 'web', workingDirectory: '.', startCommand: 'npm run start', baseUrl: 'http://127.0.0.1:4173', healthUrls: ['http://127.0.0.1:4173'], framework: 'node' }],",
+    "        targets: [{ label: 'compose stack', kind: 'web', workingDirectory: '.', startCommand: 'npm run dev:compose', baseUrl: null, healthUrls: [], framework: 'docker-compose' }, { label: 'web', kind: 'web', workingDirectory: '.', startCommand: 'npm run start', baseUrl: 'http://127.0.0.1:4173', healthUrls: ['http://127.0.0.1:4173'], framework: 'node' }],",
     "        workingDirectories: ['.'],",
     "        serviceDependencies: [],",
     "        envFiles: [],",
@@ -99,7 +99,7 @@ function writeCodexStub(stubPath: string): void {
     "      status: 'ready',",
     "      summary: 'Route and journey coverage prepared.',",
     "      data: {",
-    "        navigationTargets: [{ path: '/', purpose: 'home', requiresAuth: false, source: 'router' }, { path: '/settings', purpose: 'settings', requiresAuth: false, source: 'router' }, { path: '/secure', purpose: 'secure workspace', requiresAuth: true, source: 'router' }, { path: '/broken', purpose: 'console error route', requiresAuth: false, source: 'router' }],",
+    "        navigationTargets: [{ path: '/', purpose: 'home', requiresAuth: false, source: 'router' }, { path: '/settings', purpose: 'settings', requiresAuth: false, source: 'router' }, { path: '/secure', purpose: 'secure workspace', requiresAuth: true, source: 'router' }, { path: '/broken', purpose: 'console error route', requiresAuth: false, source: 'router' }, { path: '/portal/:path* (middleware redirect to /api/auth/login when session cookie is missing)', purpose: 'route pattern', requiresAuth: true, source: 'docs' }, { path: '/workspaces/[workspaceId]', purpose: 'dynamic route pattern', requiresAuth: true, source: 'router' }, { path: '/api/status', purpose: 'api health', requiresAuth: false, source: 'docs' }],",
     "        journeys: [{ title: 'Login and inspect secure workspace', steps: ['Open /login', 'Submit credentials', 'Open /secure'], requiresAuth: true, priority: 'high', successSignals: ['Secure workspace heading visible'] }],",
     "        assertions: ['Home page loads with an h1.', 'Secure workspace is reachable after login.', 'Console errors are captured when they occur.'],",
     "        detectedSurfaces: [{ label: 'Fixture app', kind: 'repo-app', location: '.', companion: false, confidence: 'high' }],",
@@ -203,6 +203,44 @@ function writeFailingCodexStub(stubPath: string, failingRoleId: string): void {
   fs.chmodSync(stubPath, 0o755);
 }
 
+function writeFlakyJsonCodexStub(stubPath: string, flakyRoleId: string): void {
+  const markerPath = `${stubPath}.attempts`;
+  const script = [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const args = process.argv.slice(2);",
+    "let outputPath = null;",
+    "for (let i = 0; i < args.length - 1; i += 1) {",
+    "  if (args[i] === '--output-last-message') {",
+    "    outputPath = args[i + 1];",
+    "    break;",
+    "  }",
+    "}",
+    "if (!outputPath) {",
+    "  console.error('Missing --output-last-message');",
+    "  process.exit(2);",
+    "}",
+    "const roleId = /role-(.+)\\.json$/.exec(outputPath)?.[1] ?? 'unknown';",
+    `const flakyRoleId = ${JSON.stringify(flakyRoleId)};`,
+    `const markerPath = ${JSON.stringify(markerPath)};`,
+    "if (roleId === flakyRoleId) {",
+    "  const attempts = fs.existsSync(markerPath) ? Number(fs.readFileSync(markerPath, 'utf8')) : 0;",
+    "  fs.writeFileSync(markerPath, String(attempts + 1));",
+    "  if (attempts === 0) {",
+    "    fs.writeFileSync(outputPath, '{\"summary\":\"broken\",\"sections\": [');",
+    "    process.exit(0);",
+    "  }",
+    "}",
+    "fs.writeFileSync(outputPath, JSON.stringify({",
+    "  summary: `Recovered summary for ${roleId}`,",
+    "  sections: [{ title: `Recovered section ${roleId}`, status: 'ready', summary: 'ok', data: { roleId } }],",
+    "  findings: [{ severity: 'low', title: `Recovered finding ${roleId}`, message: 'Stub message', suggestion: 'Stub suggestion', evidence: ['README.md'] }],",
+    "}));",
+  ].join("\n");
+  fs.writeFileSync(stubPath, script, { encoding: "utf8" });
+  fs.chmodSync(stubPath, 0o755);
+}
+
 function readPromptCapture(capturePath: string): Array<{ roleId: string; roleName: string; prompt: string }> {
   if (!fs.existsSync(capturePath)) {
     return [];
@@ -257,6 +295,18 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     assert.ok(agents.length > 0, "Expected at least one seeded AI agent.");
     const runtimeAgent = agents.find(agent => agent.id === "agent-universal-standard");
     assert.ok(runtimeAgent, "Expected the universal audit standard agent to be seeded.");
+    const fastToolingAgent = agents.find(agent => agent.id === "agent-e2e-runtime-tooling-fast");
+    assert.ok(fastToolingAgent, "Expected the runtime tooling fast agent to be seeded.");
+    assert.deepEqual(
+      fastToolingAgent.roles.map(role => role.id),
+      [
+        "runtime-scout",
+        "browser-executor",
+        "playwright-operator",
+        "artifact-auditor",
+        "standardized-json-output",
+      ],
+    );
     const agentId = runtimeAgent?.id ?? agents[0]?.id ?? "agent-universal-exhaustive";
     const firstJob = await createAgentJobForUser(workspace.id, user.id, agentId, {
       sourceId: source.id,
@@ -328,10 +378,27 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     );
     const runtimeExecutionSection = firstResult.report?.sections.find(section => section.title === "Runtime execution");
     assert.equal(runtimeExecutionSection?.status, "ready");
+    assert.equal(
+      (runtimeExecutionSection?.data.target as { startCommand?: string } | undefined)?.startCommand,
+      "npm run start",
+      "Expected hosted runtime execution to prefer the direct app script over compose/infra targets.",
+    );
     const browserExecutionSection = firstResult.report?.sections.find(section => section.title === "Browser QA execution");
     assert.equal(browserExecutionSection?.status, "ready");
     assert.equal(Array.isArray((browserExecutionSection?.data.pages as unknown[] | undefined)), true);
     assert.equal((browserExecutionSection?.data.authenticated as boolean | undefined), true);
+    const browserNavigationTargets = (browserExecutionSection?.data.navigationTargets as string[] | undefined) ?? [];
+    assert.equal(
+      browserNavigationTargets.some(target => target.includes(":path") || target.includes("[workspaceId]") || target.includes("/api/status")),
+      false,
+      "Expected hosted browser QA to skip API endpoints and unresolved route patterns.",
+    );
+    const skippedNavigationTargets = (browserExecutionSection?.data.skippedNavigationTargets as Array<{ reason?: string }> | undefined) ?? [];
+    assert.equal(
+      skippedNavigationTargets.some(target => target.reason === "unresolved route pattern"),
+      true,
+      "Expected hosted browser QA to explain skipped route patterns.",
+    );
     const executionAttributedFindings = (firstResult.report?.findings ?? []).filter(finding =>
       finding.title.includes("Runtime execution")
       || finding.title.includes("Browser ")
@@ -663,6 +730,74 @@ test("ai-worker persists execution diagnostics when a role fails", async () => {
     assert.equal(
       diagnosticPayload.logs?.some(log => log.scope === "agent" && (log.message ?? "").includes("Runtime scout failed")),
       true,
+    );
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test("ai-worker retries invalid Codex role JSON before accepting role execution", async () => {
+  const tempRoot = createHomeTempDirSync("speclens-ai-worker-flaky-json-");
+  const databaseUrl = await preparePrismaTestDatabase(createTestDatabaseName("aiworkerflakyjson"));
+  const stubPath = path.join(tempRoot, "codex-flaky-json-stub.js");
+  writeFlakyJsonCodexStub(stubPath, "architecture-reviewer");
+
+  const originalEnv = { ...process.env };
+  process.env.DATABASE_URL = databaseUrl;
+  Object.assign(process.env, { NODE_ENV: "test" });
+  ensureTestAuthSecrets();
+  process.env.OBJECT_STORAGE_PROVIDER = "local";
+  process.env.APP_STATE_PATH = path.join(tempRoot, "state.json");
+  process.env.CODEX_BIN = stubPath;
+  process.env.AI_WORKER_TEMP_ROOT = path.join(tempRoot, "worker");
+  process.env.AI_WORKER_CODEX_TIMEOUT_MS = "10000";
+  process.env.AI_WORKER_CODEX_MAX_ATTEMPTS = "2";
+  process.env.AI_WORKER_CODEX_RETRY_DELAY_MS = "1";
+
+  try {
+    await initializeDatabase();
+    const user = await upsertUserIdentity({
+      provider: "local-dev",
+      subject: "ai-worker-flaky-json-test",
+      email: "ai-worker-flaky-json-test@speclens.dev",
+      displayName: "AI Worker Flaky JSON Test",
+    });
+    const workspace = await createWorkspaceForUser(user, {
+      name: "AI Worker Flaky JSON Workspace",
+    });
+    const source = await createSourceForUserForTests(workspace.id, user.id, {
+      type: "git-public",
+      displayName: "Fixture Repo",
+      location: browserFixtureRepoUrl,
+    });
+    const runtimeAgent = (await listAiAgents()).find(agent => agent.id === "agent-universal-standard");
+    const architectureRole = runtimeAgent?.roles.find(role => role.id === "architecture-reviewer");
+    assert.ok(architectureRole, "Expected the universal audit standard agent to include the architecture-reviewer role.");
+    const retryProbeAgent = await createAiAgent({
+      name: "Flaky JSON role retry probe",
+      description: "Minimal agent for invalid role artifact retry coverage.",
+      roleIds: [architectureRole?.id ?? "architecture-reviewer"],
+    });
+    const retryJob = await createAgentJobForUser(workspace.id, user.id, retryProbeAgent.id, {
+      sourceId: source.id,
+    });
+
+    const result = await aiWorker.runAgentJobForTest(retryJob.job.id);
+    assert.equal(result.job.status, "succeeded");
+    assert.equal(fs.readFileSync(`${stubPath}.attempts`, "utf8"), "2");
+
+    const envelope = await getJobEnvelopeForUser(retryJob.job.id, user.id, { logVisibility: "all" });
+    assert.equal(
+      envelope.logs.some(log =>
+        log.scope === "agent"
+        && (log.message ?? "").includes("emitted invalid role output on attempt 1/2")),
+      true,
+      "Expected invalid role JSON to be retried and logged.",
+    );
+    assert.equal(
+      envelope.executionSteps.some(step => step.id === "role:architecture-reviewer" && step.status === "succeeded"),
+      true,
+      "Expected the retried role to succeed after valid JSON is emitted.",
     );
   } finally {
     process.env = originalEnv;

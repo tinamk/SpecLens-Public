@@ -5,7 +5,7 @@ This folder contains single-node deployment artifacts and runner-plane bootstrap
 ## Single-node production (all services on one droplet)
 
 1. Copy `env.single-node.example` or `deploy/digitalocean/.env.single-node` to `.env` on the droplet and fill in secrets.
-2. Use `docker-compose.single-node.yml` to boot the full stack (web, api, runner, postgres, keycloak, minio, caddy). The current Ansible deploy path prepares the Node release locally on the controller first, including `npm ci`, `prisma generate`, and the production Next.js build, then ships that prepared release to the droplet.
+2. Use `docker-compose.single-node.yml` to boot the full stack (web, api, runner, ai-worker, job-dind, postgres, keycloak, minio, caddy). The current Ansible deploy path prepares the Node release locally on the controller first, including `npm ci`, `prisma generate`, and the production Next.js build, then ships that prepared release to the droplet.
 3. Ensure DNS for `APP_DOMAIN`, `API_DOMAIN`, `AUTH_DOMAIN`, and `OBJECTS_DOMAIN` points to the droplet.
 4. If you are using the single GitHub App gateway flow, also point `GITHUB_GATEWAY_DOMAIN` at the droplet and configure the GitHub App Setup URL / Webhook URL against that host.
 5. Access health endpoints on the droplet:
@@ -57,4 +57,4 @@ Set the following in the `.env` referenced by the script before launching the ru
 - `RUNNER_*`
 - `SANDBOX_*`
 
-The runner container mounts the Docker socket and a host temp root so it can launch sandbox jobs.
+The helper starts a dedicated nested Docker daemon, builds the runner sandbox image into it, and points the runner at `DOCKER_HOST=tcp://speclens-job-dind:2375`. The runner container does not mount the host Docker socket.

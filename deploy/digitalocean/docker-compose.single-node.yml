@@ -173,6 +173,54 @@ services:
       retries: 12
       start_period: 15s
 
+  job-dind:
+    image: docker:27-dind
+    restart: unless-stopped
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - dockerd
+      - --host=tcp://0.0.0.0:2375
+      - --tls=false
+    volumes:
+      - job-dind-data:/var/lib/docker
+      - ${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}:${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}
+      - ${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}:${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}
+    healthcheck:
+      test: ["CMD-SHELL", "DOCKER_HOST=tcp://127.0.0.1:2375 docker info >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  runner-sandbox-image-init:
+    image: docker:27-cli
+    restart: "no"
+    working_dir: /workspace
+    environment:
+      DOCKER_HOST: tcp://job-dind:2375
+    command: >
+      sh -lc "docker build -t speclens/analysis-runner:local -f apps/runner/docker/Dockerfile ."
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      job-dind:
+        condition: service_healthy
+
+  ai-agent-sandbox-image-init:
+    image: docker:27-cli
+    restart: "no"
+    working_dir: /workspace
+    environment:
+      DOCKER_HOST: tcp://job-dind:2375
+    command: >
+      sh -lc "docker build -t speclens/ai-agent-sandbox:local -f apps/ai-worker/docker/agent-sandbox.Dockerfile ."
+    volumes:
+      - ../..:/workspace
+    depends_on:
+      job-dind:
+        condition: service_healthy
+
   runner:
     build:
       context: ../..
@@ -187,7 +235,9 @@ services:
     environment:
       API_URL: http://api:4000
       CODEX_HOME: /codex-host
+      DOCKER_HOST: tcp://job-dind:2375
       RUNNER_TEMP_ROOT: ${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}
+      SANDBOX_IMAGE: speclens/analysis-runner:local
       OBJECT_STORAGE_PROVIDER: s3-compatible
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
       OBJECT_STORAGE_PUBLIC_ENDPOINT: https://${OBJECTS_DOMAIN}
@@ -200,11 +250,14 @@ services:
     volumes:
       - ../..:/app
       - ${HOST_CODEX_HOME:-/root/.codex}:/codex-host:ro
-      - /var/run/docker.sock:/var/run/docker.sock
       - ${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}:${RUNNER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/runner}
     depends_on:
       api:
         condition: service_healthy
+      job-dind:
+        condition: service_healthy
+      runner-sandbox-image-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4510/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -228,6 +281,13 @@ services:
       CODEX_HOME: /codex-host
       AI_WORKER_HEALTH_PORT: ${AI_WORKER_HEALTH_PORT:-4520}
       AI_WORKER_TEMP_ROOT: ${AI_WORKER_HOST_TEMP_ROOT:-/opt/speclens/runtime/host-temp/ai-worker}
+      DOCKER_HOST: tcp://job-dind:2375
+      AI_WORKER_ROLE_MAX_CONCURRENCY: ${AI_WORKER_ROLE_MAX_CONCURRENCY:-4}
+      AI_WORKER_SANDBOX_IMAGE: speclens/ai-agent-sandbox:local
+      AI_WORKER_SANDBOX_NETWORK: host
+      AI_WORKER_SANDBOX_TIMEOUT_MS: ${AI_WORKER_SANDBOX_TIMEOUT_MS:-3600000}
+      AI_WORKER_SANDBOX_OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      AI_WORKER_CODEX_STREAM_LOGS: ${AI_WORKER_CODEX_STREAM_LOGS:-false}
       AI_WORKER_CODEX_BYPASS_SANDBOX: ${AI_WORKER_CODEX_BYPASS_SANDBOX:-false}
       OBJECT_STORAGE_PROVIDER: s3-compatible
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
@@ -247,6 +307,10 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      job-dind:
+        condition: service_healthy
+      ai-agent-sandbox-image-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + (process.env.AI_WORKER_HEALTH_PORT || '4520') + '/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -257,5 +321,6 @@ services:
 volumes:
   caddy-config:
   caddy-data:
+  job-dind-data:
   minio-data:
   postgres-data:

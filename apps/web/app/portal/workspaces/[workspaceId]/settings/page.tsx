@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { CodexAuthCard } from "../../../../../components/codex-auth-card";
+import { DataPath, DataValue } from "../../../../../components/data-visuals";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import {
   BillingPortalButton,
@@ -346,7 +347,7 @@ export default async function WorkspaceSettingsPage({
                     </div>
                     <PortalMetaList
                       items={[
-                        { label: "Installation id", value: installation.githubInstallationId },
+                        { label: "Installation id", value: <DataValue value={installation.githubInstallationId} tone="id" /> },
                       ]}
                     />
                     {canManageWorkspace ? (
@@ -407,10 +408,10 @@ export default async function WorkspaceSettingsPage({
               <div className="portal-record-stack" key={installation.id}>
                 <div className="portal-record-card">
                   <div className="portal-record-card__header">
-                    <div className="portal-record-card__title">
-                      <strong>{installation.githubAccountLogin}</strong>
-                      <p>Installation {installation.githubInstallationId}</p>
-                    </div>
+	                    <div className="portal-record-card__title">
+	                      <strong>{installation.githubAccountLogin}</strong>
+	                      <p>Installation <DataValue value={installation.githubInstallationId} tone="id" /></p>
+	                    </div>
                     <div className="portal-record-card__meta">
                       <span className="tag tag--neutral">{repositories.length} visible</span>
                       <span className="tag tag--warning">{privateRepositoryCount} private</span>
@@ -427,10 +428,10 @@ export default async function WorkspaceSettingsPage({
                         key={`${installation.githubInstallationId}:${repository.id}`}
                       >
                         <div className="portal-record-card__header">
-                          <div className="portal-record-card__title">
-                            <strong>{repository.fullName}</strong>
-                            <p>{repository.cloneUrl}</p>
-                          </div>
+	                          <div className="portal-record-card__title">
+	                            <strong>{repository.fullName}</strong>
+	                            <p><DataPath value={repository.cloneUrl} /></p>
+	                          </div>
                           <div className="portal-record-card__meta">
                             <span className={repository.private ? "tag tag--warning" : "tag tag--neutral"}>{repository.private ? "private" : "public"}</span>
                             <span className="tag tag--info">default {repository.defaultBranch}</span>

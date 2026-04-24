@@ -1,6 +1,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { DataPath } from "../../../../../components/data-visuals";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import { ApiResponseError, getPortalAnalysisTasks, getWorkspaceConsole, getWorkspaceJobsPage } from "../../../../../lib/api";
 import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
@@ -50,9 +51,9 @@ export default async function WorkspaceReportsPage({
       || !isWorkspaceScopedJobsPage(workspaceId, jobsWithReports)) {
       throw new ApiResponseError(404, `Workspace reports payload does not belong to workspace ${workspaceId}.`);
     }
-    const totalReports = workspaceConsole.jobs.filter(entry => entry.report != null).length;
-    const uniqueSourcesWithReports = new Set(workspaceConsole.jobs.filter(entry => entry.report != null).map(entry => entry.job.sourceId)).size;
-    const inFlightRuns = workspaceConsole.jobs.filter(entry => ["pending", "queued", "running"].includes(entry.job.status)).length;
+    const totalReports = workspaceConsole.stats.reportBackedJobs;
+    const uniqueSourcesWithReports = workspaceConsole.stats.sourcesWithReports;
+    const inFlightRuns = workspaceConsole.stats.activeJobs;
 
     return (
       <PortalShell
@@ -118,7 +119,7 @@ export default async function WorkspaceReportsPage({
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
                         <strong>{job.report?.title ?? "Generated report"}</strong>
-                        <p>{job.job.sourceLocation}</p>
+                        <p><DataPath value={job.job.sourceLocation} /></p>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className={getJobStatusTagClass(job.job.status)}>{job.job.status}</span>

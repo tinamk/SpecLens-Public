@@ -1,0 +1,7 @@
+interface:
+  display_name: "SpecLens Self-Improvement Loop"
+  short_description: "Dogfood SpecLens against this repo"
+  default_prompt: "Use $speclens-self-improvement-loop to run a local SpecLens self-improvement cycle, inspect the evidence, and decide whether to queue or apply a remediation changeset."
+
+policy:
+  allow_implicit_invocation: true

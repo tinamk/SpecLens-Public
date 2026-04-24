@@ -3,6 +3,7 @@ import type {
   AiRole,
   AiSkill,
   AnalysisTask,
+  AnalysisJob,
   CodeReviewPayload,
   AnalysisReport,
   CodexAuthSelection,
@@ -37,6 +38,47 @@ export type PaginatedItems<T> = {
   items: T[];
   pageInfo: PageInfo;
 };
+export type WorkspaceConsoleStats = {
+  totalJobs: number;
+  activeJobs: number;
+  completedJobs: number;
+  reportBackedJobs: number;
+  sourcesWithReports: number;
+};
+export type WorkspaceConsoleJob = {
+  job: AnalysisJob;
+  report: Pick<AnalysisReport, "id" | "workspaceId" | "jobId" | "status" | "title" | "createdAt"> | null;
+};
+export type WorkspaceConsole = {
+  workspace: Workspace;
+  members: WorkspaceMemberSummary[];
+  sources: Source[];
+  installations: GithubInstallation[];
+  jobs: WorkspaceConsoleJob[];
+  stats: WorkspaceConsoleStats;
+};
+
+async function readApiErrorMessage(response: Response): Promise<string> {
+  const text = await response.text();
+  if (!text) {
+    return `${response.status} ${response.statusText}`;
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      const payload = JSON.parse(text) as { error?: unknown; message?: unknown };
+      if (typeof payload.error === "string" && payload.error.trim()) {
+        return payload.error;
+      }
+      if (typeof payload.message === "string" && payload.message.trim()) {
+        return payload.message;
+      }
+    } catch {
+      return text;
+    }
+  }
+  return text;
+}
 
 async function apiFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
   try {
@@ -61,8 +103,7 @@ async function apiFetch<T>(pathname: string, init?: RequestInit): Promise<T> {
       cache: "no-store",
     });
     if (!response.ok) {
-      const message = await response.text();
-      throw new ApiResponseError(response.status, message || `${response.status} ${response.statusText}`);
+      throw new ApiResponseError(response.status, await readApiErrorMessage(response));
     }
     return await response.json() as T;
   } catch (error) {
@@ -111,13 +152,7 @@ export async function getPortalAnalysisTasks(): Promise<PortalAnalysisTask[]> {
   return payload.tasks;
 }
 
-export async function getWorkspaceConsole(workspaceId: string): Promise<{
-  workspace: Workspace;
-  members: WorkspaceMemberSummary[];
-  sources: Source[];
-  installations: GithubInstallation[];
-  jobs: JobEnvelope[];
-}> {
+export async function getWorkspaceConsole(workspaceId: string): Promise<WorkspaceConsole> {
   return apiFetch(`/api/workspaces/${workspaceId}`);
 }
 

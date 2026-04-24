@@ -87,6 +87,35 @@ let prismaClient: PrismaClient | null = null;
 
 const logOrderBy = { createdAt: "asc" as const };
 const artifactOrderBy = { createdAt: "asc" as const };
+const jobSummaryInclude = {
+  report: {
+    select: {
+      id: true,
+      workspaceId: true,
+      jobId: true,
+      status: true,
+      rolesJson: true,
+      runtimeMode: true,
+      title: true,
+      summaryJson: true,
+      createdAt: true,
+    },
+  },
+  source: {
+    select: {
+      id: true,
+      displayName: true,
+      location: true,
+    },
+  },
+  companionSource: {
+    select: {
+      id: true,
+      displayName: true,
+      location: true,
+    },
+  },
+} as const satisfies Prisma.AnalysisJobInclude;
 const DEFAULT_DISPATCH_LEASE_MS = 30_000;
 const DEFAULT_MAX_DISPATCH_ATTEMPTS = 12;
 
@@ -294,6 +323,40 @@ function requirePersistedHostedSourceType(value: string | null | undefined, cont
   return normalized;
 }
 
+const activeHostedPersistedSourceTypes = [
+  "git-public",
+  "github-public",
+  "github-private",
+  "upload-archive",
+];
+
+function activeHostedJobWhere(...clauses: Prisma.AnalysisJobWhereInput[]): Prisma.AnalysisJobWhereInput {
+  return {
+    AND: [
+      { sourceType: { in: activeHostedPersistedSourceTypes } },
+      {
+        OR: [
+          { companionSourceType: null },
+          { companionSourceType: { in: activeHostedPersistedSourceTypes } },
+        ],
+      },
+      ...clauses,
+    ],
+  };
+}
+
+function accessibleJobsWhere(userId: string, ...clauses: Prisma.AnalysisJobWhereInput[]): Prisma.AnalysisJobWhereInput {
+  return activeHostedJobWhere(
+    {
+      OR: [
+        { workspace: { ownerUserId: userId } },
+        { workspace: { memberships: { some: { userId } } } },
+      ],
+    },
+    ...clauses,
+  );
+}
+
 function normalizeAiToolCapabilities(value: unknown): AiToolCapability[] {
   if (!Array.isArray(value)) {
     return [];
@@ -368,6 +431,10 @@ type JobWithRelations = Prisma.AnalysisJobGetPayload<{
   };
 }>;
 
+type JobSummaryWithRelations = Prisma.AnalysisJobGetPayload<{
+  include: typeof jobSummaryInclude;
+}>;
+
 type ReportWithArtifacts = Prisma.AnalysisReportGetPayload<{
   include: {
     artifacts: { orderBy: typeof artifactOrderBy };
@@ -379,6 +446,28 @@ type ReportWithArtifacts = Prisma.AnalysisReportGetPayload<{
     };
   };
 }>;
+
+type WorkspaceConsoleReportSummary = Pick<AnalysisReport, "id" | "workspaceId" | "jobId" | "status" | "title" | "createdAt">;
+type WorkspaceConsoleStats = {
+  totalJobs: number;
+  activeJobs: number;
+  completedJobs: number;
+  reportBackedJobs: number;
+  sourcesWithReports: number;
+};
+type WorkspaceConsoleJob = {
+  job: AnalysisJob;
+  report: WorkspaceConsoleReportSummary | null;
+};
+
+const workspaceConsoleReportSummarySchema = analysisReportSchema.pick({
+  id: true,
+  workspaceId: true,
+  jobId: true,
+  status: true,
+  title: true,
+  createdAt: true,
+});
 
 type HydratedAiRoleRecord = Prisma.AiRoleGetPayload<{
   include: {
@@ -994,6 +1083,51 @@ function mapReportRecord(
   });
 }
 
+function mapReportSummaryRecord(report: {
+  id: string;
+  workspaceId: string;
+  jobId: string;
+  status: string;
+  rolesJson: unknown;
+  runtimeMode: string;
+  title: string;
+  summaryJson: unknown;
+  createdAt: Date;
+}): AnalysisReport {
+  return analysisReportSchema.parse({
+    id: report.id,
+    workspaceId: report.workspaceId,
+    jobId: report.jobId,
+    status: report.status,
+    roles: resolveReportRoles(report.rolesJson),
+    runtimeMode: report.runtimeMode,
+    title: report.title,
+    summary: report.summaryJson,
+    findings: [],
+    sections: [],
+    artifacts: [],
+    createdAt: report.createdAt.toISOString(),
+  });
+}
+
+function mapWorkspaceConsoleReportRecord(report: {
+  id: string;
+  workspaceId: string;
+  jobId: string;
+  status: string;
+  title: string;
+  createdAt: Date;
+}): WorkspaceConsoleReportSummary {
+  return workspaceConsoleReportSummarySchema.parse({
+    id: report.id,
+    workspaceId: report.workspaceId,
+    jobId: report.jobId,
+    status: report.status,
+    title: report.title,
+    createdAt: report.createdAt.toISOString(),
+  });
+}
+
 function mapJobRecord(job: {
   id: string;
   workspaceId: string;
@@ -1112,6 +1246,29 @@ function buildJobEnvelope(job: JobWithRelations): JobEnvelope {
   });
 }
 
+function buildJobSummaryEnvelope(job: JobSummaryWithRelations): JobEnvelope {
+  const jobRecord = mapJobRecord(job);
+  const report = job.report ? mapReportSummaryRecord(job.report) : null;
+  return jobEnvelopeSchema.parse({
+    job: jobRecord,
+    logs: [],
+    report,
+    artifacts: [],
+    timing: buildJobTimingEstimate(job, jobRecord),
+    qualityScorecard: report?.summary.qualityScorecard ?? null,
+    capabilityGaps: report?.summary.capabilityGaps ?? [],
+    artifactAnalysis: report?.summary.artifactAnalysis ?? null,
+    executionSteps: report?.summary.executionSteps ?? [],
+  });
+}
+
+function buildWorkspaceConsoleJob(job: JobSummaryWithRelations): WorkspaceConsoleJob {
+  return {
+    job: mapJobRecord(job),
+    report: job.report ? mapWorkspaceConsoleReportRecord(job.report) : null,
+  };
+}
+
 function estimateJobDurationMs(job: {
   roles: string[];
   runtimeMode: AnalysisJob["runtimeMode"];
@@ -1135,7 +1292,10 @@ function estimateJobDurationMs(job: {
   return Math.max(perRole, job.runtimeMode === "browser" ? 45_000 : 20_000);
 }
 
-function buildJobTimingEstimate(job: JobWithRelations, jobRecord: AnalysisJob): JobEnvelope["timing"] {
+function buildJobTimingEstimate(
+  job: { createdAt: Date; startedAt: Date | null; finishedAt: Date | null },
+  jobRecord: AnalysisJob,
+): JobEnvelope["timing"] {
   const createdAtMs = job.createdAt.getTime();
   const startedAtMs = job.startedAt?.getTime() ?? null;
   const finishedAtMs = job.finishedAt?.getTime() ?? null;
@@ -1929,7 +2089,13 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "artifact-auditor",
       name: "Artifact auditor",
       description: "Verify artifact completeness and structural validity.",
-      prompt: "Define the artifact expectations for this audit bundle and emit a section titled \"Artifact expectations\" with expected reports, traces, screenshots, route maps, and related artifact requirements.",
+      executorKind: "native",
+      nativeExecutorId: "deterministic-artifact-expectations",
+      prompt: [
+        "Define the artifact expectations for this audit bundle and emit a section titled \"Artifact expectations\" with expected reports, traces, screenshots, route maps, and related artifact requirements.",
+        "Calibrate timing carefully: browser/runtime artifacts created by prior roles are available during this role, but final report exports (`report.json`, `report.md`, `report.html`, generated spec pack, and final run manifest) are written by the controller after all roles complete.",
+        "Do not raise missing-final-report findings during this role solely because those controller-finalized files are not visible yet; instead list them as finalization expectations unless persisted artifact evidence proves the controller failed.",
+      ].join("\n"),
       order: 18,
       skillKeys: ["evidence-discipline", "artifact-validation"],
       dependencyKeys: ["browser-executor", "playwright-operator"],
@@ -1971,7 +2137,11 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "release-gate-scorer",
       name: "Release gate scorer",
       description: "Emit the final recommendation and severity rollup.",
-      prompt: "Emit the final bundle-specific pass, warn, or fail recommendation with confidence, blockers, and rationale in a section titled \"Release gate recommendation\".",
+      prompt: [
+        "Emit the final bundle-specific pass, warn, or fail recommendation with confidence, blockers, and rationale in a section titled \"Release gate recommendation\".",
+        "Calibrate artifact timing: controller-finalized report exports are produced after all roles complete, so do not fail the gate solely because `report.json`, `report.md`, `report.html`, the generated spec pack, or the final run manifest are not visible inside the role workspace yet.",
+        "Only treat artifact absence as a blocker when browser/runtime artifacts expected from already-executed roles are missing, structurally invalid, or contradicted by available evidence.",
+      ].join("\n"),
       order: 22,
       skillKeys: ["evidence-discipline", "severity-calibration", "artifact-validation"],
       dependencyKeys: ["cross-surface-consistency-reviewer", "artifact-auditor", "remediation-planner", "e2e-remediation-planner"],
@@ -2048,10 +2218,23 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       ],
     },
     {
+      id: "agent-e2e-runtime-tooling-fast",
+      name: "Runtime tooling fast agent",
+      description: "Focused sandbox, runtime, browser, Playwright, and artifact validation bundle for fast dogfood cycles.",
+      order: 3,
+      roleKeys: [
+        "runtime-scout",
+        "browser-executor",
+        "playwright-operator",
+        "artifact-auditor",
+        "standardized-json-output",
+      ],
+    },
+    {
       id: "agent-universal-standard",
       name: "Universal audit standard agent",
       description: "Broad repository, runtime, browser, UX, and remediation audit bundle.",
-      order: 3,
+      order: 4,
       roleKeys: [
         "source-topology-scout",
         "runtime-scout",
@@ -2081,7 +2264,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "agent-universal-exhaustive",
       name: "Universal audit exhaustive agent",
       description: "Full universal audit bundle with fix-readiness output for deep repository and browser analysis.",
-      order: 4,
+      order: 5,
       roleKeys: [
         "source-topology-scout",
         "runtime-scout",
@@ -2112,14 +2295,14 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "agent-remediation-planner",
       name: "Remediation planner agent",
       description: "Focused follow-up bundle that groups findings into remediation packs and release guidance.",
-      order: 5,
+      order: 6,
       roleKeys: ["remediation-planner", "release-gate-scorer", "standardized-json-output"],
     },
     {
       id: "agent-fix-readiness",
       name: "Fix readiness agent",
       description: "Focused handoff bundle that prepares implementation-ready downstream fix guidance.",
-      order: 6,
+      order: 7,
       roleKeys: ["remediation-planner", "fix-readiness-emitter", "release-gate-scorer", "standardized-json-output"],
     },
   ] as const;
@@ -2730,6 +2913,93 @@ export async function getWorkspaceDetailForUser(workspaceId: string, userId: str
     jobs: jobs
       .filter(isActiveHostedJobRecord)
       .map(buildJobEnvelope),
+  };
+}
+
+export async function getWorkspaceConsoleForUser(workspaceId: string, userId: string): Promise<{
+  workspace: Workspace;
+  members: WorkspaceMemberSummary[];
+  sources: Source[];
+  installations: GithubInstallation[];
+  jobs: WorkspaceConsoleJob[];
+  stats: WorkspaceConsoleStats;
+}> {
+  await getAccessibleWorkspaceRecord(workspaceId, userId);
+  const prisma = getPrismaClient();
+  const workspace = await prisma.workspace.findUniqueOrThrow({
+    where: { id: workspaceId },
+    include: {
+      memberships: {
+        include: {
+          user: {
+            select: {
+              email: true,
+              displayName: true,
+              avatarUrl: true,
+            },
+          },
+        },
+      },
+      sources: true,
+      installations: true,
+    },
+  });
+  const workspaceJobsWhere = activeHostedJobWhere({ workspaceId });
+  const [
+    totalJobs,
+    activeJobs,
+    completedJobs,
+    reportBackedJobs,
+    sourceRowsWithReports,
+    recentJobs,
+  ] = await prisma.$transaction([
+    prisma.analysisJob.count({ where: workspaceJobsWhere }),
+    prisma.analysisJob.count({
+      where: activeHostedJobWhere({
+        workspaceId,
+        status: { in: ["pending", "queued", "running"] },
+      }),
+    }),
+    prisma.analysisJob.count({
+      where: activeHostedJobWhere({
+        workspaceId,
+        status: "succeeded",
+      }),
+    }),
+    prisma.analysisJob.count({
+      where: activeHostedJobWhere({
+        workspaceId,
+        report: { isNot: null },
+      }),
+    }),
+    prisma.analysisJob.findMany({
+      where: activeHostedJobWhere({
+        workspaceId,
+        report: { isNot: null },
+      }),
+      distinct: ["sourceId"],
+      select: { sourceId: true },
+    }),
+    prisma.analysisJob.findMany({
+      where: workspaceJobsWhere,
+      include: jobSummaryInclude,
+      orderBy: { createdAt: "desc" },
+      take: 4,
+    }),
+  ]);
+  return {
+    workspace: mapWorkspaceRecord(workspace),
+    members: workspace.memberships.map(mapMemberSummaryRecord),
+    sources: workspace.sources.filter(isActiveHostedSourceRecord).map(mapSourceRecord),
+    installations: workspace.installations.map(mapInstallationRecord),
+    jobs: recentJobs.map(buildWorkspaceConsoleJob),
+    stats: {
+      totalJobs,
+      activeJobs,
+      completedJobs,
+      reportBackedJobs,
+      sourcesWithReports: sourceRowsWithReports.length,
+    },
   };
 }
 
@@ -3999,51 +4269,41 @@ export async function listJobsPageForUser(
   const prisma = getPrismaClient();
   const page = normalizePageNumber(options.page);
   const pageSize = normalizePageSize(options.pageSize);
-  const q = options.q?.trim().toLowerCase() ?? "";
-  const jobs = await prisma.analysisJob.findMany({
-    where: {
-      OR: [
-        { workspace: { ownerUserId: userId } },
-        { workspace: { memberships: { some: { userId } } } },
-      ],
-      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
-      ...(options.status ? { status: options.status } : {}),
-    },
-    include: {
-      logs: { orderBy: logOrderBy },
-      report: {
-        include: {
-          artifacts: { orderBy: artifactOrderBy },
-        },
-      },
-      artifacts: { orderBy: artifactOrderBy },
-      source: true,
-      companionSource: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  const filtered = jobs
-    .filter(isActiveHostedJobRecord)
-    .filter(job => (options.hasReport === undefined ? true : options.hasReport ? Boolean(job.report) : !job.report))
-    .filter(job => {
-      if (!q) {
-        return true;
-      }
-      const haystack = [
-        job.id,
-        job.status,
-        job.sourceLocation,
-        job.companionSourceLocation ?? "",
-        job.agentId ?? "",
-        job.failureReason ?? "",
-        job.report?.title ?? "",
-      ].join("\n").toLowerCase();
-      return haystack.includes(q);
-    });
-  const start = (page - 1) * pageSize;
+  const q = options.q?.trim() ?? "";
+  const where = accessibleJobsWhere(
+    userId,
+    ...(options.workspaceId ? [{ workspaceId: options.workspaceId }] satisfies Prisma.AnalysisJobWhereInput[] : []),
+    ...(options.status ? [{ status: options.status }] satisfies Prisma.AnalysisJobWhereInput[] : []),
+    ...(options.hasReport === undefined
+      ? []
+      : [{ report: options.hasReport ? { isNot: null } : { is: null } }] satisfies Prisma.AnalysisJobWhereInput[]),
+    ...(q
+      ? [{
+          OR: [
+            { id: { contains: q, mode: "insensitive" } },
+            { status: { contains: q, mode: "insensitive" } },
+            { sourceLocation: { contains: q, mode: "insensitive" } },
+            { companionSourceLocation: { contains: q, mode: "insensitive" } },
+            { agentId: { contains: q, mode: "insensitive" } },
+            { failureReason: { contains: q, mode: "insensitive" } },
+            { report: { is: { title: { contains: q, mode: "insensitive" } } } },
+          ],
+        }] satisfies Prisma.AnalysisJobWhereInput[]
+      : []),
+  );
+  const [total, jobs] = await prisma.$transaction([
+    prisma.analysisJob.count({ where }),
+    prisma.analysisJob.findMany({
+      where,
+      include: jobSummaryInclude,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
   return {
-    items: filtered.slice(start, start + pageSize).map(buildJobEnvelope),
-    pageInfo: buildPageInfo(filtered.length, page, pageSize),
+    items: jobs.map(buildJobSummaryEnvelope),
+    pageInfo: buildPageInfo(total, page, pageSize),
   };
 }
 

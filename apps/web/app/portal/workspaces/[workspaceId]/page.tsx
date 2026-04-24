@@ -1,6 +1,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { DataPath } from "../../../../components/data-visuals";
 import { ApiResponseError } from "../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../lib/auth";
 import {
@@ -25,7 +26,7 @@ export default async function WorkspaceOverviewPage({
     if (!isWorkspaceScopedWorkspaceConsoleContext(workspaceId, workspaceConsole)) {
       throw new ApiResponseError(404, `Workspace overview payload does not belong to workspace ${workspaceId}.`);
     }
-    const completedJobs = workspaceConsole.jobs.filter(job => job.job.status === "succeeded").length;
+    const completedJobs = workspaceConsole.stats.completedJobs;
 
     return (
       <PortalShell
@@ -49,7 +50,7 @@ export default async function WorkspaceOverviewPage({
           </article>
           <article className="portal-stat" data-testid="workspace-overview-stat-jobs">
             <span className="portal-stat__label">Runs</span>
-            <span className="portal-stat__value">{workspaceConsole.jobs.length}</span>
+            <span className="portal-stat__value">{workspaceConsole.stats.totalJobs}</span>
             <p>{completedJobs} completed</p>
           </article>
           <article className="portal-stat" data-testid="workspace-overview-stat-installations">
@@ -117,7 +118,7 @@ export default async function WorkspaceOverviewPage({
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
                         <strong>{formatJobLabel(job.job, tasks)}</strong>
-                        <p>{job.job.sourceLocation}</p>
+                        <p><DataPath value={job.job.sourceLocation} /></p>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className={getJobStatusTagClass(job.job.status)}>{job.job.status}</span>

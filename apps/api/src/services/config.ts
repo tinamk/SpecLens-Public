@@ -48,6 +48,7 @@ export interface ApiConfig {
   rateLimitMax: number;
   rateLimitWindowMs: number;
   rateLimitAllowList: string[];
+  uploadArchiveMaxBytes: number;
   metricsEnabled: boolean;
   httpAccessLogEnabled: boolean;
 }
@@ -89,6 +90,11 @@ function readMirrorRequired(rawValue: string | undefined, mirrorConfigured: bool
     return false;
   }
   return true;
+}
+
+function readPositiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export function loadApiConfig(): ApiConfig {
@@ -161,6 +167,7 @@ export function loadApiConfig(): ApiConfig {
     rateLimitAllowList: process.env.RATE_LIMIT_ALLOW_LIST
       ? process.env.RATE_LIMIT_ALLOW_LIST.split(",").map(value => value.trim()).filter(Boolean)
       : [],
+    uploadArchiveMaxBytes: readPositiveInteger(process.env.UPLOAD_ARCHIVE_MAX_BYTES, 128 * 1024 * 1024),
     metricsEnabled: process.env.METRICS_ENABLED !== "false",
     httpAccessLogEnabled: process.env.HTTP_ACCESS_LOG_ENABLED === "true" || process.env.NODE_ENV !== "test",
   };

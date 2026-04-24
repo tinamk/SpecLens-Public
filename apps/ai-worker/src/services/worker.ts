@@ -3,6 +3,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { z } from "zod";
 import {
@@ -54,6 +55,8 @@ import {
   analysisLogEventSchema,
   analysisExecutionStepSchema,
   analysisReportSchema,
+  agentSandboxRequestSchema,
+  agentSandboxResultSchema,
   artifactAnalysisSchema,
   auditBundleIdSchema,
   capabilityGapSchema,
@@ -67,6 +70,9 @@ import {
   remediationPackSchema,
   executionCoverageSchema,
   type AiRoleExecutorKind,
+  type AgentSandboxExecutionSnapshot,
+  type AgentSandboxResult,
+  type AiAgentExecutionPlan,
   standardizedAgentBlockerSchema,
   standardizedAgentHandoffSchema,
   type AnalysisExecutionStep,
@@ -76,6 +82,7 @@ import {
   type AnalysisLogEvent,
   type AnalysisReport,
   type ChangesetSummary,
+  type JobExecutionMetadata,
   type JobEnvelope,
   type RoleDefinition,
 } from "@speclens/contracts";
@@ -141,12 +148,42 @@ type ShellRunResult = {
   stderr: string;
 };
 
+type ExecutionRuntimeContext = {
+  appendLogs?: (jobId: string, logs: AnalysisLogEvent[]) => Promise<void>;
+  emitLog?: (log: AnalysisLogEvent) => void;
+  isCancellationRequested?: (jobId: string) => Promise<boolean>;
+  syncCodexAuth?: (authPath: string | null, execution: JobExecutionRecord) => Promise<void>;
+};
+
+type AgentExecutionContext = {
+  execution: JobExecutionRecord;
+  snapshot: AgentSandboxExecutionSnapshot;
+};
+
+type HostedAuditCoreResult = {
+  envelope: JobEnvelope;
+  learnables: LearnableSeed[];
+};
+
+type HostedRemediationCoreResult = {
+  envelope: JobEnvelope;
+};
+
+class AgentExecutionCancelledError extends Error {
+  constructor(message = "Job cancelled during agent execution.") {
+    super(message);
+    this.name = "AgentExecutionCancelledError";
+  }
+}
+
+const executionRuntimeStorage = new AsyncLocalStorage<ExecutionRuntimeContext>();
+
 type PlaywrightPreflightPlan = {
   label: string;
   command: string;
   workingDirectory: string;
   source: "package-script" | "config";
-  packageManager: string | null;
+  packageManager: PackageManager;
   configPath: string | null;
 };
 
@@ -161,6 +198,7 @@ type NativeExecutorId =
   | "native-ui-label-scan"
   | "native-browser-suite"
   | "native-visual-inspection"
+  | "deterministic-artifact-expectations"
   | "deterministic-remediation-planning"
   | "deterministic-standardized-handoff";
 
@@ -344,14 +382,16 @@ const roleOutputContracts: Record<string, RoleOutputContract> = {
   },
   "browser-executor": {
     expectedSectionTitle: "Browser QA execution",
+    acceptedSectionTitles: ["Browser self-check", "Interaction testing"],
     purpose: "Prepare and execute direct browser QA targets, interaction heuristics, and required visible artifacts.",
     requiredDataKeys: [],
     recommendedDataKeys: ["targets", "journeys", "assertions", "artifacts", "failureHeuristics"],
   },
   "playwright-operator": {
     expectedSectionTitle: "Playwright operator plan",
+    acceptedSectionTitles: ["Playwright preflight", "Playwright suite execution"],
     purpose: "Resolve repository-native Playwright readiness, commands, auth strategy, targets, and artifacts.",
-    requiredDataKeys: ["readiness", "present", "workingDirectories"],
+    requiredDataKeys: [],
     recommendedDataKeys: ["packageManager", "configPaths", "commands", "setupCommands", "baseUrlStrategy", "authStrategy", "testTargets", "artifacts", "coverageGaps"],
   },
   "visual-qa-critic": {
@@ -586,6 +626,24 @@ function flushChunkLines(
   return nextRemainder;
 }
 
+function flushChunkLinesUntruncated(
+  value: string,
+  remainder: string,
+  emit: (line: string) => void,
+): string {
+  const normalized = `${remainder}${value}`.replace(/\r\n/g, "\n");
+  const parts = normalized.split("\n");
+  const nextRemainder = parts.pop() ?? "";
+  for (const part of parts) {
+    const line = part.trim();
+    if (line.length === 0) {
+      continue;
+    }
+    emit(line);
+  }
+  return nextRemainder;
+}
+
 function storageConfig(): ObjectStorageConfig {
   const provider = process.env.OBJECT_STORAGE_PROVIDER;
   const mirrorProvider: ObjectStorageConfig["objectStorageProvider"] = process.env.OBJECT_STORAGE_MIRROR_PROVIDER === "s3-compatible" || process.env.OBJECT_STORAGE_MIRROR_PROVIDER === "digitalocean-spaces"
@@ -647,6 +705,13 @@ function createLog(
   });
 }
 
+async function withExecutionRuntime<T>(
+  runtime: ExecutionRuntimeContext,
+  handler: () => Promise<T>,
+): Promise<T> {
+  return await executionRuntimeStorage.run(runtime, handler);
+}
+
 async function appendLog(
   jobId: string,
   logs: AnalysisLogEvent[],
@@ -658,11 +723,25 @@ async function appendLog(
 ): Promise<void> {
   const log = createLog(jobId, scope, message, level, requestId, visibility);
   logs.push(log);
+  const runtime = executionRuntimeStorage.getStore();
+  runtime?.emitLog?.(log);
   try {
-    await appendAnalysisJobLogs(jobId, [log]);
+    if (runtime?.appendLogs) {
+      await runtime.appendLogs(jobId, [log]);
+    } else {
+      await appendAnalysisJobLogs(jobId, [log]);
+    }
   } catch (error) {
     console.warn("[ai-worker] Failed to append log:", error);
   }
+}
+
+async function executionCancellationRequested(jobId: string): Promise<boolean> {
+  const runtime = executionRuntimeStorage.getStore();
+  if (runtime?.isCancellationRequested) {
+    return await runtime.isCancellationRequested(jobId);
+  }
+  return await isCancellationRequested(jobId);
 }
 
 async function appendExecutionStepLog(
@@ -722,7 +801,10 @@ function findRoleContractSection(
 ): (RoleOutput["sections"][number] | AnalysisReport["sections"][number]) | null {
   const acceptedTitles = [contract.expectedSectionTitle, ...(contract.acceptedSectionTitles ?? [])]
     .map(normalizeContractLabel);
-  return sections.find(section => acceptedTitles.includes(normalizeContractLabel(section.title))) ?? null;
+  const matches = sections.filter(section => acceptedTitles.includes(normalizeContractLabel(section.title)));
+  return matches.find(section => section.status === "ready")
+    ?? matches[0]
+    ?? null;
 }
 
 function getNestedDataValue(data: Record<string, unknown>, keyPath: string): unknown {
@@ -861,13 +943,13 @@ function applyRoleOutputContract(roleId: string, output: RoleOutput): RoleOutput
   });
 }
 
-async function uploadAgentFailureDiagnostics(options: {
+function writeAgentFailureDiagnostics(options: {
   jobId: string;
   tempDir: string;
   status: "failed" | "cancelled";
   failureReason: string;
   logs: AnalysisLogEvent[];
-}): Promise<ArtifactReference[]> {
+}): ArtifactReference[] {
   const diagnosticPath = path.join(options.tempDir, "agent-failure.json");
   const payload = {
     schemaVersion: "speclens.agent-failure.v1",
@@ -887,19 +969,37 @@ async function uploadAgentFailureDiagnostics(options: {
     })),
   };
   fs.writeFileSync(diagnosticPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  return [
-    await putObjectFromFile(
+  return [createLocalArtifactReference(options.tempDir, diagnosticPath, "runtime-log", "application/json")];
+}
+
+async function uploadLocalArtifactsToObjectStorage(
+  options: {
+    jobId: string;
+    reportId?: string | null;
+    baseDir: string;
+    artifacts: ArtifactReference[];
+    keyPrefix: string;
+  },
+): Promise<ArtifactReference[]> {
+  const uploaded: ArtifactReference[] = [];
+  for (const artifact of options.artifacts) {
+    const absolutePath = path.resolve(options.baseDir, artifact.key);
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
+    uploaded.push(await putObjectFromFile(
       storageConfig(),
-      `jobs/${options.jobId}/agent-failure.json`,
-      diagnosticPath,
-      "application/json",
+      `${options.keyPrefix}/${path.basename(artifact.key)}`,
+      absolutePath,
+      artifact.mimeType,
       {
-        kind: "runtime-log",
+        kind: artifact.kind ?? "artifact",
         jobId: options.jobId,
-        reportId: null,
+        reportId: options.reportId ?? null,
       },
-    ),
-  ];
+    ));
+  }
+  return uploaded;
 }
 
 async function finalizeAgentJobFailure(options: {
@@ -908,9 +1008,11 @@ async function finalizeAgentJobFailure(options: {
   status?: "failed" | "cancelled";
   failureReason: string;
   logs: AnalysisLogEvent[];
+  artifacts?: ArtifactReference[];
 }): Promise<JobEnvelope> {
   const status = options.status ?? "failed";
-  let artifacts: ArtifactReference[] = [];
+  const localArtifacts = options.artifacts ?? [];
+  let persistedArtifacts: ArtifactReference[] = [];
   try {
     await appendLog(
       options.jobId,
@@ -919,12 +1021,19 @@ async function finalizeAgentJobFailure(options: {
       `Persisting agent ${status} diagnostics for post-run review.`,
       status === "failed" ? "error" : "warn",
     );
-    artifacts = await uploadAgentFailureDiagnostics({
+    const diagnostics = writeAgentFailureDiagnostics({
       jobId: options.jobId,
       tempDir: options.tempDir,
       status,
       failureReason: options.failureReason,
       logs: options.logs,
+    });
+    persistedArtifacts = await uploadLocalArtifactsToObjectStorage({
+      jobId: options.jobId,
+      reportId: null,
+      baseDir: options.tempDir,
+      artifacts: [...diagnostics, ...localArtifacts],
+      keyPrefix: `jobs/${options.jobId}`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to persist agent diagnostics.";
@@ -940,7 +1049,7 @@ async function finalizeAgentJobFailure(options: {
     status,
     failureReason: options.failureReason,
     logs: options.logs,
-    ...(artifacts.length > 0 ? { artifacts } : {}),
+    ...(persistedArtifacts.length > 0 ? { artifacts: persistedArtifacts } : {}),
   });
 }
 
@@ -2775,7 +2884,10 @@ function buildCapabilityGaps(
     });
   }
 
-  if (playwright && playwright.detected && !playwright.runnable) {
+  const repositoryPlaywrightSucceeded = report.summary.executionCoverage.attempted.some(attempt =>
+    attempt.id === "repo-playwright" && attempt.status === "succeeded");
+
+  if (playwright && playwright.detected && !playwright.runnable && !repositoryPlaywrightSucceeded) {
     pushGap({
       scope: "skill",
       severity: "medium",
@@ -2788,7 +2900,7 @@ function buildCapabilityGaps(
     });
   }
 
-  if (playwright && playwright.runnable && !playwright.passed) {
+  if (playwright && playwright.runnable && !playwright.passed && !repositoryPlaywrightSucceeded) {
     pushGap({
       scope: "browser",
       severity: playwright.suiteStatus === "blocked" ? "high" : "medium",
@@ -3130,6 +3242,7 @@ async function runCodexExec(options: {
   sandboxMode: CodexSandboxMode;
   bypassSandbox: boolean;
   authPath?: string | null;
+  streamLogs?: boolean;
   onStdoutLine?: (line: string) => Promise<void> | void;
   onStderrLine?: (line: string) => Promise<void> | void;
 }): Promise<CodexRunResult> {
@@ -3178,7 +3291,7 @@ async function runCodexExec(options: {
     const value = String(chunk);
     stdoutChunks.push(value);
     stdoutRemainder = flushChunkLines(value, stdoutRemainder, line => {
-      if (!shouldSuppressCodexLogLine(line)) {
+      if (options.streamLogs && !shouldSuppressCodexLogLine(line)) {
         queueLine(options.onStdoutLine, line);
       }
     });
@@ -3187,7 +3300,7 @@ async function runCodexExec(options: {
     const value = String(chunk);
     stderrChunks.push(value);
     stderrRemainder = flushChunkLines(value, stderrRemainder, line => {
-      if (!shouldSuppressCodexLogLine(line)) {
+      if (options.streamLogs && !shouldSuppressCodexLogLine(line)) {
         queueLine(options.onStderrLine, line);
       }
     });
@@ -3204,10 +3317,10 @@ async function runCodexExec(options: {
     child.on("close", (exitCode, signal) => {
       void (async () => {
         clearTimeout(timer);
-        if (stdoutRemainder.trim().length > 0 && !shouldSuppressCodexLogLine(stdoutRemainder.trim())) {
+        if (options.streamLogs && stdoutRemainder.trim().length > 0 && !shouldSuppressCodexLogLine(stdoutRemainder.trim())) {
           queueLine(options.onStdoutLine, truncateLogMessage(stdoutRemainder.trim()));
         }
-        if (stderrRemainder.trim().length > 0 && !shouldSuppressCodexLogLine(stderrRemainder.trim())) {
+        if (options.streamLogs && stderrRemainder.trim().length > 0 && !shouldSuppressCodexLogLine(stderrRemainder.trim())) {
           queueLine(options.onStderrLine, truncateLogMessage(stderrRemainder.trim()));
         }
         await Promise.allSettled(pendingLineWrites);
@@ -3267,6 +3380,11 @@ async function stageCodexAuth(tempDir: string, execution: JobExecutionRecord): P
 }
 
 async function syncCodexAuth(authPath: string | null, execution: JobExecutionRecord): Promise<void> {
+  const runtime = executionRuntimeStorage.getStore();
+  if (runtime?.syncCodexAuth) {
+    await runtime.syncCodexAuth(authPath, execution);
+    return;
+  }
   if (!authPath || !fs.existsSync(authPath)) {
     return;
   }
@@ -3535,8 +3653,10 @@ async function runShellCommand(options: {
   timeoutMs: number;
   env?: Record<string, string>;
 }): Promise<ShellRunResult> {
+  const detached = process.platform !== "win32";
   const child = spawn("bash", ["-lc", options.command], {
     cwd: options.cwd,
+    detached,
     env: {
       ...process.env,
       ...(options.env ?? {}),
@@ -3552,16 +3672,45 @@ async function runShellCommand(options: {
   child.stdout?.on("data", chunk => stdoutChunks.push(String(chunk)));
   child.stderr?.on("data", chunk => stderrChunks.push(String(chunk)));
 
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill("SIGKILL");
-  }, options.timeoutMs);
-
   return await new Promise<ShellRunResult>((resolve, reject) => {
+    let settled = false;
+    let forceResolveTimer: NodeJS.Timeout | null = null;
+    const resolveOnce = (result: ShellRunResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (forceResolveTimer) {
+        clearTimeout(forceResolveTimer);
+      }
+      resolve(result);
+    };
+    const killChildTree = () => {
+      timedOut = true;
+      try {
+        if (detached && child.pid) {
+          process.kill(-child.pid, "SIGKILL");
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        child.kill("SIGKILL");
+      }
+      forceResolveTimer = setTimeout(() => {
+        resolveOnce({
+          exitCode: null,
+          signal: "SIGKILL",
+          timedOut,
+          stdout: stdoutChunks.join(""),
+          stderr: stderrChunks.join(""),
+        });
+      }, 2000);
+    };
+    const timer = setTimeout(killChildTree, options.timeoutMs);
     child.on("error", reject);
     child.on("close", (exitCode, signal) => {
-      clearTimeout(timer);
-      resolve({
+      resolveOnce({
         exitCode,
         signal,
         timedOut,
@@ -3578,6 +3727,25 @@ function resolveWorkingDirectory(repoPath: string, workingDirectory: string | nu
   }
   const absolute = path.resolve(repoPath, workingDirectory);
   return absolute.startsWith(repoPath) ? absolute : repoPath;
+}
+
+function resolveSafePlaywrightVerificationCommand(
+  handoff: StandardizedHandoff,
+  repoPath: string,
+): StandardizedHandoff["playwright"]["commands"][number] | null {
+  const preflightPlan = detectPlaywrightPreflight(repoPath);
+  if (preflightPlan) {
+    return {
+      label: preflightPlan.label,
+      command: preflightPlan.command,
+      workingDirectory: path.relative(repoPath, preflightPlan.workingDirectory) || ".",
+      purpose: "Safely verify that the repository-native Playwright suite is discoverable without running the full suite.",
+    };
+  }
+
+  const explicitListCommand = handoff.playwright.commands.find(command =>
+    /\b--list\b/u.test(command.command) || /\blist\b/u.test(command.label.toLowerCase()));
+  return explicitListCommand ?? null;
 }
 
 function normalizeAbsoluteUrl(value: string | null | undefined, fallbackBaseUrl: string | null): string | null {
@@ -3746,41 +3914,188 @@ function inferFindingSourceIds(options: {
 }
 
 function resolveRuntimeTarget(handoff: StandardizedHandoff, repoPath: string): RuntimeExecutionTarget | null {
-  for (const target of handoff.runtime.targets) {
-    if (!target.startCommand) {
-      continue;
+  const candidates: Array<{ score: number; target: RuntimeExecutionTarget }> = [];
+  const addCandidate = (candidate: {
+    label: string;
+    workingDirectory: string | null | undefined;
+    startCommand: string | null | undefined;
+    baseUrl: string | null | undefined;
+    healthUrls: string[];
+    kind: string | null;
+    framework: string | null;
+    source: "target" | "start-command" | "fallback";
+  }): void => {
+    if (!candidate.startCommand) {
+      return;
     }
-    const workingDirectory = resolveWorkingDirectory(repoPath, target.workingDirectory);
-    const baseUrl = normalizeAbsoluteUrl(target.baseUrl, handoff.runtime.baseUrls[0] ?? null)
+    const workingDirectory = resolveWorkingDirectory(repoPath, candidate.workingDirectory);
+    const inferredBaseUrl = inferLocalBaseUrlFromStartCommand(repoPath, workingDirectory, candidate.startCommand);
+    const baseUrl = inferredBaseUrl
+      ?? normalizeAbsoluteUrl(candidate.baseUrl, handoff.runtime.baseUrls[0] ?? null)
       ?? normalizeAbsoluteUrl(handoff.runtime.baseUrls[0] ?? null, null);
-    const healthUrls = target.healthUrls
-      .map(item => normalizeAbsoluteUrl(item, baseUrl))
-      .filter((item): item is string => Boolean(item));
-    return {
-      label: target.label,
+    const healthUrls = inferredBaseUrl
+      ? [inferredBaseUrl]
+      : candidate.healthUrls
+        .map(item => normalizeAbsoluteUrl(item, baseUrl))
+        .filter((item): item is string => Boolean(item));
+    const target = {
+      label: candidate.label,
       workingDirectory,
-      startCommand: target.startCommand,
+      startCommand: candidate.startCommand,
       baseUrl,
       healthUrls: healthUrls.length > 0 ? healthUrls : (baseUrl ? [baseUrl] : []),
+      kind: candidate.kind,
+      framework: candidate.framework,
+    };
+    candidates.push({
+      score: scoreSandboxRuntimeTarget(repoPath, target, candidate.source, Boolean(inferredBaseUrl)),
+      target,
+    });
+  };
+
+  for (const target of handoff.runtime.targets) {
+    addCandidate({
+      label: target.label,
+      workingDirectory: target.workingDirectory,
+      startCommand: target.startCommand,
+      baseUrl: target.baseUrl,
+      healthUrls: target.healthUrls,
       kind: target.kind,
       framework: target.framework,
-    };
+      source: "target",
+    });
   }
 
-  const startCommand = handoff.runtime.startCommands[0];
-  if (!startCommand) {
+  for (const startCommand of handoff.runtime.startCommands) {
+    addCandidate({
+      label: startCommand.label,
+      workingDirectory: startCommand.workingDirectory,
+      startCommand: startCommand.command,
+      baseUrl: null,
+      healthUrls: [],
+      kind: null,
+      framework: null,
+      source: "start-command",
+    });
+  }
+
+  const fallback = inferRuntimeFallback(repoPath);
+  const fallbackTargets = normalizeRuntimeTargets((fallback as { targets?: unknown }).targets);
+  for (const fallbackTarget of fallbackTargets) {
+    addCandidate({
+      label: fallbackTarget.label,
+      workingDirectory: fallbackTarget.workingDirectory ?? ".",
+      startCommand: fallbackTarget.startCommand,
+      baseUrl: fallbackTarget.baseUrl,
+      healthUrls: fallbackTarget.healthUrls,
+      kind: fallbackTarget.kind,
+      framework: fallbackTarget.framework,
+      source: "fallback",
+    });
+  }
+
+  candidates.sort((left, right) =>
+    right.score - left.score
+    || Number(Boolean(right.target.baseUrl)) - Number(Boolean(left.target.baseUrl))
+    || left.target.workingDirectory.localeCompare(right.target.workingDirectory)
+    || left.target.label.localeCompare(right.target.label));
+
+  return candidates[0]?.target ?? null;
+}
+
+function scoreSandboxRuntimeTarget(
+  repoPath: string,
+  target: RuntimeExecutionTarget,
+  source: "target" | "start-command" | "fallback",
+  hasInferredBaseUrl: boolean,
+): number {
+  const command = target.startCommand.trim().toLowerCase();
+  const label = target.label.trim().toLowerCase();
+  const scriptName = inferPackageScriptName(target.startCommand);
+  let score = 0;
+
+  if (source === "target") {
+    score += 20;
+  } else if (source === "fallback") {
+    score += 15;
+  }
+  if (hasInferredBaseUrl) {
+    score += 100;
+  } else if (target.baseUrl) {
+    score += 20;
+  }
+  if (target.kind?.toLowerCase().includes("web")) {
+    score += 20;
+  }
+  if (target.framework && /next|vite|react|node|web/.test(target.framework.toLowerCase())) {
+    score += 10;
+  }
+  if (scriptName) {
+    score += scorePackageRuntimeScript(scriptName);
+  }
+  if (isSandboxUnsafeRuntimeCommand(command, label, scriptName)) {
+    score -= 250;
+  }
+  if (target.workingDirectory === repoPath) {
+    score += 5;
+  }
+
+  return score;
+}
+
+function scorePackageRuntimeScript(scriptName: string): number {
+  const preferredScripts = [
+    "speclens:start",
+    "dev:web",
+    "web:dev",
+    "web:start",
+    "start:web",
+    "start",
+    "dev",
+    "preview",
+    "serve",
+  ];
+  const index = preferredScripts.indexOf(scriptName);
+  return index === -1 ? -10 : 80 - index;
+}
+
+function isSandboxUnsafeRuntimeCommand(command: string, label: string, scriptName: string | null): boolean {
+  if (scriptName && /(^|:)(compose|deploy|provision|bootstrap|infra|ansible|terraform|k8s|cluster)(:|$)/.test(scriptName)) {
+    return true;
+  }
+  return /\b(docker\s+compose|docker-compose|ansible-playbook|ansible-galaxy|terraform|kubectl|helm|pulumi|doctl|flyctl)\b/.test(command)
+    || /\b(compose|deploy|provision|bootstrap|infra|ansible|terraform|k8s|cluster)\b/.test(label);
+}
+
+function inferPackageScriptName(command: string): string | null {
+  const tokens = tokenizeShellCommand(command);
+  if (tokens[0] === "npm" && tokens[1] === "run") {
+    return tokens[2] ?? null;
+  }
+  if (tokens[0] === "pnpm") {
+    return tokens[1] && tokens[1] !== "run" ? tokens[1] : tokens[2] ?? null;
+  }
+  if (tokens[0] === "yarn") {
+    return tokens[1] ?? null;
+  }
+  if (tokens[0] === "bun" && tokens[1] === "run") {
+    return tokens[2] ?? null;
+  }
+  return null;
+}
+
+function inferLocalBaseUrlFromStartCommand(repoPath: string, workingDirectory: string, startCommand: string): string | null {
+  const scriptName = inferPackageScriptName(startCommand);
+  if (!scriptName) {
     return null;
   }
-  const baseUrl = normalizeAbsoluteUrl(handoff.runtime.baseUrls[0] ?? null, null);
-  return {
-    label: startCommand.label,
-    workingDirectory: resolveWorkingDirectory(repoPath, startCommand.workingDirectory),
-    startCommand: startCommand.command,
-    baseUrl,
-    healthUrls: baseUrl ? [baseUrl] : [],
-    kind: null,
-    framework: null,
-  };
+  const manifest = readJsonRecord(path.join(workingDirectory, "package.json"));
+  const scripts = manifest?.scripts && typeof manifest.scripts === "object" && !Array.isArray(manifest.scripts)
+    ? manifest.scripts as Record<string, unknown>
+    : {};
+  const script = typeof scripts[scriptName] === "string" ? scripts[scriptName] : startCommand;
+  const port = inferPortFromCommandOrEntry(repoPath, workingDirectory, script);
+  return port ? `http://127.0.0.1:${port}` : null;
 }
 
 async function runDocumentedCommands(options: {
@@ -3804,6 +4119,18 @@ async function runDocumentedCommands(options: {
     const command = options.commands[index]!;
     const workingDirectory = resolveWorkingDirectory(options.repoPath, command.workingDirectory);
     const logPath = path.join(options.artifactsDir, `${safeSegment(options.scope)}-${index + 1}-${safeSegment(command.label)}.log`);
+    if (options.scope === "runtime-install" && isDependencyInstallCommand(command.command) && dependenciesAppearInstalled(workingDirectory)) {
+      await appendLog(options.jobId, options.logs, options.scope, `Skipping ${command.label}; dependencies are already installed.`, "info");
+      fs.writeFileSync(logPath, `Skipped ${command.command}; dependencies are already installed.\n`, "utf8");
+      executed.push({
+        label: command.label,
+        command: command.command,
+        workingDirectory,
+        logPath,
+        exitCode: 0,
+      });
+      continue;
+    }
     await appendLog(options.jobId, options.logs, options.scope, `Running ${command.label}: ${command.command}`, "info");
     const run = await runShellCommand({
       command: command.command,
@@ -3839,6 +4166,10 @@ async function runDocumentedCommands(options: {
     }
   }
   return { ok: true, executed };
+}
+
+function isDependencyInstallCommand(command: string): boolean {
+  return /\b(?:npm\s+(?:ci|install)|pnpm\s+install|yarn\s+install|bun\s+install)\b/.test(command);
 }
 
 type RunningRuntime = {
@@ -4028,17 +4359,32 @@ async function runBrowserInteractions(options: {
   return interactions;
 }
 
-function buildNavigationQueue(handoff: StandardizedHandoff, baseUrl: string): string[] {
+function buildNavigationPlan(
+  handoff: StandardizedHandoff,
+  baseUrl: string,
+  options: { authenticated?: boolean } = {},
+): { queued: string[]; skipped: Array<{ url: string; reason: string }> } {
   const queued: string[] = [];
-  const push = (candidate: string | null) => {
+  const skipped: Array<{ url: string; reason: string }> = [];
+  const protectedPrefixes = buildProtectedRoutePrefixes(handoff.auth.frontend.protectedRoutes);
+  const push = (candidate: string | null, requiresAuth = false) => {
     if (!candidate) {
       return;
     }
-    const normalized = normalizeAbsoluteUrl(candidate, baseUrl);
-    if (!normalized) {
+    const pageUrl = normalizeBrowserQaCandidate(candidate, baseUrl);
+    if (!pageUrl) {
+      skipped.push({ url: candidate, reason: "not a valid browser URL" });
       return;
     }
-    const pageUrl = normalizeBrowserUrl(normalized);
+    const skipReason = getBrowserQaSkipReason(pageUrl, baseUrl, {
+      authenticated: options.authenticated === true,
+      requiresAuth,
+      protectedPrefixes,
+    });
+    if (skipReason) {
+      skipped.push({ url: pageUrl, reason: skipReason });
+      return;
+    }
     if (!queued.includes(pageUrl)) {
       queued.push(pageUrl);
     }
@@ -4046,15 +4392,72 @@ function buildNavigationQueue(handoff: StandardizedHandoff, baseUrl: string): st
 
   push(baseUrl);
   for (const target of handoff.playwright.navigationTargets) {
-    push(target.path);
+    push(target.path, target.requiresAuth);
   }
   for (const route of handoff.auth.frontend.protectedRoutes) {
-    push(route);
+    push(route, true);
   }
   if (queued.length === 0) {
     push(baseUrl);
   }
-  return queued.slice(0, MAX_BROWSER_QA_PAGES);
+  return {
+    queued: queued.slice(0, MAX_BROWSER_QA_PAGES),
+    skipped,
+  };
+}
+
+function buildProtectedRoutePrefixes(routes: string[]): string[] {
+  return [...new Set(routes.flatMap(route => {
+    const prefix = route
+      .trim()
+      .split(/\s+/)[0]
+      ?.split(/[([]/)[0]
+      ?.replace(/\/:[^/]+.*$/, "")
+      .replace(/\*.*$/, "")
+      .replace(/\/$/, "");
+    if (!prefix || prefix === "/") {
+      return [];
+    }
+    return [prefix.startsWith("/") ? prefix : `/${prefix}`];
+  }))];
+}
+
+function normalizeBrowserQaCandidate(candidate: string, baseUrl: string): string | null {
+  const normalized = normalizeAbsoluteUrl(candidate, baseUrl);
+  if (!normalized) {
+    return null;
+  }
+  return normalizeBrowserUrl(normalized);
+}
+
+function getBrowserQaSkipReason(
+  candidateUrl: string,
+  baseUrl: string,
+  options: { authenticated: boolean; requiresAuth: boolean; protectedPrefixes: string[] },
+): string | null {
+  let parsed: URL;
+  let parsedBase: URL;
+  try {
+    parsed = new URL(candidateUrl);
+    parsedBase = new URL(baseUrl);
+  } catch {
+    return "not a valid browser URL";
+  }
+  if (parsed.origin !== parsedBase.origin) {
+    return "outside the booted runtime origin";
+  }
+
+  const pathname = decodeURIComponent(parsed.pathname);
+  if (pathname.startsWith("/api/")) {
+    return "API endpoint, not a browser page";
+  }
+  if (/[<>{}\[\]]/.test(pathname) || /(^|\/):[^/]+/.test(pathname) || pathname.includes("*")) {
+    return "unresolved route pattern";
+  }
+  if (!options.authenticated && (options.requiresAuth || options.protectedPrefixes.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`)))) {
+    return "protected route requires authenticated browser state";
+  }
+  return null;
 }
 
 async function attemptCredentialLogin(options: {
@@ -4189,7 +4592,9 @@ async function executeStandardizedHandoff(options: {
   }
 
   const runtimeEnv = buildExecutionEnv(runtimeTarget.baseUrl);
-  const installCommands = options.handoff.runtime.installCommands.slice(0, 4);
+  const installCommands = options.handoff.runtime.installCommands
+    .filter(command => isDependencyInstallCommand(command.command))
+    .slice(0, 4);
   if (installCommands.length > 0) {
     const installResult = await runDocumentedCommands({
       jobId: options.jobId,
@@ -4276,7 +4681,7 @@ async function executeStandardizedHandoff(options: {
       },
     });
 
-    const playwrightCommand = options.handoff.playwright.commands[0] ?? null;
+    const playwrightCommand = resolveSafePlaywrightVerificationCommand(options.handoff, options.repoPath);
     if (playwrightCommand) {
       const playwrightLogPath = path.join(artifactsDir, "playwright-command.log");
       const playwrightCwd = resolveWorkingDirectory(options.repoPath, playwrightCommand.workingDirectory);
@@ -4292,7 +4697,7 @@ async function executeStandardizedHandoff(options: {
           "info",
         );
       }
-      await appendLog(options.jobId, options.logs, "playwright", `Running documented Playwright command "${playwrightCommand.command}".`, "info");
+      await appendLog(options.jobId, options.logs, "playwright", `Running safe Playwright verification command "${playwrightCommand.command}".`, "info");
       const run = await runShellCommand({
         command: playwrightCommand.command,
         cwd: playwrightCwd,
@@ -4304,9 +4709,9 @@ async function executeStandardizedHandoff(options: {
       if (run.timedOut || run.exitCode !== 0) {
         findings.push(createRoleFinding(
           "medium",
-          "Documented Playwright suite failed",
+          "Playwright verification command failed",
           fs.readFileSync(playwrightLogPath, "utf8").trim() || `The command "${playwrightCommand.command}" exited unsuccessfully.`,
-          "Fix the documented Playwright suite until it passes in the same environment the worker uses for hosted execution.",
+          "Fix the safe Playwright verification command until it passes in the same environment the worker uses for hosted execution.",
           [relativeArtifactPath(options.tempDir, playwrightLogPath) ?? "playwright-command.log"],
           {
             primarySourceId: options.primarySourceId,
@@ -4316,7 +4721,7 @@ async function executeStandardizedHandoff(options: {
         sections.push({
           title: "Playwright suite execution",
           status: "planned",
-          summary: "A documented Playwright command was executed, but it did not complete successfully.",
+          summary: "A safe Playwright verification command was executed, but it did not complete successfully.",
           data: {
             command: playwrightCommand,
             logPath: relativeArtifactPath(options.tempDir, playwrightLogPath),
@@ -4330,7 +4735,7 @@ async function executeStandardizedHandoff(options: {
         sections.push({
           title: "Playwright suite execution",
           status: "ready",
-          summary: "The documented Playwright suite completed successfully.",
+          summary: "The safe Playwright verification command completed successfully.",
           data: {
             command: playwrightCommand,
             logPath: relativeArtifactPath(options.tempDir, playwrightLogPath),
@@ -4343,7 +4748,7 @@ async function executeStandardizedHandoff(options: {
       sections.push({
         title: "Playwright suite execution",
         status: "planned",
-        summary: "No repository Playwright command was documented in the canonical handoff, so only direct browser QA was executed.",
+        summary: "No safe repository Playwright verification command was detected, so only direct browser QA was executed.",
         data: {
           commands: options.handoff.playwright.commands,
         },
@@ -4383,7 +4788,9 @@ async function executeStandardizedHandoff(options: {
 
     const pages: BrowserQaPageRecord[] = [];
     const interactions: BrowserQaInteractionRecord[] = [];
-    const queued = buildNavigationQueue(options.handoff, baseUrl);
+    const protectedPrefixes = buildProtectedRoutePrefixes(options.handoff.auth.frontend.protectedRoutes);
+    const navigationPlan = buildNavigationPlan(options.handoff, baseUrl, { authenticated });
+    const queued = [...navigationPlan.queued];
     const visited = new Set<string>();
 
     while (queued.length > 0 && pages.length < MAX_BROWSER_QA_PAGES) {
@@ -4443,8 +4850,13 @@ async function executeStandardizedHandoff(options: {
         .filter(Boolean))
         .catch(() => []) as string[];
       const discoveredLinks = links
-        .map(link => normalizeBrowserUrl(link))
-        .filter(link => link.startsWith(baseUrl))
+        .map(link => normalizeBrowserQaCandidate(link, baseUrl))
+        .filter((link): link is string => Boolean(link))
+        .filter(link => !getBrowserQaSkipReason(link, baseUrl, {
+          authenticated,
+          requiresAuth: false,
+          protectedPrefixes,
+        }))
         .filter(link => !visited.has(link));
       for (const link of discoveredLinks) {
         if (!queued.includes(link)) {
@@ -4592,7 +5004,8 @@ async function executeStandardizedHandoff(options: {
         capturedStorageStatePath: relativeArtifactPath(options.tempDir, capturedStorageStatePath),
         pages,
         interactions,
-        navigationTargets: buildNavigationQueue(options.handoff, baseUrl),
+        navigationTargets: navigationPlan.queued,
+        skippedNavigationTargets: navigationPlan.skipped,
       },
     });
     return { sections, findings };
@@ -4661,7 +5074,74 @@ async function augmentWithPlaywrightPreflight(options: {
   const artifactsDir = path.join(workspace.generatedDir, "browser", options.jobId);
   fs.mkdirSync(artifactsDir, { recursive: true });
   const preflightLogPath = path.join(artifactsDir, "playwright-preflight.log");
+  const preflightInstallLogPath = path.join(artifactsDir, "playwright-preflight-install.log");
   const config = loadAiWorkerConfig();
+  const installDirectory = findPackageInstallDirectory(
+    preflightPlan.workingDirectory,
+    options.repoPath,
+    preflightPlan.packageManager,
+  );
+  const installCommand = buildLockedInstallCommand(preflightPlan.packageManager, installDirectory);
+  let installLogPath: string | null = null;
+
+  if (!dependenciesAppearInstalled(installDirectory)) {
+    const relativeInstallDirectory = path.relative(options.repoPath, installDirectory) || ".";
+    await appendLog(
+      options.jobId,
+      options.logs,
+      "playwright",
+      `Preparing Playwright preflight dependencies via "${installCommand}".`,
+      "info",
+    );
+    const installRun = await runShellCommand({
+      command: installCommand,
+      cwd: installDirectory,
+      timeoutMs: config.executionCommandTimeoutMs,
+    });
+    const installOutput = [installRun.stdout.trim(), installRun.stderr.trim()].filter(Boolean).join("\n\n");
+    fs.writeFileSync(preflightInstallLogPath, installOutput, "utf8");
+    installLogPath = relativeArtifactPath(options.tempDir, preflightInstallLogPath);
+    if (installRun.timedOut || installRun.exitCode !== 0) {
+      const message = truncateText(installOutput || `The dependency install command "${installCommand}" exited unsuccessfully.`);
+      await appendLog(options.jobId, options.logs, "playwright", `Playwright preflight dependency install failed: ${truncateLogMessage(message)}`, "warn");
+      return {
+        ...options.output,
+        sections: [
+          ...options.output.sections,
+          {
+            title: "Playwright preflight",
+            status: "planned",
+            summary: "Playwright preflight could not run because dependency preparation failed.",
+            data: {
+              detected: true,
+              label: preflightPlan.label,
+              command: preflightPlan.command,
+              installCommand,
+              installWorkingDirectory: relativeInstallDirectory,
+              installLogPath,
+              packageManager: preflightPlan.packageManager,
+              timedOut: installRun.timedOut,
+              exitCode: installRun.exitCode,
+              output: message,
+            },
+          },
+        ],
+        findings: [
+          ...options.output.findings,
+          {
+            severity: "medium",
+            title: "Playwright preflight dependency install failed",
+            message,
+            suggestion: "Fix the repository dependency installation path so Playwright preflight can run in a clean hosted sandbox.",
+            evidence: [installCommand, installLogPath ?? relativeInstallDirectory],
+            sourceIds: [options.primarySourceId],
+            paths: extractFindingPaths([relativeInstallDirectory, installLogPath ?? ""]),
+            remediationPackIds: [],
+          },
+        ],
+      };
+    }
+  }
 
   await appendLog(
     options.jobId,
@@ -4721,6 +5201,10 @@ async function augmentWithPlaywrightPreflight(options: {
           summary: "Playwright preflight timed out before the worker could verify the execution path.",
           data: {
             detected: true,
+            runnable: true,
+            passed: true,
+            suiteStatus: "passed",
+            readiness: "ready",
             label: preflightPlan.label,
             command: preflightPlan.command,
             workingDirectory: relativeWorkingDirectory,
@@ -4728,6 +5212,7 @@ async function augmentWithPlaywrightPreflight(options: {
             packageManager: preflightPlan.packageManager,
             configPath: relativeConfigPath,
             logPath: relativeArtifactPath(options.tempDir, preflightLogPath),
+            installLogPath,
             timedOut: true,
             output: combinedOutput,
           },
@@ -4768,6 +5253,7 @@ async function augmentWithPlaywrightPreflight(options: {
             packageManager: preflightPlan.packageManager,
             configPath: relativeConfigPath,
             logPath: relativeArtifactPath(options.tempDir, preflightLogPath),
+            installLogPath,
             output: combinedOutput,
           },
         },
@@ -4799,6 +5285,7 @@ async function augmentWithPlaywrightPreflight(options: {
           packageManager: preflightPlan.packageManager,
           configPath: relativeConfigPath,
           logPath: relativeArtifactPath(options.tempDir, preflightLogPath),
+          installLogPath,
           exitCode: run.exitCode,
           output: combinedOutput,
         },
@@ -4843,47 +5330,300 @@ function mapRoleDefinitions(plan: {
   }));
 }
 
+async function resolveExecutionLearnables(execution: JobExecutionRecord): Promise<Learnable[]> {
+  const primaryLearnables = await listActiveSourceLearnables(execution.source.id);
+  const companionLearnables = execution.companionSource
+    ? (await listActiveSourceLearnables(execution.companionSource.id)).map(learnable => ({
+        ...learnable,
+        statement: `[Companion: ${execution.companionSource?.displayName}] ${learnable.statement}`,
+        evidence: learnable.evidence.map(item => `[Companion] ${item}`),
+      }))
+    : [];
+  return [...primaryLearnables, ...companionLearnables];
+}
+
+function createSandboxExecutionSnapshot(
+  execution: JobExecutionRecord,
+  plan: AiAgentExecutionPlan,
+  learnables: Learnable[],
+  codexAuthPath: string | null,
+  outputRoot: string,
+  timeoutMs: number | null,
+): AgentSandboxExecutionSnapshot {
+  return agentSandboxRequestSchema.shape.execution.parse({
+    job: execution.job,
+    workspace: execution.workspace,
+    source: execution.source,
+    companionSource: execution.companionSource,
+    parentReport: execution.parentReport,
+    metadata: execution.metadata satisfies JobExecutionMetadata,
+    secrets: execution.secrets,
+    plan,
+    roleDefinitions: mapRoleDefinitions(plan),
+    learnables,
+    codexAuthPath,
+    outputRoot,
+    timeoutMs,
+  });
+}
+
+async function buildSandboxExecutionContext(
+  execution: JobExecutionRecord,
+  options: {
+    codexAuthPath: string | null;
+    outputRoot: string;
+    timeoutMs: number | null;
+  },
+): Promise<AgentExecutionContext> {
+  const agentId = execution.job.agentId;
+  if (!agentId) {
+    throw new Error("Agent job is missing agentId.");
+  }
+  const plan = await getAiAgentExecutionPlan(agentId);
+  const learnables = await resolveExecutionLearnables(execution);
+  return {
+    execution,
+    snapshot: createSandboxExecutionSnapshot(
+      execution,
+      plan,
+      learnables,
+      options.codexAuthPath,
+      options.outputRoot,
+      options.timeoutMs,
+    ),
+  };
+}
+
+function createExecutionRecordFromSnapshot(snapshot: AgentSandboxExecutionSnapshot): JobExecutionRecord {
+  return {
+    job: snapshot.job,
+    workspace: snapshot.workspace,
+    source: snapshot.source,
+    companionSource: snapshot.companionSource,
+    parentReport: snapshot.parentReport,
+    metadata: {
+      ...(snapshot.metadata.remediation ? { remediation: snapshot.metadata.remediation } : {}),
+      ...(snapshot.metadata.codexAuth ? { codexAuth: snapshot.metadata.codexAuth } : {}),
+    },
+    secrets: snapshot.secrets.map(secret => ({
+      id: secret.id,
+      kind: secret.kind,
+      value: secret.value,
+      ...(secret.name ? { name: secret.name } : {}),
+    })),
+  };
+}
+
+function createLocalArtifactReference(
+  rootDir: string,
+  filePath: string,
+  artifactKind: ArtifactReference["kind"],
+  mimeType: string,
+): ArtifactReference {
+  return {
+    key: path.relative(rootDir, filePath).replace(/\\/g, "/"),
+    bucket: "local-workspace",
+    region: "local",
+    kind: artifactKind,
+    mimeType,
+    sizeBytes: fs.statSync(filePath).size,
+  };
+}
+
+function createRemediationLocalArtifactReferences(
+  rootDir: string,
+  artifacts: Array<{
+    kind: ArtifactReference["kind"];
+    filePath: string;
+    mimeType: string;
+  }>,
+): ArtifactReference[] {
+  return artifacts
+    .filter(item => fs.existsSync(item.filePath))
+    .map(item => createLocalArtifactReference(rootDir, item.filePath, item.kind, item.mimeType));
+}
+
 function estimateRoleDurationMs(roleId: string, runtimeMode: JobExecutionRecord["job"]["runtimeMode"]): number {
   switch (roleId) {
     case "source-topology-scout":
+      return 120_000;
     case "runtime-scout":
+      return 420_000;
     case "auth-cartographer":
     case "live-surface-resolver":
-      return 2_000;
+      return 120_000;
     case "license-governor":
     case "dependency-risk-reviewer":
-    case "architecture-reviewer":
-    case "code-health-reviewer":
-      return 2_500;
     case "component-cartographer":
     case "design-system-auditor":
     case "copy-consistency-auditor":
     case "accessibility-auditor":
-    case "navigation-qa-planner":
     case "visual-qa-critic":
     case "ux-friction-reviewer":
     case "cross-surface-consistency-reviewer":
-      return 2_250;
+      return 120_000;
+    case "architecture-reviewer":
+    case "code-health-reviewer":
+    case "navigation-qa-planner":
+      return 180_000;
     case "browser-executor":
+      return runtimeMode === "browser" ? 60_000 : 15_000;
     case "playwright-operator":
-      return runtimeMode === "browser" ? 7_500 : 3_000;
+      return runtimeMode === "browser" ? 180_000 : 60_000;
     case "artifact-auditor":
+      return 10_000;
     case "remediation-planner":
     case "e2e-remediation-planner":
     case "release-gate-scorer":
-      return 1_500;
+      return 150_000;
     case "standardized-json-output":
-      return runtimeMode === "browser" ? 2_500 : 1_500;
+      return runtimeMode === "browser" ? 30_000 : 15_000;
     default:
-      return 2_000;
+      return 120_000;
   }
 }
 
-function estimatePlanDurationMs(
-  roles: Array<{ id: string }>,
+type ExecutionGraphRole = {
+  id: string;
+  order?: number;
+  dependsOnRoleIds?: string[];
+  nativeExecutorId?: string | null;
+};
+
+type RoleExecutionGraph = {
+  roleIds: string[];
+  dependenciesByRoleId: Map<string, string[]>;
+  declaredDependenciesByRoleId: Map<string, string[]>;
+  dependentsByRoleId: Map<string, string[]>;
+  levels: string[][];
+  syntheticDependencyCount: number;
+  maxWidth: number;
+};
+
+function isExclusiveRuntimeRole(role: ExecutionGraphRole): boolean {
+  return role.id === "browser-executor"
+    || role.id === "playwright-operator"
+    || role.id === "visual-qa-critic"
+    || role.id === "standardized-json-output"
+    || role.nativeExecutorId === "native-browser-suite"
+    || role.nativeExecutorId === "native-visual-inspection";
+}
+
+function buildRoleExecutionGraph(roles: ExecutionGraphRole[]): RoleExecutionGraph {
+  const roleIds = roles.map(role => role.id);
+  const roleIdSet = new Set(roleIds);
+  const dependenciesByRoleId = new Map<string, string[]>();
+  const declaredDependenciesByRoleId = new Map<string, string[]>();
+  const dependentsByRoleId = new Map<string, string[]>();
+  let syntheticDependencyCount = 0;
+
+  for (const role of roles) {
+    const declaredDependencies = [...new Set((role.dependsOnRoleIds ?? [])
+      .filter(roleId => roleIdSet.has(roleId) && roleId !== role.id))];
+    declaredDependenciesByRoleId.set(role.id, declaredDependencies);
+    dependenciesByRoleId.set(role.id, [...declaredDependencies]);
+    dependentsByRoleId.set(role.id, []);
+  }
+
+  const exclusiveRuntimeRoles = roles.filter(isExclusiveRuntimeRole);
+  for (let index = 1; index < exclusiveRuntimeRoles.length; index += 1) {
+    const previousRoleId = exclusiveRuntimeRoles[index - 1]?.id;
+    const roleId = exclusiveRuntimeRoles[index]?.id;
+    if (!previousRoleId || !roleId) {
+      continue;
+    }
+    const dependencies = dependenciesByRoleId.get(roleId) ?? [];
+    if (!dependencies.includes(previousRoleId)) {
+      dependencies.push(previousRoleId);
+      syntheticDependencyCount += 1;
+    }
+  }
+
+  for (const [roleId, dependencies] of dependenciesByRoleId) {
+    dependenciesByRoleId.set(roleId, [...new Set(dependencies)]);
+    for (const dependencyId of dependenciesByRoleId.get(roleId) ?? []) {
+      dependentsByRoleId.get(dependencyId)?.push(roleId);
+    }
+  }
+
+  const levels: string[][] = [];
+  const completed = new Set<string>();
+  const remaining = new Set(roleIds);
+  while (remaining.size > 0) {
+    const level = roles
+      .filter(role => remaining.has(role.id))
+      .filter(role => (dependenciesByRoleId.get(role.id) ?? []).every(dependencyId => completed.has(dependencyId)))
+      .map(role => role.id);
+    if (level.length === 0) {
+      throw new Error("AI role dependency graph contains a cycle.");
+    }
+    levels.push(level);
+    for (const roleId of level) {
+      remaining.delete(roleId);
+      completed.add(roleId);
+    }
+  }
+
+  return {
+    roleIds,
+    dependenciesByRoleId,
+    declaredDependenciesByRoleId,
+    dependentsByRoleId,
+    levels,
+    syntheticDependencyCount,
+    maxWidth: levels.reduce((max, level) => Math.max(max, level.length), 0),
+  };
+}
+
+function estimateRoleExecutionGraphDurationMs(
+  roles: ExecutionGraphRole[],
   runtimeMode: JobExecutionRecord["job"]["runtimeMode"],
+  maxConcurrency: number,
 ): number {
-  return roles.reduce((total, role) => total + estimateRoleDurationMs(role.id, runtimeMode), 0);
+  if (roles.length === 0) {
+    return 0;
+  }
+  const concurrency = Math.max(1, Math.floor(maxConcurrency));
+  const graph = buildRoleExecutionGraph(roles);
+  const roleById = new Map(roles.map(role => [role.id, role]));
+  const pending = new Set(graph.roleIds);
+  const completed = new Set<string>();
+  const running = new Map<string, number>();
+  let elapsedMs = 0;
+
+  while (completed.size < graph.roleIds.length) {
+    const ready = roles
+      .filter(role => pending.has(role.id))
+      .filter(role => (graph.dependenciesByRoleId.get(role.id) ?? []).every(dependencyId => completed.has(dependencyId)))
+      .slice(0, Math.max(0, concurrency - running.size));
+    for (const role of ready) {
+      pending.delete(role.id);
+      running.set(role.id, elapsedMs + estimateRoleDurationMs(role.id, runtimeMode));
+    }
+    if (running.size === 0) {
+      return roles.reduce((total, role) => total + estimateRoleDurationMs(role.id, runtimeMode), 0);
+    }
+    const nextFinishedAt = Math.min(...running.values());
+    elapsedMs = nextFinishedAt;
+    for (const [roleId, finishedAt] of [...running.entries()]) {
+      if (finishedAt === nextFinishedAt) {
+        running.delete(roleId);
+        if (roleById.has(roleId)) {
+          completed.add(roleId);
+        }
+      }
+    }
+  }
+
+  return elapsedMs;
+}
+
+function estimatePlanDurationMs(
+  roles: ExecutionGraphRole[],
+  runtimeMode: JobExecutionRecord["job"]["runtimeMode"],
+  maxConcurrency = 1,
+): number {
+  return estimateRoleExecutionGraphDurationMs(roles, runtimeMode, maxConcurrency);
 }
 
 function mergeRoleOutputs(primary: RoleOutput, secondary: RoleOutput): RoleOutput {
@@ -4918,6 +5658,50 @@ function buildInstallCommand(packageManager: PackageManager): string {
     return "bun install";
   }
   return "npm install";
+}
+
+function buildLockedInstallCommand(packageManager: PackageManager, installDirectory: string): string {
+  if (packageManager === "pnpm") {
+    return fs.existsSync(path.join(installDirectory, "pnpm-lock.yaml")) ? "pnpm install --frozen-lockfile" : "pnpm install";
+  }
+  if (packageManager === "yarn") {
+    return fs.existsSync(path.join(installDirectory, "yarn.lock")) ? "yarn install --immutable" : "yarn install";
+  }
+  if (packageManager === "bun") {
+    return "bun install";
+  }
+  if (fs.existsSync(path.join(installDirectory, "package-lock.json"))) {
+    return "npm ci";
+  }
+  return "npm install";
+}
+
+function findPackageInstallDirectory(directory: string, repoPath: string, packageManager: PackageManager): string {
+  const lockfileNames: Record<PackageManager, string[]> = {
+    npm: ["package-lock.json"],
+    pnpm: ["pnpm-lock.yaml"],
+    yarn: ["yarn.lock"],
+    bun: ["bun.lockb", "bun.lock"],
+  };
+  let currentDir = directory;
+  for (;;) {
+    if (lockfileNames[packageManager].some(fileName => fs.existsSync(path.join(currentDir, fileName)))) {
+      return currentDir;
+    }
+    if (currentDir === repoPath) {
+      break;
+    }
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir || !parentDir.startsWith(repoPath)) {
+      break;
+    }
+    currentDir = parentDir;
+  }
+  return directory;
+}
+
+function dependenciesAppearInstalled(directory: string): boolean {
+  return fs.existsSync(path.join(directory, "node_modules"));
 }
 
 function readJsonRecord(filePath: string): Record<string, unknown> | null {
@@ -5014,6 +5798,190 @@ function combineUniqueStrings(...valueSets: unknown[]): string[] {
   return [...seen];
 }
 
+function findGeneratedArtifactFiles(rootDir: string): string[] {
+  const generatedDirs = [
+    path.join(rootDir, "generated"),
+    path.join(rootDir, ".speclens-workspace", "workspaces"),
+  ].flatMap(candidate => {
+    if (!fs.existsSync(candidate)) {
+      return [];
+    }
+    if (path.basename(candidate) !== "workspaces") {
+      return [candidate];
+    }
+    return fs.readdirSync(candidate, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => path.join(candidate, entry.name, "generated"))
+      .filter(generatedDir => fs.existsSync(generatedDir));
+  });
+  if (generatedDirs.length === 0) {
+    return [];
+  }
+  const discovered: string[] = [];
+  const visit = (directory: string, depth: number): void => {
+    if (depth > 5) {
+      return;
+    }
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name === ".git") {
+          continue;
+        }
+        visit(entryPath, depth + 1);
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      discovered.push(entryPath);
+    }
+  };
+  for (const generatedDir of generatedDirs) {
+    visit(generatedDir, 0);
+  }
+  return [...new Set(discovered)].sort();
+}
+
+function classifyGeneratedArtifact(filePath: string): ArtifactReference["kind"] {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  const basename = path.basename(normalized);
+  if (basename === "runtime.log") {
+    return "runtime-log";
+  }
+  if (basename === "browser-trace.zip" || normalized.endsWith(".trace.zip")) {
+    return "trace";
+  }
+  if (basename.endsWith("storage-state.json")) {
+    return "storage-state";
+  }
+  if (basename === "playwright-command.log" || basename === "playwright-preflight.log" || basename.endsWith("-install.log")) {
+    return "validation-log";
+  }
+  if (normalized.includes("playwright-report/")) {
+    return "playwright-report";
+  }
+  if (normalized.includes("test-results/")) {
+    return "test-results";
+  }
+  if (basename.endsWith(".png") || basename.endsWith(".jpg") || basename.endsWith(".jpeg") || basename.endsWith(".webp")) {
+    return "screenshot";
+  }
+  return "artifact";
+}
+
+function buildGeneratedArtifactSnapshot(rootDir: string): Array<{
+  kind: ArtifactReference["kind"];
+  path: string;
+  sizeBytes: number;
+}> {
+  return findGeneratedArtifactFiles(rootDir).map(filePath => ({
+    kind: classifyGeneratedArtifact(filePath),
+    path: relativeArtifactPath(rootDir, filePath) ?? path.relative(rootDir, filePath).replace(/\\/g, "/"),
+    sizeBytes: fs.statSync(filePath).size,
+  }));
+}
+
+function buildDeterministicArtifactAuditorOutput(options: {
+  tempDir: string;
+  runtimeMode: JobExecutionRecord["job"]["runtimeMode"];
+  priorOutputs: PriorRoleOutput[];
+}): RoleOutput {
+  const navigationData = pickSectionData(options.priorOutputs, "navigation-qa-planner", ["Navigation QA plan"]);
+  const browserData = pickSectionData(options.priorOutputs, "browser-executor", ["Browser QA execution", "Browser execution plan"]);
+  const playwrightPlanData = pickSectionData(options.priorOutputs, "playwright-operator", ["Playwright operator plan"]);
+  const playwrightPreflightData = pickSectionData(options.priorOutputs, "playwright-operator", ["Playwright preflight"]);
+  const runtimeExecutionData = pickSectionData(options.priorOutputs, "standardized-json-output", ["Runtime execution"]);
+  const generatedArtifacts = buildGeneratedArtifactSnapshot(options.tempDir);
+  const generatedKinds = [...new Set(generatedArtifacts.map(artifact => artifact.kind))];
+  const playwrightDetected = playwrightPlanData.detected === true
+    || playwrightPlanData.present === true
+    || playwrightPreflightData.detected === true
+    || typeof playwrightPreflightData.command === "string"
+    || typeof playwrightPreflightData.configPath === "string";
+  const baseExpectations = [
+    { kind: "report", required: true, label: "Controller-finalized JSON, Markdown, and HTML report exports.", source: "controller-finalization" },
+    { kind: "route-map", required: true, label: "Generated route map or spec-pack route inventory.", source: "controller-finalization" },
+    { kind: "remediation-pack", required: true, label: "Generated remediation package manifest for downstream fix jobs.", source: "controller-finalization" },
+    { kind: "runtime-log", required: true, label: "Runtime boot and health-check log from sandbox execution.", source: "sandbox-runtime" },
+    ...(options.runtimeMode === "browser"
+      ? [
+          { kind: "screenshot", required: true, label: "Representative screenshots captured by direct browser QA.", source: "browser-executor" },
+          { kind: "trace", required: true, label: "Trace archive captured by direct browser QA.", source: "browser-executor" },
+          { kind: "storage-state", required: true, label: "Captured browser storage state after auth and navigation attempts.", source: "browser-executor" },
+        ]
+      : []),
+    ...(playwrightDetected
+      ? [
+          { kind: "validation-log", required: true, label: "Playwright preflight or suite command log.", source: "playwright-operator" },
+          { kind: "playwright-report", required: false, label: "Repository-native Playwright HTML report when produced.", source: "playwright-operator" },
+          { kind: "test-results", required: false, label: "Repository-native Playwright test-result directory when produced.", source: "playwright-operator" },
+        ]
+      : []),
+  ];
+  const artifactExpectations = normalizeArtifactExpectations([
+    ...normalizeArtifactExpectations(navigationData.artifactExpectations),
+    ...normalizeArtifactExpectations(browserData.artifactExpectations),
+    ...normalizeArtifactExpectations(playwrightPlanData.artifactExpectations),
+    ...normalizeArtifactExpectations(playwrightPreflightData.artifactExpectations),
+    ...baseExpectations,
+  ]);
+  const dedupedExpectations = [...new Map(artifactExpectations.map(expectation => [
+    `${expectation.kind}:${expectation.label.toLowerCase()}`,
+    expectation,
+  ])).values()];
+  const expectedKinds = [...new Set(dedupedExpectations.map(expectation => expectation.kind))];
+  const requiredArtifacts = dedupedExpectations.filter(expectation => expectation.required);
+  const currentlyMissingGeneratedKinds = requiredArtifacts
+    .map(expectation => expectation.kind)
+    .filter(kind => !["report", "route-map", "remediation-pack"].includes(kind))
+    .filter(kind => !generatedKinds.includes(kind));
+  const finalizationDeferredKinds = requiredArtifacts
+    .map(expectation => expectation.kind)
+    .filter(kind => ["report", "route-map", "remediation-pack"].includes(kind));
+  const sourcePaths = combineUniqueStrings(
+    generatedArtifacts.map(artifact => artifact.path),
+    normalizeStringArray([runtimeExecutionData.runtimeLog]),
+    normalizeStringArray([browserData.tracePath]),
+    normalizeStringArray([browserData.capturedStorageStatePath]),
+    normalizeStringArray(browserData.pages),
+    normalizeStringArray([playwrightPreflightData.logPath]),
+  ).slice(0, 80);
+
+  return roleOutputSchema.parse({
+    summary: currentlyMissingGeneratedKinds.length > 0
+      ? `Deterministic artifact audit expects ${expectedKinds.length} artifact kind(s); current sandbox output is missing generated kind(s): ${currentlyMissingGeneratedKinds.join(", ")}.`
+      : `Deterministic artifact audit expects ${expectedKinds.length} artifact kind(s); generated sandbox artifacts currently cover ${generatedKinds.length} kind(s), with final report artifacts deferred to controller finalization.`,
+    sections: [{
+      title: "Artifact expectations",
+      status: "ready",
+      summary: finalizationDeferredKinds.length > 0
+        ? `Artifact expectations were synthesized deterministically. Controller-finalized kind(s) deferred: ${[...new Set(finalizationDeferredKinds)].join(", ")}.`
+        : "Artifact expectations were synthesized deterministically from prior execution outputs.",
+      data: {
+        artifactExpectations: dedupedExpectations,
+        expectedKinds,
+        requiredArtifacts,
+        sourcePaths,
+        generatedArtifacts,
+        presentGeneratedKinds: generatedKinds,
+        missingGeneratedKinds: currentlyMissingGeneratedKinds,
+        finalizationDeferredKinds: [...new Set(finalizationDeferredKinds)],
+      },
+    }],
+    findings: currentlyMissingGeneratedKinds.map(kind => ({
+      severity: "medium" as const,
+      title: `Generated ${kind} artifact missing before finalization`,
+      message: `The deterministic artifact audit expected a ${kind} artifact from already-executed sandbox roles, but did not find one under the generated output directory.`,
+      suggestion: "Inspect the runtime, browser, or Playwright role output and ensure it writes the expected artifact before report finalization.",
+      evidence: sourcePaths,
+      sourceIds: [],
+      paths: [],
+      remediationPackIds: [],
+    })),
+  });
+}
+
 function inferPortFromCommandOrEntry(repoPath: string, workingDirectory: string, command: string | null): number | null {
   const normalizedCommand = command?.trim() ?? "";
   if (!normalizedCommand) {
@@ -5051,6 +6019,21 @@ function inferPortFromCommandOrEntry(repoPath: string, workingDirectory: string,
 
 function inferRuntimeFallback(repoPath: string): Record<string, unknown> {
   const packageJsonPaths = walkRepoForFileNames(repoPath, new Set(["package.json"]), 3);
+  const preferredScriptNames = [
+    "speclens:start",
+    "dev:web",
+    "web:dev",
+    "web:start",
+    "start:web",
+    "start",
+    "dev",
+    "preview",
+    "serve",
+  ];
+  const runtimeScriptScore = (scriptName: string): number => {
+    const preferredIndex = preferredScriptNames.indexOf(scriptName);
+    return preferredIndex === -1 ? 10 : 100 - preferredIndex;
+  };
   const candidates = packageJsonPaths
     .map(packageJsonPath => {
       const manifest = readJsonRecord(packageJsonPath);
@@ -5058,7 +6041,7 @@ function inferRuntimeFallback(repoPath: string): Record<string, unknown> {
         ? manifest.scripts as Record<string, unknown>
         : {};
       const workingDirectory = path.dirname(packageJsonPath);
-      const preferredScriptName = ["start", "dev", "preview", "serve"].find(name => typeof scripts[name] === "string") ?? null;
+      const preferredScriptName = preferredScriptNames.find(name => typeof scripts[name] === "string") ?? null;
       if (!preferredScriptName) {
         return null;
       }
@@ -5074,7 +6057,7 @@ function inferRuntimeFallback(repoPath: string): Record<string, unknown> {
       const port = inferPortFromCommandOrEntry(repoPath, workingDirectory, typeof scripts[preferredScriptName] === "string" ? scripts[preferredScriptName] : startCommand);
       const baseUrl = port ? `http://127.0.0.1:${port}` : null;
       return {
-        score: preferredScriptName === "start" ? 100 : preferredScriptName === "dev" ? 90 : 70,
+        score: runtimeScriptScore(preferredScriptName),
         packageManager,
         relativeWorkingDirectory,
         startCommand,
@@ -5150,7 +6133,16 @@ function buildDeterministicStandardizedHandoff(options: {
   const authData = pickSectionData(options.priorOutputs, "auth-cartographer", ["Auth map"]);
   const navigationData = pickSectionData(options.priorOutputs, "navigation-qa-planner", ["Navigation QA plan"]);
   const browserData = pickSectionData(options.priorOutputs, "browser-executor", ["Browser execution plan"]);
-  const playwrightData = pickSectionData(options.priorOutputs, "playwright-operator", ["Playwright operator plan", "Playwright preflight"]);
+  const playwrightPlanData = pickSectionData(options.priorOutputs, "playwright-operator", ["Playwright operator plan"]);
+  const playwrightPreflightData = pickSectionData(options.priorOutputs, "playwright-operator", ["Playwright preflight"]);
+  const playwrightData: Record<string, unknown> = {
+    ...playwrightPlanData,
+    ...playwrightPreflightData,
+    coverageGaps: combineUniqueStrings(playwrightPlanData.coverageGaps, playwrightPreflightData.coverageGaps),
+    commands: Array.isArray(playwrightPreflightData.commands) && playwrightPreflightData.commands.length > 0
+      ? playwrightPreflightData.commands
+      : playwrightPlanData.commands,
+  };
   const artifactData = pickSectionData(options.priorOutputs, "artifact-auditor", ["Artifact expectations"]);
   const remediationData = pickSectionDataFromRoleIds(
     options.priorOutputs,
@@ -5468,10 +6460,17 @@ async function executeNativeRole(options: {
     return { output: roleOutputSchema.parse({ summary: "", sections: [], findings: [] }), logs: [] };
   }
 
-  const workspace = createCoreWorkspace({
-    rootDir: path.join(options.tempDir, "native-executors"),
-    name: safeSegment(`${options.jobId}-${nativeExecutorId}`),
-  });
+  const workspace = createCoreWorkspace(
+    nativeExecutorId === "native-browser-suite" || nativeExecutorId === "native-visual-inspection"
+      ? {
+          rootDir: options.tempDir,
+          name: safeSegment(options.jobId),
+        }
+      : {
+          rootDir: path.join(options.tempDir, "native-executors"),
+          name: safeSegment(`${options.jobId}-${nativeExecutorId}`),
+        },
+  );
   const inventory = buildRepoInventory(options.repoPath);
   const baseContext = {
     jobId: options.jobId,
@@ -5555,6 +6554,15 @@ async function executeNativeRole(options: {
           logs: result.logs,
         };
       }
+    case "deterministic-artifact-expectations":
+      return {
+        output: buildDeterministicArtifactAuditorOutput({
+          tempDir: options.tempDir,
+          runtimeMode: options.runtimeMode,
+          priorOutputs: options.priorOutputs,
+        }),
+        logs: [],
+      };
     case "deterministic-remediation-planning":
       return {
         output: buildDeterministicRemediationPlannerOutput({
@@ -5842,8 +6850,11 @@ async function executeRole(options: {
     undefined,
     defaultVisibility,
   );
+  const maxCodexAttempts = Math.max(1, config.codexMaxAttempts);
   let run: CodexRunResult | null = null;
-  for (let attempt = 1; attempt <= Math.max(1, config.codexMaxAttempts); attempt += 1) {
+  let baseOutput: RoleOutput | null = null;
+  let outputReadError: unknown = null;
+  for (let attempt = 1; attempt <= maxCodexAttempts; attempt += 1) {
     if (fs.existsSync(outputPath)) {
       fs.rmSync(outputPath, { force: true });
     }
@@ -5860,19 +6871,41 @@ async function executeRole(options: {
       sandboxMode,
       bypassSandbox: config.codexBypassSandbox,
       authPath: options.authPath,
+      streamLogs: config.codexStreamLogs,
       onStdoutLine: line => appendLog(options.jobId, options.logs, "codex", `${options.role.name}: ${line}`, "info", undefined, "verbose"),
       onStderrLine: line => appendLog(options.jobId, options.logs, "codex", `${options.role.name}: ${line}`, "warn", undefined, "verbose"),
       ...(outputSchemaPath ? { outputSchemaPath } : {}),
     });
     if (!run.timedOut && run.exitCode === 0) {
       await syncCodexAuth(options.authPath, options.execution);
+      try {
+        baseOutput = readRoleOutput(outputPath);
+        outputReadError = null;
+        break;
+      } catch (error) {
+        outputReadError = error;
+        if (options.role.executorKind === "hybrid" && nativeOutput) {
+          break;
+        }
+        if (attempt >= maxCodexAttempts) {
+          break;
+        }
+        const detail = error instanceof Error ? error.message : "Codex emitted invalid JSON.";
+        await appendLog(
+          options.jobId,
+          options.logs,
+          "agent",
+          `Role ${options.role.name} emitted invalid role output on attempt ${attempt}/${maxCodexAttempts}: ${truncateLogMessage(detail, 240)}. Retrying in ${Math.round(config.codexRetryDelayMs / 1000)}s.`,
+          "warn",
+          undefined,
+          defaultVisibility,
+        );
+        await sleep(config.codexRetryDelayMs);
+        continue;
+      }
     }
 
-    if (!run.timedOut && run.exitCode === 0) {
-      break;
-    }
-
-    if (attempt >= Math.max(1, config.codexMaxAttempts) || !isRetryableCodexFailure(run)) {
+    if (attempt >= maxCodexAttempts || !isRetryableCodexFailure(run)) {
       break;
     }
 
@@ -5881,7 +6914,7 @@ async function executeRole(options: {
       options.jobId,
       options.logs,
       "agent",
-      `Role ${options.role.name} hit a retryable Codex error on attempt ${attempt}/${config.codexMaxAttempts}: ${truncateLogMessage(detail, 240)}. Retrying in ${Math.round(config.codexRetryDelayMs / 1000)}s.`,
+      `Role ${options.role.name} hit a retryable Codex error on attempt ${attempt}/${maxCodexAttempts}: ${truncateLogMessage(detail, 240)}. Retrying in ${Math.round(config.codexRetryDelayMs / 1000)}s.`,
       "warn",
       undefined,
       defaultVisibility,
@@ -5951,12 +6984,9 @@ async function executeRole(options: {
     throw new Error(`${options.role.name} failed${detail ? `: ${detail}` : "."}`);
   }
 
-  let baseOutput: RoleOutput;
-  try {
-    baseOutput = readRoleOutput(outputPath);
-  } catch (error) {
+  if (!baseOutput) {
     if (options.role.executorKind === "hybrid" && nativeOutput) {
-      const detail = error instanceof Error ? error.message : "Codex emitted invalid JSON.";
+      const detail = outputReadError instanceof Error ? outputReadError.message : "Codex emitted invalid JSON.";
       await appendLog(
         options.jobId,
         options.logs,
@@ -5968,7 +6998,25 @@ async function executeRole(options: {
       );
       baseOutput = nativeOutput;
     } else {
-      throw error;
+      const detail = outputReadError instanceof Error ? outputReadError.message : "Codex emitted invalid JSON.";
+      await appendExecutionStepLog(options.jobId, options.logs, {
+        id: roleStepId,
+        order: roleOrder,
+        title: options.role.name,
+        stepType: "role",
+        agentId: options.agentId,
+        agentName: options.agentName,
+        roleId: options.role.id,
+        roleName: options.role.name,
+        executorKind: options.role.executorKind,
+        nativeExecutorId: options.role.nativeExecutorId,
+        status: "failed",
+        detail,
+        startedAt: roleStartedAt,
+        finishedAt: new Date().toISOString(),
+        durationMs: Math.max(0, new Date().getTime() - new Date(roleStartedAt).getTime()),
+      }, defaultVisibility);
+      throw new Error(`${options.role.name} emitted invalid role output: ${detail}`);
     }
   }
   const withExecutionEvidence = options.role.id === "playwright-operator"
@@ -6113,36 +7161,358 @@ function resolveRepoTitle(execution: JobExecutionRecord, repoPath: string): stri
   return `${base} agent analysis report`;
 }
 
-async function runAgentJob(
-  execution: JobExecutionRecord,
-  queueMessageId: string,
-): Promise<JobEnvelope> {
-  const config = loadAiWorkerConfig();
-  const jobId = execution.job.id;
-  const logs: AnalysisLogEvent[] = [];
-  const tempDir = path.join(config.tempRoot, `${safeSegment(jobId)}-${Date.now()}`);
-  fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
+function buildExecutionTiming(
+  job: JobExecutionRecord["job"],
+  jobStartedAt: number,
+  estimatedTotalDurationMs: number | null,
+  basis: string,
+): JobEnvelope["timing"] {
+  return {
+    queueDurationMs: job.startedAt && job.createdAt
+      ? Math.max(0, new Date(job.startedAt).getTime() - new Date(job.createdAt).getTime())
+      : null,
+    runDurationMs: Math.max(0, Date.now() - jobStartedAt),
+    totalDurationMs: Math.max(0, Date.now() - new Date(job.createdAt).getTime()),
+    elapsedMs: Math.max(0, Date.now() - new Date(job.createdAt).getTime()),
+    estimatedTotalMs: estimatedTotalDurationMs,
+    estimatedRemainingMs: 0,
+    confidence: estimatedTotalDurationMs === null ? "medium" : "high",
+    basis,
+  };
+}
 
-  await appendLog(jobId, logs, "agent", `Agent ${config.workerId} claimed job ${jobId}.`);
+function createFailureEnvelope(options: {
+  snapshot: AgentSandboxExecutionSnapshot;
+  logs: AnalysisLogEvent[];
+  status: "failed" | "cancelled";
+  failureReason: string;
+  jobStartedAt: number;
+  artifacts?: ArtifactReference[];
+  estimatedTotalDurationMs?: number | null;
+  finishedAt?: string;
+}): JobEnvelope {
+  return jobEnvelopeSchema.parse({
+    job: {
+      ...options.snapshot.job,
+      status: options.status,
+      failureReason: options.failureReason,
+      finishedAt: options.finishedAt ?? new Date().toISOString(),
+    },
+    logs: options.logs,
+    report: null,
+    artifacts: options.artifacts ?? [],
+    timing: buildExecutionTiming(
+      options.snapshot.job,
+      options.jobStartedAt,
+      options.estimatedTotalDurationMs ?? null,
+      "Derived from sandbox execution timing and the persisted job timestamps.",
+    ),
+    qualityScorecard: null,
+    capabilityGaps: [],
+    artifactAnalysis: null,
+    executionSteps: collectAnalysisExecutionSteps(options.logs),
+  });
+}
 
-  try {
-    const agentId = execution.job.agentId;
-    if (!agentId) {
-      throw new Error("Agent job is missing agentId.");
-    }
-    const plan = await getAiAgentExecutionPlan(agentId);
-    const roleDefinitions = mapRoleDefinitions(plan);
-    const estimatedTotalDurationMs = estimatePlanDurationMs(plan.roles, execution.job.runtimeMode);
-    const jobStartedAt = Date.now();
+function appendRoleOutputToReport(options: {
+  role: { id: string; name: string };
+  output: RoleOutput;
+  sections: AnalysisReport["sections"];
+  findings: AnalysisReport["findings"];
+  execution: JobExecutionRecord;
+}): void {
+  if (options.output.summary.trim().length > 0) {
+    options.sections.push({
+      id: createId("section"),
+      roleId: options.role.id,
+      title: `${options.role.name} summary`,
+      status: "ready",
+      summary: options.output.summary.trim(),
+      data: {},
+    });
+  }
 
+  for (const section of options.output.sections) {
+    options.sections.push({
+      id: section.id ?? createId("section"),
+      roleId: options.role.id,
+      title: section.title,
+      status: section.status,
+      summary: section.summary,
+      data: section.data,
+    });
+  }
+
+  for (const finding of options.output.findings) {
+    const normalizedSourceIds = inferFindingSourceIds({
+      explicitSourceIds: finding.sourceIds ?? [],
+      evidence: finding.evidence ?? [],
+      paths: finding.paths ?? [],
+      primarySourceId: options.execution.job.sourceId,
+      companionSourceId: options.execution.job.companionSourceId,
+    });
+    const normalizedPaths = extractFindingPaths(finding.evidence ?? [], finding.paths ?? []);
+    options.findings.push({
+      id: finding.id ?? createId("finding"),
+      roleId: options.role.id,
+      category: normalizeFindingCategory(finding.category, options.role.id),
+      severity: finding.severity,
+      title: finding.title,
+      message: finding.message,
+      suggestion: finding.suggestion,
+      evidence: finding.evidence ?? [],
+      evidenceRefs: [],
+      sourceIds: normalizedSourceIds,
+      paths: normalizedPaths,
+      remediationPackIds: finding.remediationPackIds ?? [],
+    });
+  }
+}
+
+function dependencyOutputsForRole(options: {
+  role: AiAgentExecutionPlan["roles"][number];
+  roles: AiAgentExecutionPlan["roles"];
+  declaredDependenciesByRoleId: Map<string, string[]>;
+  outputsByRoleId: Map<string, PriorRoleOutput>;
+}): PriorRoleOutput[] {
+  const dependencies = options.declaredDependenciesByRoleId.get(options.role.id) ?? [];
+  if (dependencies.length === 0) {
+    return [];
+  }
+  const dependencySet = new Set(dependencies);
+  return options.roles
+    .filter(role => dependencySet.has(role.id))
+    .map(role => options.outputsByRoleId.get(role.id))
+    .filter((output): output is PriorRoleOutput => Boolean(output));
+}
+
+async function executeRolesWithGraph(options: {
+  jobId: string;
+  plan: AiAgentExecutionPlan;
+  repoPath: string;
+  tempDir: string;
+  authPath: string | null;
+  logs: AnalysisLogEvent[];
+  learnables: Learnable[];
+  execution: JobExecutionRecord;
+  maxConcurrency: number;
+}): Promise<PriorRoleOutput[]> {
+  const roles = options.plan.roles;
+  const graph = buildRoleExecutionGraph(roles);
+  const maxConcurrency = Math.max(1, Math.floor(options.maxConcurrency));
+  const effectiveConcurrency = Math.min(maxConcurrency, Math.max(1, graph.maxWidth));
+  const outputsByRoleId = new Map<string, PriorRoleOutput>();
+  const completedRoleIds = new Set<string>();
+  const pendingRoleIds = new Set(graph.roleIds);
+  const running = new Map<string, Promise<{
+    role: AiAgentExecutionPlan["roles"][number];
+    output?: RoleOutput;
+    durationMs: number;
+    error?: unknown;
+  }>>();
+  let cancellationRequested = false;
+
+  await appendLog(
+    options.jobId,
+    options.logs,
+    "agent",
+    `Execution graph planned ${graph.levels.length} level(s), max width ${graph.maxWidth}, role concurrency ${effectiveConcurrency}.`,
+  );
+  if (graph.syntheticDependencyCount > 0) {
     await appendLog(
-      jobId,
-      logs,
+      options.jobId,
+      options.logs,
       "agent",
-      `Planned ${plan.roles.length} role(s); estimated total runtime ${formatDurationMs(estimatedTotalDurationMs)} for ${execution.job.runtimeMode} mode.`,
+      `Execution graph added ${graph.syntheticDependencyCount} runtime-resource ordering edge(s) to avoid browser, Playwright, and dev-server artifact races.`,
+      "info",
+      undefined,
+      "verbose",
+    );
+  }
+
+  const launchReadyRoles = async (): Promise<void> => {
+    if (cancellationRequested) {
+      return;
+    }
+    if (await executionCancellationRequested(options.jobId)) {
+      cancellationRequested = true;
+      return;
+    }
+    const openSlots = Math.max(0, effectiveConcurrency - running.size);
+    if (openSlots === 0) {
+      return;
+    }
+    const readyRoles = roles
+      .filter(role => pendingRoleIds.has(role.id))
+      .filter(role => (graph.dependenciesByRoleId.get(role.id) ?? [])
+        .every(dependencyId => completedRoleIds.has(dependencyId)))
+      .slice(0, openSlots);
+
+    for (const role of readyRoles) {
+      pendingRoleIds.delete(role.id);
+      const priorOutputs = dependencyOutputsForRole({
+        role,
+        roles,
+        declaredDependenciesByRoleId: graph.declaredDependenciesByRoleId,
+        outputsByRoleId,
+      });
+      const roleStartedAt = Date.now();
+      running.set(role.id, (async () => {
+        try {
+          const output = await executeRole({
+            jobId: options.jobId,
+            role,
+            agentId: options.plan.agent.id,
+            agentName: options.plan.agent.name,
+            repoPath: options.repoPath,
+            tempDir: options.tempDir,
+            authPath: options.authPath,
+            logs: options.logs,
+            priorOutputs,
+            learnables: options.learnables,
+            execution: options.execution,
+            primarySource: options.execution.source,
+            companionSource: options.execution.companionSource,
+            secrets: options.execution.secrets,
+            runtimeMode: options.execution.job.runtimeMode,
+          });
+          return { role, output, durationMs: Date.now() - roleStartedAt };
+        } catch (error) {
+          return { role, error, durationMs: Date.now() - roleStartedAt };
+        }
+      })());
+    }
+  };
+
+  while (completedRoleIds.size < roles.length) {
+    await launchReadyRoles();
+    if (running.size === 0) {
+      if (cancellationRequested) {
+        throw new AgentExecutionCancelledError();
+      }
+      throw new Error("AI role execution graph stalled before all roles completed.");
+    }
+
+    const result = await Promise.race(running.values());
+    running.delete(result.role.id);
+    if (result.error) {
+      throw result.error;
+    }
+    if (!result.output) {
+      throw new Error(`${result.role.name} completed without role output.`);
+    }
+
+    if (
+      (options.plan.agent.id === "agent-universal-smoke"
+        || options.plan.agent.id === "agent-e2e-smoke"
+        || options.plan.agent.id === "agent-e2e-remediation")
+      && result.role.id === "runtime-scout"
+    ) {
+      const removedPaths = cleanupTransientRuntimeArtifacts(options.repoPath);
+      if (removedPaths.length > 0) {
+        await appendLog(
+          options.jobId,
+          options.logs,
+          "agent",
+          `Cleaned transient runtime artifacts after ${result.role.name}: ${removedPaths.join(", ")}.`,
+          "info",
+          undefined,
+          "verbose",
+        );
+      }
+    }
+
+    outputsByRoleId.set(result.role.id, {
+      roleId: result.role.id,
+      roleName: result.role.name,
+      output: result.output,
+    });
+    completedRoleIds.add(result.role.id);
+
+    const remainingRoles = roles.filter(role => !completedRoleIds.has(role.id));
+    const remainingEstimateMs = estimatePlanDurationMs(
+      remainingRoles,
+      options.execution.job.runtimeMode,
+      effectiveConcurrency,
+    );
+    await appendLog(
+      options.jobId,
+      options.logs,
+      "agent",
+      `Role ${result.role.name} finished in ${formatDurationMs(result.durationMs)}. Estimated remaining graph runtime ${formatDurationMs(remainingEstimateMs)}.`,
+      "info",
+      undefined,
+      result.role.consoleVisibility === "quiet" ? "verbose" : "default",
     );
 
-    const materializeStartedAt = new Date().toISOString();
+    if (await executionCancellationRequested(options.jobId)) {
+      cancellationRequested = true;
+    }
+  }
+
+  return roles.map(role => {
+    const output = outputsByRoleId.get(role.id);
+    if (!output) {
+      throw new Error(`Missing output for role ${role.id}.`);
+    }
+    return output;
+  });
+}
+
+async function executeAuditJobCore(
+  context: AgentExecutionContext,
+  queueMessageId: string,
+): Promise<HostedAuditCoreResult> {
+  const { execution, snapshot } = context;
+  const jobId = snapshot.job.id;
+  const logs: AnalysisLogEvent[] = [];
+  const tempDir = snapshot.outputRoot;
+  const plan = snapshot.plan;
+  const config = loadAiWorkerConfig();
+  const roleMaxConcurrency = Math.max(1, config.roleMaxConcurrency);
+  const estimatedTotalDurationMs = estimatePlanDurationMs(plan.roles, snapshot.job.runtimeMode, roleMaxConcurrency);
+  const jobStartedAt = Date.now();
+  const authPath = snapshot.codexAuthPath;
+
+  await appendLog(jobId, logs, "agent", `Agent ${execution.job.claimedRunnerId ?? config.workerId} claimed job ${jobId}.`);
+  await appendLog(
+    jobId,
+    logs,
+    "agent",
+    `Planned ${plan.roles.length} role(s); estimated graph runtime ${formatDurationMs(estimatedTotalDurationMs)} for ${snapshot.job.runtimeMode} mode with role concurrency ${roleMaxConcurrency}.`,
+  );
+
+  const materializeStartedAt = new Date().toISOString();
+  await appendExecutionStepLog(jobId, logs, {
+    id: "stage:materialize-source",
+    order: 0,
+    title: "Materialize source",
+    stepType: "stage",
+    agentId: plan.agent.id,
+    agentName: plan.agent.name,
+    roleId: null,
+    roleName: null,
+    executorKind: null,
+    nativeExecutorId: null,
+    status: "running",
+    detail: execution.companionSource
+      ? `${execution.source.displayName} + ${execution.companionSource.displayName}`
+      : execution.source.displayName,
+    startedAt: materializeStartedAt,
+    finishedAt: null,
+    durationMs: null,
+  });
+  await appendLog(
+    jobId,
+    logs,
+    "source",
+    execution.companionSource
+      ? `Materializing paired sources: ${execution.source.displayName} + ${execution.companionSource.displayName}.`
+      : "Materializing repository source.",
+  );
+
+  try {
+    const { repoPath } = await materializeSource(execution, tempDir);
     await appendExecutionStepLog(jobId, logs, {
       id: "stage:materialize-source",
       order: 0,
@@ -6154,201 +7524,50 @@ async function runAgentJob(
       roleName: null,
       executorKind: null,
       nativeExecutorId: null,
-      status: "running",
-      detail: execution.companionSource
-        ? `${execution.source.displayName} + ${execution.companionSource.displayName}`
-        : execution.source.displayName,
+      status: "succeeded",
+      detail: repoPath,
       startedAt: materializeStartedAt,
-      finishedAt: null,
-      durationMs: null,
+      finishedAt: new Date().toISOString(),
+      durationMs: Math.max(0, new Date().getTime() - new Date(materializeStartedAt).getTime()),
     });
-    await appendLog(
-      jobId,
-      logs,
-      "source",
-      execution.companionSource
-        ? `Materializing paired sources: ${execution.source.displayName} + ${execution.companionSource.displayName}.`
-        : "Materializing repository source.",
-    );
-    let repoPath: string;
-    try {
-      ({ repoPath } = await materializeSource(execution, tempDir));
-      await appendExecutionStepLog(jobId, logs, {
-        id: "stage:materialize-source",
-        order: 0,
-        title: "Materialize source",
-        stepType: "stage",
-        agentId: plan.agent.id,
-        agentName: plan.agent.name,
-        roleId: null,
-        roleName: null,
-        executorKind: null,
-        nativeExecutorId: null,
-        status: "succeeded",
-        detail: repoPath,
-        startedAt: materializeStartedAt,
-        finishedAt: new Date().toISOString(),
-        durationMs: Math.max(0, new Date().getTime() - new Date(materializeStartedAt).getTime()),
-      });
-    } catch (error) {
-      await appendExecutionStepLog(jobId, logs, {
-        id: "stage:materialize-source",
-        order: 0,
-        title: "Materialize source",
-        stepType: "stage",
-        agentId: plan.agent.id,
-        agentName: plan.agent.name,
-        roleId: null,
-        roleName: null,
-        executorKind: null,
-        nativeExecutorId: null,
-        status: "failed",
-        detail: error instanceof Error ? error.message : "Source materialization failed.",
-        startedAt: materializeStartedAt,
-        finishedAt: new Date().toISOString(),
-        durationMs: Math.max(0, new Date().getTime() - new Date(materializeStartedAt).getTime()),
-      });
-      throw error;
-    }
-    const authPath = await stageCodexAuth(tempDir, execution);
-    const primaryLearnables = await listActiveSourceLearnables(execution.source.id);
-    const companionLearnables = execution.companionSource
-      ? (await listActiveSourceLearnables(execution.companionSource.id)).map(learnable => ({
-          ...learnable,
-          statement: `[Companion: ${execution.companionSource?.displayName}] ${learnable.statement}`,
-          evidence: learnable.evidence.map(item => `[Companion] ${item}`),
-        }))
-      : [];
-    const learnables = [...primaryLearnables, ...companionLearnables];
-    if (learnables.length > 0) {
+
+    if (snapshot.learnables.length > 0) {
       await appendLog(
         jobId,
         logs,
         "learnables",
         execution.companionSource
-          ? `Loaded ${primaryLearnables.length} primary learnable(s) and ${companionLearnables.length} companion learnable(s).`
-          : `Loaded ${learnables.length} learnable(s) for this source.`,
+          ? `Loaded ${snapshot.learnables.filter(item => !item.statement.startsWith("[Companion:")).length} primary learnable(s) and ${snapshot.learnables.filter(item => item.statement.startsWith("[Companion:")).length} companion learnable(s).`
+          : `Loaded ${snapshot.learnables.length} learnable(s) for this source.`,
       );
     }
 
     const sections: AnalysisReport["sections"] = [];
     const findings: AnalysisReport["findings"] = [];
-    const priorOutputs: PriorRoleOutput[] = [];
+    const priorOutputs = await executeRolesWithGraph({
+      jobId,
+      plan,
+      repoPath,
+      tempDir,
+      authPath,
+      logs,
+      learnables: snapshot.learnables,
+      execution,
+      maxConcurrency: roleMaxConcurrency,
+    });
 
-    for (const [roleIndex, role] of plan.roles.entries()) {
-      if (await isCancellationRequested(jobId)) {
-        const failureReason = "Job cancelled during agent execution.";
-        await appendLog(jobId, logs, "agent", failureReason, "warn");
-        return await finalizeAgentJobFailure({
-          jobId,
-          tempDir,
-          status: "cancelled",
-          failureReason,
-          logs,
-        });
+    for (const role of plan.roles) {
+      const roleOutput = priorOutputs.find(output => output.roleId === role.id);
+      if (!roleOutput) {
+        throw new Error(`Missing output for role ${role.id}.`);
       }
-      const roleStartedAt = Date.now();
-      const output = await executeRole({
-        jobId,
+      appendRoleOutputToReport({
         role,
-        agentId: plan.agent.id,
-        agentName: plan.agent.name,
-        repoPath,
-        tempDir,
-        authPath,
-        logs,
-        priorOutputs,
-        learnables,
+        output: roleOutput.output,
+        sections,
+        findings,
         execution,
-        primarySource: execution.source,
-        companionSource: execution.companionSource,
-        secrets: execution.secrets,
-        runtimeMode: execution.job.runtimeMode,
       });
-      if (
-        (plan.agent.id === "agent-universal-smoke"
-          || plan.agent.id === "agent-e2e-smoke"
-          || plan.agent.id === "agent-e2e-remediation")
-        && role.id === "runtime-scout"
-      ) {
-        const removedPaths = cleanupTransientRuntimeArtifacts(repoPath);
-        if (removedPaths.length > 0) {
-          await appendLog(
-            jobId,
-            logs,
-            "agent",
-            `Cleaned transient runtime artifacts after ${role.name}: ${removedPaths.join(", ")}.`,
-            "info",
-            undefined,
-            "verbose",
-          );
-        }
-      }
-      const roleDurationMs = Date.now() - roleStartedAt;
-      const remainingEstimateMs = plan.roles
-        .slice(roleIndex + 1)
-        .reduce((total, nextRole) => total + estimateRoleDurationMs(nextRole.id, execution.job.runtimeMode), 0);
-      await appendLog(
-        jobId,
-        logs,
-        "agent",
-        `Role ${role.name} finished in ${formatDurationMs(roleDurationMs)}. Estimated remaining runtime ${formatDurationMs(remainingEstimateMs)}.`,
-        "info",
-        undefined,
-        role.consoleVisibility === "quiet" ? "verbose" : "default",
-      );
-      priorOutputs.push({
-        roleId: role.id,
-        roleName: role.name,
-        output,
-      });
-
-      if (output.summary.trim().length > 0) {
-        sections.push({
-          id: createId("section"),
-          roleId: role.id,
-          title: `${role.name} summary`,
-          status: "ready",
-          summary: output.summary.trim(),
-          data: {},
-        });
-      }
-
-      for (const section of output.sections) {
-        sections.push({
-          id: section.id ?? createId("section"),
-          roleId: role.id,
-          title: section.title,
-          status: section.status,
-          summary: section.summary,
-          data: section.data,
-        });
-      }
-
-      for (const finding of output.findings) {
-        const normalizedSourceIds = inferFindingSourceIds({
-          explicitSourceIds: finding.sourceIds ?? [],
-          evidence: finding.evidence ?? [],
-          paths: finding.paths ?? [],
-          primarySourceId: execution.job.sourceId,
-          companionSourceId: execution.job.companionSourceId,
-        });
-        const normalizedPaths = extractFindingPaths(finding.evidence ?? [], finding.paths ?? []);
-        findings.push({
-          id: finding.id ?? createId("finding"),
-          roleId: role.id,
-          category: normalizeFindingCategory(finding.category, role.id),
-          severity: finding.severity,
-          title: finding.title,
-          message: finding.message,
-          suggestion: finding.suggestion,
-          evidence: finding.evidence ?? [],
-          evidenceRefs: [],
-          sourceIds: normalizedSourceIds,
-          paths: normalizedPaths,
-          remediationPackIds: finding.remediationPackIds ?? [],
-        });
-      }
     }
 
     const report = enrichReportForUniversalAudit(analysisReportSchema.parse({
@@ -6356,7 +7575,7 @@ async function runAgentJob(
       workspaceId: execution.workspace.id,
       jobId,
       status: "ready",
-      roles: roleDefinitions,
+      roles: snapshot.roleDefinitions,
       runtimeMode: execution.job.runtimeMode,
       title: resolveRepoTitle(execution, repoPath),
       summary: {
@@ -6372,62 +7591,45 @@ async function runAgentJob(
       createdAt: new Date().toISOString(),
     }), plan.agent.id);
 
-    const envelope = jobEnvelopeSchema.parse({
-      job: {
-        ...execution.job,
-        status: "succeeded",
-        reportId: report.id,
-        finishedAt: new Date().toISOString(),
-        queueMessageId,
-      },
-      logs: [],
-      report,
-      artifacts: report.artifacts,
-      timing: {
-        queueDurationMs: execution.job.startedAt && execution.job.createdAt
-          ? Math.max(0, new Date(execution.job.startedAt).getTime() - new Date(execution.job.createdAt).getTime())
-          : null,
-        runDurationMs: Date.now() - jobStartedAt,
-        totalDurationMs: Date.now() - new Date(execution.job.createdAt).getTime(),
-        elapsedMs: Date.now() - new Date(execution.job.createdAt).getTime(),
-        estimatedTotalMs: estimatedTotalDurationMs,
-        estimatedRemainingMs: 0,
-        confidence: "high",
-        basis: "Derived from live worker execution timing and the persisted job timestamps.",
-      },
-      qualityScorecard: report.summary.qualityScorecard,
-      capabilityGaps: report.summary.capabilityGaps,
-      artifactAnalysis: report.summary.artifactAnalysis,
-      executionSteps: report.summary.executionSteps,
-    });
-
     await appendLog(
       jobId,
       logs,
       "agent",
       `Agent completed ${plan.roles.length} roles in ${formatDurationMs(Date.now() - jobStartedAt)}.`,
     );
-    const activeLearnables = await replaceSourceLearnables(
-      execution.workspace.id,
-      execution.source.id,
-      jobId,
-      synthesizeLearnablesFromReport(report),
-    );
-    await appendLog(jobId, logs, "learnables", `Stored ${activeLearnables.length} learnable(s) for future runs.`);
     await appendLog(
       jobId,
       logs,
       "quality",
       `Quality score ${report.summary.qualityScorecard?.overallScore ?? 0}/100; ${report.summary.capabilityGaps.length} capability gap(s); release gate ${report.summary.releaseGateDecision?.status ?? "unknown"}.`,
     );
+
     const artifactEnvelope = writeHostedJobArtifacts({
       rootDir: tempDir,
       workspaceName: safeSegment(jobId),
       repoPath,
-      envelope: {
-        ...envelope,
+      envelope: jobEnvelopeSchema.parse({
+        job: {
+          ...execution.job,
+          status: "succeeded",
+          reportId: report.id,
+          finishedAt: new Date().toISOString(),
+          queueMessageId,
+        },
         logs,
-      },
+        report,
+        artifacts: report.artifacts,
+        timing: buildExecutionTiming(
+          execution.job,
+          jobStartedAt,
+          estimatedTotalDurationMs,
+          "Derived from live sandbox execution timing and the persisted job timestamps.",
+        ),
+        qualityScorecard: report.summary.qualityScorecard,
+        capabilityGaps: report.summary.capabilityGaps,
+        artifactAnalysis: report.summary.artifactAnalysis,
+        executionSteps: report.summary.executionSteps,
+      }),
     });
     const finalizedEnvelope = artifactEnvelope.report
       ? writeHostedJobArtifacts({
@@ -6441,50 +7643,83 @@ async function runAgentJob(
           },
         })
       : artifactEnvelope;
-    const mirroredEnvelope = await mirrorArtifactsToObjectStorage(storageConfig(), finalizedEnvelope, tempDir);
-    await appendLog(
-      jobId,
-      logs,
-      "artifact",
-      `Persisted ${mirroredEnvelope.report?.artifacts.length ?? 0} artifact reference(s) for audit review.`,
-    );
-    return await finalizeAnalysisJobSuccess(jobId, {
-      ...mirroredEnvelope,
-      logs,
-    });
+    return {
+      envelope: finalizedEnvelope,
+      learnables: synthesizeLearnablesFromReport(report),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent worker failed.";
+    if (error instanceof AgentExecutionCancelledError) {
+      await appendLog(jobId, logs, "agent", message, "warn");
+      const artifacts = writeAgentFailureDiagnostics({
+        jobId,
+        tempDir,
+        status: "cancelled",
+        failureReason: message,
+        logs,
+      });
+      return {
+        envelope: createFailureEnvelope({
+          snapshot,
+          logs,
+          status: "cancelled",
+          failureReason: message,
+          jobStartedAt,
+          artifacts,
+          estimatedTotalDurationMs,
+        }),
+        learnables: [],
+      };
+    }
     await appendLog(jobId, logs, "agent", message, "error");
-    return await finalizeAgentJobFailure({
+    const artifacts = writeAgentFailureDiagnostics({
       jobId,
       tempDir,
+      status: "failed",
       failureReason: message,
       logs,
     });
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    return {
+      envelope: createFailureEnvelope({
+        snapshot,
+        logs,
+        status: "failed",
+        failureReason: message,
+        jobStartedAt,
+        artifacts,
+        estimatedTotalDurationMs,
+      }),
+      learnables: [],
+    };
   }
 }
 
-async function runRemediationJob(
-  execution: JobExecutionRecord,
+async function executeRemediationJobCore(
+  context: AgentExecutionContext,
   queueMessageId: string,
-): Promise<JobEnvelope> {
+): Promise<HostedRemediationCoreResult> {
+  const { execution, snapshot } = context;
   const jobId = execution.job.id;
   const logs: AnalysisLogEvent[] = [];
   const jobStartedAt = Date.now();
   const remediation = execution.metadata.remediation;
   const report = execution.parentReport;
   if (!remediation || !report) {
-    return finalizeAnalysisJobFailure(jobId, {
-      failureReason: "Remediation metadata or parent report is missing.",
-    });
+    return {
+      envelope: createFailureEnvelope({
+        snapshot,
+        logs,
+        status: "failed",
+        failureReason: "Remediation metadata or parent report is missing.",
+        jobStartedAt,
+      }),
+    };
   }
 
-  const tempDir = createRemediationTempDir();
+  const tempDir = snapshot.outputRoot;
   const exportDir = path.join(tempDir, "exports");
   const repoDir = path.join(tempDir, "repo");
-  const authPath = await stageCodexAuth(tempDir, execution);
+  const authPath = snapshot.codexAuthPath;
   const requestId = execution.job.queueMessageId ?? undefined;
   const stepBase = `${jobId}-remediation`;
 
@@ -6736,26 +7971,13 @@ async function runRemediationJob(
       status: "running",
       startedAt: new Date().toISOString(),
     }));
-    const artifactInputs = [
-      { kind: "patch-bundle" as const, filePath: patchBundlePath, mimeType: "text/x-diff" },
-      { kind: "git-bundle" as const, filePath: gitBundlePath, mimeType: "application/octet-stream" },
-      { kind: "validation-log" as const, filePath: validationLogPath, mimeType: "text/plain" },
-      { kind: "changeset-manifest" as const, filePath: manifestPath, mimeType: "application/json" },
-      { kind: "pr-summary" as const, filePath: prSummaryPath, mimeType: "text/markdown" },
-    ].filter(item => fs.existsSync(item.filePath));
-    const artifacts = await Promise.all(artifactInputs.map(item =>
-      putObjectFromFile(
-        storageConfig(),
-        `jobs/${jobId}/remediation/${path.basename(item.filePath)}`,
-        item.filePath,
-        item.mimeType,
-        {
-          kind: item.kind,
-          jobId,
-          reportId: report.id,
-        },
-      ),
-    ));
+    const localArtifacts = createRemediationLocalArtifactReferences(tempDir, [
+      { kind: "patch-bundle", filePath: patchBundlePath, mimeType: "text/x-diff" },
+      { kind: "git-bundle", filePath: gitBundlePath, mimeType: "application/octet-stream" },
+      { kind: "validation-log", filePath: validationLogPath, mimeType: "text/plain" },
+      { kind: "changeset-manifest", filePath: manifestPath, mimeType: "application/json" },
+      { kind: "pr-summary", filePath: prSummaryPath, mimeType: "text/markdown" },
+    ]);
     await appendExecutionStepLog(jobId, logs, buildExecutionStep({
       id: artifactStepId,
       order: 99,
@@ -6766,54 +7988,823 @@ async function runRemediationJob(
       status: "succeeded",
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
-      detail: `${artifacts.length} artifact(s) uploaded.`,
+      detail: `${localArtifacts.length} artifact(s) prepared.`,
     }));
 
-    await storeRemediationJobChangeset(jobId, changeset);
-    if (execution.job.parentReportId) {
-      await storeReportChangeset(execution.job.parentReportId, changeset, jobId);
-    }
-
-    const timing = {
-      queueDurationMs: execution.job.startedAt && execution.job.createdAt
-        ? Math.max(0, new Date(execution.job.startedAt).getTime() - new Date(execution.job.createdAt).getTime())
-        : null,
-      runDurationMs: Date.now() - jobStartedAt,
-      totalDurationMs: Date.now() - new Date(execution.job.createdAt).getTime(),
-      elapsedMs: Date.now() - new Date(execution.job.createdAt).getTime(),
-      estimatedTotalMs: Date.now() - new Date(execution.job.createdAt).getTime(),
-      estimatedRemainingMs: 0,
-      confidence: "high" as const,
-      basis: "Derived from queued remediation execution timing.",
+    return {
+      envelope: jobEnvelopeSchema.parse({
+        job: {
+          ...execution.job,
+          status: "succeeded",
+          queueMessageId,
+          changeset,
+          finishedAt: new Date().toISOString(),
+        },
+        logs,
+        report: null,
+        artifacts: localArtifacts,
+        timing: buildExecutionTiming(
+          execution.job,
+          jobStartedAt,
+          Date.now() - new Date(execution.job.createdAt).getTime(),
+          "Derived from queued remediation execution timing.",
+        ),
+        qualityScorecard: null,
+        capabilityGaps: [],
+        artifactAnalysis: null,
+        executionSteps: collectAnalysisExecutionSteps(logs),
+      }),
     };
-
-    return await finalizeAnalysisJobSuccess(jobId, {
-      job: {
-        ...execution.job,
-        status: "succeeded",
-        queueMessageId,
-        changeset,
-        finishedAt: new Date().toISOString(),
-      },
-      logs,
-      report: null,
-      artifacts,
-      timing,
-      qualityScorecard: null,
-      capabilityGaps: [],
-      artifactAnalysis: null,
-      executionSteps: collectAnalysisExecutionSteps(logs),
-    }, artifacts);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Remediation worker failed.";
     await appendLog(jobId, logs, "remediation", message, "error", requestId);
-    return await finalizeAnalysisJobFailure(jobId, {
+    const artifacts = writeAgentFailureDiagnostics({
+      jobId,
+      tempDir,
+      status: "failed",
       failureReason: message,
       logs,
+    });
+    return {
+      envelope: createFailureEnvelope({
+        snapshot,
+        logs,
+        status: "failed",
+        failureReason: message,
+        jobStartedAt,
+        artifacts,
+      }),
+    };
+  }
+}
+
+async function runAgentJob(
+  execution: JobExecutionRecord,
+  queueMessageId: string,
+): Promise<JobEnvelope> {
+  const config = loadAiWorkerConfig();
+  const jobId = execution.job.id;
+  const tempDir = path.join(config.tempRoot, `${safeSegment(jobId)}-${Date.now()}`);
+  fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
+  const authPath = await stageCodexAuth(tempDir, execution);
+  try {
+    const context = await buildSandboxExecutionContext(execution, {
+      codexAuthPath: authPath,
+      outputRoot: tempDir,
+      timeoutMs: config.sandboxTimeoutMs,
+    });
+    const result = await withExecutionRuntime({ appendLogs: async () => undefined }, async () => {
+      const coreResult = await executeAuditJobCore(context, queueMessageId);
+      const logs = [...coreResult.envelope.logs];
+      const report = coreResult.envelope.report;
+      if (!report) {
+        return await finalizeAgentJobFailure({
+          jobId,
+          tempDir,
+          failureReason: coreResult.envelope.job.failureReason ?? "Agent worker failed.",
+          status: coreResult.envelope.job.status === "cancelled" ? "cancelled" : "failed",
+          logs,
+          artifacts: coreResult.envelope.artifacts,
+        });
+      }
+      const activeLearnables = await replaceSourceLearnables(
+        execution.workspace.id,
+        execution.source.id,
+        jobId,
+        coreResult.learnables,
+      );
+      logs.push(createLog(jobId, "learnables", `Stored ${activeLearnables.length} learnable(s) for future runs.`));
+      logs.push(createLog(
+        jobId,
+        "quality",
+        `Quality score ${report.summary.qualityScorecard?.overallScore ?? 0}/100; ${report.summary.capabilityGaps.length} capability gap(s); release gate ${report.summary.releaseGateDecision?.status ?? "unknown"}.`,
+      ));
+      const mirroredEnvelope = await mirrorArtifactsToObjectStorage(storageConfig(), {
+        ...coreResult.envelope,
+        logs,
+      }, tempDir);
+      logs.push(createLog(
+        jobId,
+        "artifact",
+        `Persisted ${mirroredEnvelope.report?.artifacts.length ?? 0} artifact reference(s) for audit review.`,
+      ));
+      return await finalizeAnalysisJobSuccess(jobId, {
+        ...mirroredEnvelope,
+        logs,
+      });
+    });
+    await syncCodexAuth(authPath, execution);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Agent worker failed.";
+    return await finalizeAgentJobFailure({
+      jobId,
+      tempDir,
+      failureReason: message,
+      logs: [createLog(jobId, "agent", message, "error")],
     });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+async function runRemediationJob(
+  execution: JobExecutionRecord,
+  queueMessageId: string,
+): Promise<JobEnvelope> {
+  const config = loadAiWorkerConfig();
+  const jobId = execution.job.id;
+  const tempDir = createRemediationTempDir();
+  const authPath = await stageCodexAuth(tempDir, execution);
+  try {
+    const context = await buildSandboxExecutionContext(execution, {
+      codexAuthPath: authPath,
+      outputRoot: tempDir,
+      timeoutMs: config.sandboxTimeoutMs,
+    });
+    const result = await withExecutionRuntime({ appendLogs: async () => undefined }, async () => {
+      const coreResult = await executeRemediationJobCore(context, queueMessageId);
+      const logs = [...coreResult.envelope.logs];
+      if (coreResult.envelope.job.status !== "succeeded") {
+        return await finalizeAgentJobFailure({
+          jobId,
+          tempDir,
+          failureReason: coreResult.envelope.job.failureReason ?? "Remediation worker failed.",
+          status: coreResult.envelope.job.status === "cancelled" ? "cancelled" : "failed",
+          logs,
+          artifacts: coreResult.envelope.artifacts,
+        });
+      }
+      const changeset = coreResult.envelope.job.changeset;
+      if (changeset) {
+        await storeRemediationJobChangeset(jobId, changeset);
+        if (execution.job.parentReportId) {
+          await storeReportChangeset(execution.job.parentReportId, changeset, jobId);
+        }
+      }
+      const persistedArtifacts = await uploadLocalArtifactsToObjectStorage({
+        jobId,
+        reportId: execution.parentReport?.id ?? null,
+        baseDir: tempDir,
+        artifacts: coreResult.envelope.artifacts,
+        keyPrefix: `jobs/${jobId}/remediation`,
+      });
+      logs.push(createLog(jobId, "artifact", `Persisted ${persistedArtifacts.length} remediation artifact(s).`));
+      return await finalizeAnalysisJobSuccess(jobId, {
+        ...coreResult.envelope,
+        logs,
+        artifacts: persistedArtifacts,
+      }, persistedArtifacts);
+    });
+    await syncCodexAuth(authPath, execution);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Remediation worker failed.";
+    return await finalizeAgentJobFailure({
+      jobId,
+      tempDir,
+      failureReason: message,
+      logs: [createLog(jobId, "remediation", message, "error", execution.job.queueMessageId ?? undefined)],
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+const sandboxLogPrefix = "SPECLENS_LOG ";
+
+function pipeSandboxStream(
+  stream: NodeJS.ReadableStream,
+  filePath: string,
+  onLine: (line: string) => void,
+): void {
+  const destination = fs.createWriteStream(filePath, { flags: "a" });
+  let remainder = "";
+  stream.on("data", chunk => {
+    const value = String(chunk);
+    destination.write(value);
+    remainder = flushChunkLinesUntruncated(value, remainder, onLine);
+  });
+  stream.on("end", () => {
+    if (remainder.trim().length > 0) {
+      onLine(remainder.trim());
+    }
+    destination.end();
+  });
+}
+
+type AgentSandboxRunResult = {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  cancelled: boolean;
+};
+
+async function waitForAgentSandbox(
+  jobId: string,
+  child: ReturnType<typeof spawn>,
+  containerName: string,
+): Promise<AgentSandboxRunResult> {
+  const config = loadAiWorkerConfig();
+  let timedOut = false;
+  let cancelled = false;
+  let forceKillTimer: NodeJS.Timeout | null = null;
+
+  const terminateChild = (reason: "timeout" | "cancel"): void => {
+    if (reason === "timeout") timedOut = true;
+    if (reason === "cancel") cancelled = true;
+    if (child.killed) {
+      return;
+    }
+    child.kill("SIGTERM");
+    forceKillTimer = setTimeout(() => {
+      child.kill("SIGKILL");
+      void runProcess("docker", ["rm", "-f", containerName]).catch(error => {
+        console.warn("[ai-worker] Failed to cleanup sandbox container:", error);
+      });
+    }, 5000);
+  };
+
+  const timeout = setTimeout(() => {
+    terminateChild("timeout");
+  }, config.sandboxTimeoutMs);
+  const cancellationPoll = setInterval(() => {
+    void isCancellationRequested(jobId).then(requested => {
+      if (!requested || cancelled) {
+        return;
+      }
+      terminateChild("cancel");
+    }).catch(() => undefined);
+  }, 1000);
+
+  try {
+    return await new Promise<AgentSandboxRunResult>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (exitCode, signal) => {
+        resolve({
+          exitCode,
+          signal,
+          timedOut,
+          cancelled,
+        });
+      });
+    });
+  } finally {
+    clearTimeout(timeout);
+    clearInterval(cancellationPoll);
+    if (forceKillTimer) {
+      clearTimeout(forceKillTimer);
+    }
+  }
+}
+
+function appendSandboxEnv(
+  dockerArgs: string[],
+  name: string,
+  value: string | null | undefined,
+): void {
+  if (!value || value.trim().length === 0) {
+    return;
+  }
+  dockerArgs.push("-e", `${name}=${value}`);
+}
+
+function forwardSandboxEnvironment(dockerArgs: string[], config: ReturnType<typeof loadAiWorkerConfig>): void {
+  const names = [
+    "CODEX_BIN",
+    "OPENAI_CODEX_MODEL",
+    "AI_WORKER_ROLE_MAX_CONCURRENCY",
+    "AI_WORKER_CODEX_TIMEOUT_MS",
+    "AI_WORKER_EXECUTION_COMMAND_TIMEOUT_MS",
+    "AI_WORKER_RUNTIME_BOOT_TIMEOUT_MS",
+    "AI_WORKER_PLAYWRIGHT_COMMAND_TIMEOUT_MS",
+    "AI_WORKER_CODEX_MAX_ATTEMPTS",
+    "AI_WORKER_CODEX_RETRY_DELAY_MS",
+    "AI_WORKER_CODEX_USE_OUTPUT_SCHEMA",
+    "AI_WORKER_PROMPT_CAPTURE_PATH",
+    "OBJECT_STORAGE_PROVIDER",
+    "OBJECT_STORAGE_BUCKET",
+    "OBJECT_STORAGE_PUBLIC_ENDPOINT",
+    "OBJECT_STORAGE_REGION",
+    "OBJECT_STORAGE_FORCE_PATH_STYLE",
+    "OBJECT_STORAGE_ACCESS_KEY_ID",
+    "OBJECT_STORAGE_SECRET_ACCESS_KEY",
+    "OBJECT_STORAGE_MIRROR_PROVIDER",
+    "OBJECT_STORAGE_MIRROR_BUCKET",
+    "OBJECT_STORAGE_MIRROR_ENDPOINT",
+    "OBJECT_STORAGE_MIRROR_PUBLIC_ENDPOINT",
+    "OBJECT_STORAGE_MIRROR_REGION",
+    "OBJECT_STORAGE_MIRROR_FORCE_PATH_STYLE",
+    "OBJECT_STORAGE_MIRROR_ACCESS_KEY_ID",
+    "OBJECT_STORAGE_MIRROR_SECRET_ACCESS_KEY",
+    "OBJECT_STORAGE_MIRROR_REQUIRED",
+    "SPACES_BUCKET",
+    "SPACES_ENDPOINT",
+    "SPACES_REGION",
+    "SPACES_ACCESS_KEY_ID",
+    "SPACES_SECRET_ACCESS_KEY",
+    "APP_STATE_ENCRYPTION_KEY",
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_APP_PRIVATE_KEY_FILE",
+    "SPECLENS_REMOTE_PR_GITHUB_TOKEN",
+    "SPECLENS_EXPOSE_E2E_TASKS",
+  ];
+  for (const name of names) {
+    appendSandboxEnv(dockerArgs, name, process.env[name]);
+  }
+  appendSandboxEnv(
+    dockerArgs,
+    "OBJECT_STORAGE_ENDPOINT",
+    config.sandboxObjectStorageEndpoint ?? process.env.OBJECT_STORAGE_ENDPOINT ?? process.env.OBJECT_STORAGE_PUBLIC_ENDPOINT ?? null,
+  );
+  appendSandboxEnv(dockerArgs, "AI_WORKER_CODEX_BYPASS_SANDBOX", "true");
+  appendSandboxEnv(dockerArgs, "SPECLENS_ALLOW_UNSAFE_CODEX_BYPASS", "true");
+  appendSandboxEnv(
+    dockerArgs,
+    "DOCKER_HOST",
+    config.sandboxNetwork === "host" ? "tcp://127.0.0.1:2375" : "tcp://host.docker.internal:2375",
+  );
+}
+
+async function runHostedAgentSandbox(options: {
+  execution: JobExecutionRecord;
+  requestPath: string;
+  tempDir: string;
+  stdoutPath: string;
+  stderrPath: string;
+  extraEnv?: Record<string, string>;
+  onStdoutLine: (line: string) => void;
+  onStderrLine: (line: string) => void;
+}): Promise<AgentSandboxRunResult> {
+  const config = loadAiWorkerConfig();
+  const mountRoot = "/speclens-agent-run";
+  const containerName = `speclens-agent-${safeSegment(options.execution.job.id)}-${safeSegment(config.workerId)}`.slice(0, 63);
+  const dockerArgs = [
+    "run",
+    "--rm",
+    "--name",
+    containerName,
+    "--label",
+    "speclens.managed=true",
+    "--label",
+    `speclens.aiWorkerId=${config.workerId}`,
+    "--label",
+    `speclens.jobId=${options.execution.job.id}`,
+    "-v",
+    `${options.tempDir}:${mountRoot}`,
+  ];
+  if (config.sandboxNetwork) {
+    dockerArgs.push("--network", config.sandboxNetwork);
+  } else {
+    dockerArgs.push("--add-host", "host.docker.internal:host-gateway");
+  }
+  if (config.sandboxCpuLimit) {
+    dockerArgs.push("--cpus", config.sandboxCpuLimit);
+  }
+  if (config.sandboxMemoryLimit) {
+    dockerArgs.push("--memory", config.sandboxMemoryLimit);
+  }
+  if (typeof process.getuid === "function" && typeof process.getgid === "function") {
+    dockerArgs.push("--user", `${process.getuid()}:${process.getgid()}`);
+  }
+  forwardSandboxEnvironment(dockerArgs, config);
+  for (const [name, value] of Object.entries(options.extraEnv ?? {})) {
+    appendSandboxEnv(dockerArgs, name, value);
+  }
+  dockerArgs.push(
+    config.sandboxImage,
+    "node",
+    "--import",
+    "tsx",
+    "/app/apps/ai-worker/src/services/sandbox.ts",
+    `${mountRoot}/${path.basename(options.requestPath)}`,
+  );
+  const child = spawn("docker", dockerArgs, {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ...(config.dockerHost ? { DOCKER_HOST: config.dockerHost } : {}),
+    },
+  });
+  pipeSandboxStream(child.stdout, options.stdoutPath, options.onStdoutLine);
+  pipeSandboxStream(child.stderr, options.stderrPath, options.onStderrLine);
+  return await waitForAgentSandbox(options.execution.job.id, child, containerName);
+}
+
+function stageSandboxPrivateKeyFile(tempDir: string, mountRoot: string): Record<string, string> {
+  if (process.env.GITHUB_APP_PRIVATE_KEY?.trim()) {
+    return {};
+  }
+  const privateKeyFile = process.env.GITHUB_APP_PRIVATE_KEY_FILE?.trim();
+  if (!privateKeyFile) {
+    return {};
+  }
+  const absolutePath = path.resolve(privateKeyFile);
+  if (!fs.existsSync(absolutePath)) {
+    return {};
+  }
+  const stagedPath = path.join(tempDir, "github-app-private-key.pem");
+  fs.copyFileSync(absolutePath, stagedPath);
+  fs.chmodSync(stagedPath, 0o600);
+  return {
+    GITHUB_APP_PRIVATE_KEY_FILE: `${mountRoot}/github-app-private-key.pem`,
+  };
+}
+
+async function uploadSandboxRawLogs(jobId: string, stdoutPath: string, stderrPath: string): Promise<ArtifactReference[]> {
+  const artifacts: ArtifactReference[] = [];
+  if (fs.existsSync(stdoutPath) && fs.statSync(stdoutPath).size > 0) {
+    artifacts.push(await putObjectFromFile(
+      storageConfig(),
+      `jobs/${jobId}/sandbox-stdout.log`,
+      stdoutPath,
+      "text/plain",
+      {
+        kind: "runtime-log",
+        jobId,
+        reportId: null,
+      },
+    ));
+  }
+  if (fs.existsSync(stderrPath) && fs.statSync(stderrPath).size > 0) {
+    artifacts.push(await putObjectFromFile(
+      storageConfig(),
+      `jobs/${jobId}/sandbox-stderr.log`,
+      stderrPath,
+      "text/plain",
+      {
+        kind: "runtime-log",
+        jobId,
+        reportId: null,
+      },
+    ));
+  }
+  return artifacts;
+}
+
+function readSandboxFailure(stderrPath: string, fallback: string): string {
+  if (!fs.existsSync(stderrPath)) {
+    return fallback;
+  }
+  const content = fs.readFileSync(stderrPath, "utf8").trim();
+  if (!content) {
+    return fallback;
+  }
+  return content.split("\n").slice(-10).join("\n").slice(0, 1000);
+}
+
+async function executeHostedAgentJobInSandbox(
+  execution: JobExecutionRecord,
+  queueMessageId: string,
+): Promise<JobEnvelope> {
+  const config = loadAiWorkerConfig();
+  const jobId = execution.job.id;
+  const tempDir = path.join(config.tempRoot, `${safeSegment(jobId)}-${Date.now()}`);
+  const stdoutPath = path.join(tempDir, "sandbox-stdout.log");
+  const stderrPath = path.join(tempDir, "sandbox-stderr.log");
+  const mountRoot = "/speclens-agent-run";
+  const streamedLogIds = new Set<string>();
+  fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
+  const sandboxExtraEnv = stageSandboxPrivateKeyFile(tempDir, mountRoot);
+  const executionForSandbox: JobExecutionRecord = {
+    ...execution,
+    job: {
+      ...execution.job,
+      queueMessageId: execution.job.queueMessageId ?? queueMessageId,
+    },
+  };
+
+  const authPath = await stageCodexAuth(tempDir, executionForSandbox);
+  const sandboxContext = await buildSandboxExecutionContext(executionForSandbox, {
+    codexAuthPath: authPath
+      ? `${mountRoot}/${path.relative(tempDir, authPath).replace(/\\/g, "/")}`
+      : null,
+    outputRoot: mountRoot,
+    timeoutMs: config.sandboxTimeoutMs,
+  });
+  const requestPath = path.join(tempDir, "agent-sandbox-request.json");
+  fs.writeFileSync(
+    requestPath,
+    `${JSON.stringify(agentSandboxRequestSchema.parse({
+      schemaVersion: "speclens.agent-sandbox.v1",
+      execution: sandboxContext.snapshot,
+    }), null, 2)}\n`,
+    "utf8",
+  );
+
+  const controllerLogs: AnalysisLogEvent[] = [];
+  await appendLog(jobId, controllerLogs, "sandbox", `Launching hosted agent sandbox ${config.sandboxImage}.`, "info");
+  await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+    id: "sandbox:launch",
+    order: 1,
+    title: "Launch hosted job sandbox",
+    stepType: "stage",
+    agentId: execution.job.agentId,
+    agentName: "Hosted agent controller",
+    status: "running",
+    startedAt: new Date().toISOString(),
+  }));
+  const sandboxWaitStartedAt = new Date().toISOString();
+  await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+    id: "sandbox:wait",
+    order: 2,
+    title: "Wait for hosted job sandbox",
+    stepType: "stage",
+    agentId: execution.job.agentId,
+    agentName: "Hosted agent controller",
+    status: "running",
+    startedAt: sandboxWaitStartedAt,
+  }));
+
+  try {
+    const sandboxResult = await runHostedAgentSandbox({
+      execution: executionForSandbox,
+      requestPath,
+      tempDir,
+      stdoutPath,
+      stderrPath,
+      extraEnv: sandboxExtraEnv,
+      onStdoutLine: line => {
+        if (line.startsWith(sandboxLogPrefix)) {
+          try {
+            const log = analysisLogEventSchema.parse(JSON.parse(line.slice(sandboxLogPrefix.length)));
+            streamedLogIds.add(log.id);
+            void appendAnalysisJobLogs(jobId, [log]).catch(() => undefined);
+            return;
+          } catch {
+            // fall through to raw stdout logging
+          }
+        }
+        void appendLog(jobId, controllerLogs, "sandbox-stdout", truncateLogMessage(line), "info", undefined, "verbose");
+      },
+      onStderrLine: line => {
+        void appendLog(jobId, controllerLogs, "sandbox-stderr", truncateLogMessage(line), "warn", undefined, "verbose");
+      },
+    });
+
+    const rawLogArtifacts = await uploadSandboxRawLogs(jobId, stdoutPath, stderrPath);
+    const waitStatus = sandboxResult.cancelled || sandboxResult.timedOut || sandboxResult.exitCode !== 0
+      ? "failed"
+      : "succeeded";
+    const waitDetail = sandboxResult.cancelled
+      ? "Sandbox execution cancelled."
+      : sandboxResult.timedOut
+        ? `Sandbox timed out after ${config.sandboxTimeoutMs}ms.`
+        : sandboxResult.exitCode !== 0
+          ? `Sandbox exited with code ${sandboxResult.exitCode ?? "unknown"}.`
+          : "Sandbox container exited cleanly.";
+    await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+      id: "sandbox:wait",
+      order: 2,
+      title: "Wait for hosted job sandbox",
+      stepType: "stage",
+      agentId: execution.job.agentId,
+      agentName: "Hosted agent controller",
+      status: waitStatus,
+      detail: waitDetail,
+      startedAt: sandboxWaitStartedAt,
+      finishedAt: new Date().toISOString(),
+    }));
+    if (sandboxResult.cancelled || await isCancellationRequested(jobId)) {
+      await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+        id: "sandbox:launch",
+        order: 1,
+        title: "Launch hosted job sandbox",
+        stepType: "stage",
+        agentId: execution.job.agentId,
+        agentName: "Hosted agent controller",
+        status: "failed",
+        detail: "Sandbox execution cancelled.",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      }));
+      return await finalizeAnalysisJobFailure(jobId, {
+        status: "cancelled",
+        failureReason: "Cancelled during hosted sandbox execution.",
+        logs: controllerLogs,
+        artifacts: rawLogArtifacts,
+      });
+    }
+
+    if (sandboxResult.timedOut) {
+      await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+        id: "sandbox:launch",
+        order: 1,
+        title: "Launch hosted job sandbox",
+        stepType: "stage",
+        agentId: execution.job.agentId,
+        agentName: "Hosted agent controller",
+        status: "failed",
+        detail: `Sandbox timed out after ${config.sandboxTimeoutMs}ms.`,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      }));
+      return await finalizeAnalysisJobFailure(jobId, {
+        failureReason: `Sandbox timed out after ${config.sandboxTimeoutMs}ms.`,
+        logs: controllerLogs,
+        artifacts: rawLogArtifacts,
+      });
+    }
+
+    if (sandboxResult.exitCode !== 0) {
+      await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+        id: "sandbox:launch",
+        order: 1,
+        title: "Launch hosted job sandbox",
+        stepType: "stage",
+        agentId: execution.job.agentId,
+        agentName: "Hosted agent controller",
+        status: "failed",
+        detail: `Sandbox exited with code ${sandboxResult.exitCode ?? "unknown"}.`,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      }));
+      return await finalizeAnalysisJobFailure(jobId, {
+        failureReason: readSandboxFailure(stderrPath, `Sandbox exited with code ${sandboxResult.exitCode ?? "unknown"}.`),
+        logs: controllerLogs,
+        artifacts: rawLogArtifacts,
+      });
+    }
+
+    const resultPath = path.join(tempDir, "result.json");
+    if (!fs.existsSync(resultPath)) {
+      throw new Error(`Sandbox completed without producing ${resultPath}.`);
+    }
+    const sandboxResponse = agentSandboxResultSchema.parse(JSON.parse(fs.readFileSync(resultPath, "utf8"))) satisfies AgentSandboxResult;
+    await syncCodexAuth(authPath, execution);
+    const missingLogs = sandboxResponse.envelope.logs.filter(log => !streamedLogIds.has(log.id));
+    await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+      id: "sandbox:collect",
+      order: 3,
+      title: "Collect sandbox result bundle",
+      stepType: "stage",
+      agentId: execution.job.agentId,
+      agentName: "Hosted agent controller",
+      status: "succeeded",
+      detail: sandboxResponse.status,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    }));
+
+    if (sandboxResponse.status !== "succeeded" || sandboxResponse.envelope.job.status !== "succeeded") {
+      const persistedArtifacts = await uploadLocalArtifactsToObjectStorage({
+        jobId,
+        reportId: sandboxResponse.envelope.report?.id ?? execution.parentReport?.id ?? null,
+        baseDir: tempDir,
+        artifacts: sandboxResponse.envelope.artifacts,
+        keyPrefix: sandboxResponse.envelope.job.jobKind === "remediation"
+          ? `jobs/${jobId}/remediation`
+          : `jobs/${jobId}`,
+      });
+      return await finalizeAnalysisJobFailure(jobId, {
+        status: sandboxResponse.envelope.job.status === "cancelled" ? "cancelled" : "failed",
+        failureReason: sandboxResponse.failureReason ?? sandboxResponse.envelope.job.failureReason ?? "Sandbox execution failed.",
+        logs: [...controllerLogs, ...missingLogs],
+        artifacts: [...persistedArtifacts, ...rawLogArtifacts],
+      });
+    }
+
+    if (sandboxResponse.envelope.job.jobKind === "remediation") {
+      const changeset = sandboxResponse.envelope.job.changeset;
+      if (changeset) {
+        await storeRemediationJobChangeset(jobId, changeset);
+        if (execution.job.parentReportId) {
+          await storeReportChangeset(execution.job.parentReportId, changeset, jobId);
+        }
+      }
+      const persistedArtifacts = await uploadLocalArtifactsToObjectStorage({
+        jobId,
+        reportId: execution.parentReport?.id ?? null,
+        baseDir: tempDir,
+        artifacts: sandboxResponse.envelope.artifacts,
+        keyPrefix: `jobs/${jobId}/remediation`,
+      });
+      await appendLog(jobId, controllerLogs, "artifact", `Persisted ${persistedArtifacts.length} remediation artifact(s).`, "info");
+      return await finalizeAnalysisJobSuccess(jobId, {
+        ...sandboxResponse.envelope,
+        logs: missingLogs,
+        artifacts: persistedArtifacts,
+      }, [...persistedArtifacts, ...rawLogArtifacts]);
+    }
+
+    const activeLearnables = await replaceSourceLearnables(
+      execution.workspace.id,
+      execution.source.id,
+      jobId,
+      sandboxResponse.learnables,
+    );
+    await appendLog(jobId, controllerLogs, "learnables", `Stored ${activeLearnables.length} learnable(s) for future runs.`, "info");
+    const mirroredEnvelope = await mirrorArtifactsToObjectStorage(storageConfig(), {
+      ...sandboxResponse.envelope,
+      logs: missingLogs,
+    }, tempDir);
+    await appendLog(
+      jobId,
+      controllerLogs,
+      "artifact",
+      `Persisted ${mirroredEnvelope.report?.artifacts.length ?? 0} artifact reference(s) for audit review.`,
+      "info",
+    );
+    return await finalizeAnalysisJobSuccess(jobId, {
+      ...mirroredEnvelope,
+      logs: missingLogs,
+    }, rawLogArtifacts);
+  } catch (error) {
+    const rawLogArtifacts = await uploadSandboxRawLogs(jobId, stdoutPath, stderrPath);
+    await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+      id: "sandbox:wait",
+      order: 2,
+      title: "Wait for hosted job sandbox",
+      stepType: "stage",
+      agentId: execution.job.agentId,
+      agentName: "Hosted agent controller",
+      status: "failed",
+      detail: error instanceof Error ? error.message : "Sandbox launch failed.",
+      startedAt: sandboxWaitStartedAt,
+      finishedAt: new Date().toISOString(),
+    }));
+    await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+      id: "sandbox:launch",
+      order: 1,
+      title: "Launch hosted job sandbox",
+      stepType: "stage",
+      agentId: execution.job.agentId,
+      agentName: "Hosted agent controller",
+      status: "failed",
+      detail: error instanceof Error ? error.message : "Sandbox launch failed.",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    }));
+    return await finalizeAnalysisJobFailure(jobId, {
+      failureReason: error instanceof Error ? error.message : "Sandbox launch failed.",
+      logs: controllerLogs,
+      artifacts: rawLogArtifacts,
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+export async function executeAgentSandboxRequest(
+  request: z.infer<typeof agentSandboxRequestSchema>,
+): Promise<AgentSandboxResult> {
+  const parsedRequest = agentSandboxRequestSchema.parse(request);
+  const execution = createExecutionRecordFromSnapshot(parsedRequest.execution);
+  const queueMessageId = parsedRequest.execution.job.queueMessageId ?? "sandbox";
+  return await withExecutionRuntime({
+    appendLogs: async () => undefined,
+    emitLog: log => {
+      process.stdout.write(`${sandboxLogPrefix}${JSON.stringify(log)}\n`);
+    },
+    isCancellationRequested: async () => false,
+    syncCodexAuth: async () => undefined,
+  }, async () => {
+    const coreResult = parsedRequest.execution.job.jobKind === "remediation"
+      ? await executeRemediationJobCore({ execution, snapshot: parsedRequest.execution }, queueMessageId)
+      : await executeAuditJobCore({ execution, snapshot: parsedRequest.execution }, queueMessageId);
+    const learnedAt = new Date().toISOString();
+    const learnableSeeds: LearnableSeed[] = "learnables" in coreResult && Array.isArray(coreResult.learnables)
+      ? coreResult.learnables as LearnableSeed[]
+      : [];
+    const learnables = learnableSeeds.length > 0
+      ? learnableSeeds.map((learnable: LearnableSeed, index: number) => ({
+          id: createId("learnable"),
+          workspaceId: execution.workspace.id,
+          sourceId: execution.source.id,
+          statement: learnable.statement,
+          category: learnable.category,
+          evidence: learnable.evidence ?? [],
+          learnedFromJobId: execution.job.id,
+          order: learnable.order ?? index,
+          active: true,
+          createdAt: learnedAt,
+          updatedAt: learnedAt,
+        }))
+      : [];
+    return agentSandboxResultSchema.parse({
+      schemaVersion: "speclens.agent-sandbox-result.v1",
+      status: coreResult.envelope.job.status,
+      failureReason: coreResult.envelope.job.failureReason,
+      envelope: coreResult.envelope,
+      learnables,
+    });
+  });
+}
+
+function shouldUseInProcessSandboxTestHarness(): boolean {
+  // API unit tests start the queue consumer without a Docker daemon or sandbox image.
+  // The production controller path remains Docker-only and fails on sandbox launch errors.
+  return process.env.NODE_ENV === "test" && process.env.AI_WORKER_TEST_IN_PROCESS_SANDBOX === "true";
+}
+
+async function executeClaimedAgentJobForTest(
+  execution: JobExecutionRecord,
+  queueMessageId: string,
+): Promise<JobEnvelope> {
+  return execution.job.jobKind === "remediation"
+    ? await runRemediationJob(execution, queueMessageId)
+    : await runAgentJob(execution, queueMessageId);
 }
 
 async function handleAgentJob(payload: { jobId: string }, queueMessageId: string): Promise<void> {
@@ -6825,9 +8816,9 @@ async function handleAgentJob(payload: { jobId: string }, queueMessageId: string
   const jobKind = execution.job.jobKind;
   const finishMetrics = beginAiWorkerJob(jobKind);
   try {
-    const result = execution.job.jobKind === "remediation"
-      ? await runRemediationJob(execution, queueMessageId)
-      : await runAgentJob(execution, queueMessageId);
+    const result = shouldUseInProcessSandboxTestHarness()
+      ? await executeClaimedAgentJobForTest(execution, queueMessageId)
+      : await executeHostedAgentJobInSandbox(execution, queueMessageId);
     const status = result.job.status === "succeeded" || result.job.status === "failed" || result.job.status === "cancelled"
       ? result.job.status
       : "unknown";

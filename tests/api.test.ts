@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { createHmac, generateKeyPairSync } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import test, { after } from "node:test";
 import { pathToFileURL } from "node:url";
 import Stripe from "stripe";
@@ -36,6 +36,7 @@ const fixturePath = createCommittedGitFixture(path.join(process.cwd(), "fixtures
 const browserFixturePath = createCommittedGitFixture(path.join(process.cwd(), "fixtures", "browser-parity-app"), "speclens-api-browser-repo-");
 const fixtureArchivePath = createCommittedGitArchiveFixture(path.join(process.cwd(), "fixtures", "tagtwo-mini"), "speclens-api-static-archive-").archivePath;
 const browserFixtureArchivePath = createCommittedGitArchiveFixture(path.join(process.cwd(), "fixtures", "browser-parity-app"), "speclens-api-browser-archive-").archivePath;
+const largeFixtureArchivePath = createLargeCommittedGitArchiveFixture();
 const fixtureUrl = pathToFileURL(fixturePath).toString();
 const browserFixtureUrl = pathToFileURL(browserFixturePath).toString();
 const defaultStripeWebhookSecret = "whsec_speclens_test";
@@ -52,6 +53,38 @@ const workspaceAdminCookie = makePortalSessionCookie({
   email: "portal-admin@speclens.test",
   displayName: "Portal Admin",
 });
+
+function runGitFixtureCommand(args: string[], cwd: string): void {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "SpecLens Tests",
+      GIT_AUTHOR_EMAIL: "tests@speclens.dev",
+      GIT_COMMITTER_NAME: "SpecLens Tests",
+      GIT_COMMITTER_EMAIL: "tests@speclens.dev",
+    },
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `git ${args.join(" ")} failed`);
+  }
+}
+
+function createLargeCommittedGitArchiveFixture(): string {
+  const repoPath = createCommittedGitFixture(path.join(process.cwd(), "fixtures", "tagtwo-mini"), "speclens-api-large-upload-");
+  fs.writeFileSync(path.join(repoPath, "large-upload.bin"), randomBytes(2 * 1024 * 1024));
+  runGitFixtureCommand(["add", "large-upload.bin"], repoPath);
+  runGitFixtureCommand(["commit", "--quiet", "-m", "large upload fixture"], repoPath);
+  const archivePath = path.join(path.dirname(repoPath), "large-upload.tar.gz");
+  const result = spawnSync("tar", ["-czf", archivePath, "-C", path.dirname(repoPath), path.basename(repoPath)], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || "Failed to create large upload archive.");
+  }
+  return archivePath;
+}
 
 async function postStripeWebhook(
   app: { inject: (options: Record<string, unknown>) => Promise<unknown> },
@@ -251,6 +284,8 @@ async function startAgentWorkerProcess(env: Record<string, string>): Promise<{
     env: {
       ...process.env,
       ...env,
+      NODE_ENV: "test",
+      AI_WORKER_TEST_IN_PROCESS_SANDBOX: "true",
       AI_WORKER_ID: env.AI_WORKER_ID ?? `ai-worker-${Date.now()}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -2728,6 +2763,38 @@ test("hosted API exposes artifacts and supports Git repository archive upload fo
     url: `/api/jobs/${analysisPayload.job.job.id}/artifacts/0`,
   });
   assert.equal(artifactContentResponse.statusCode, 200);
+});
+
+test("hosted API accepts Git repository archive uploads above the legacy default multipart size", async t => {
+  const instance = await createStubbedAiWorkerApiAppInstance(createTestDatabaseName("speclens_large_upload"));
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+    fs.rmSync(instance.tempRoot, { recursive: true, force: true });
+  });
+
+  assert.ok(fs.statSync(largeFixtureArchivePath).size > 1_048_576);
+
+  const workspaceResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: "/api/workspaces",
+    payload: {
+      name: "Large Upload Workspace",
+      description: "Archive size limit validation",
+    },
+  });
+  const workspacePayload = workspaceResponse.json() as { workspace: { id: string } };
+
+  await enableProWorkspace(app, workspacePayload.workspace.id);
+
+  const uploadPayload = await uploadGitArchiveSource(
+    app,
+    workspacePayload.workspace.id,
+    largeFixtureArchivePath,
+    "large-upload.tar.gz",
+  );
+  assert.equal(uploadPayload.source.location, "large-upload.tar.gz");
+  assert.ok(uploadPayload.source.uploadObjectKey);
 });
 
 test("hosted API supports queued job cancellation and retry", async t => {

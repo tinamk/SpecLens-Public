@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { PortalMetaList, PortalSectionHeader } from "@speclens/ui";
 import type { GitPullRequestSummary } from "@speclens/contracts";
+import { DataValue } from "./data-visuals";
 
 function buildCodeHref(workspaceId: string, query: {
   sourceId: string;
@@ -116,8 +117,8 @@ export function WorkspaceCodePrPanel(props: {
                     label: "Changed files",
                     value: prItem.changedFiles !== null ? `${prItem.changedFiles} file(s)` : "GitHub did not return a changed-file count",
                   },
-                  { label: "Head ref", value: prItem.headRef },
-                  { label: "Base ref", value: prItem.baseRef },
+                  { label: "Head ref", value: <DataValue value={prItem.headRef} /> },
+                  { label: "Base ref", value: <DataValue value={prItem.baseRef} /> },
                 ]}
               />
               <div className="portal-record-card__actions">

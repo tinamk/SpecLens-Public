@@ -1,6 +1,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { DataChipList, DataCommandList, DataPath, DataValue } from "../../../../../../components/data-visuals";
 import { JobLifecycleActions, JobLogConsole } from "../../../../../../components/portal-actions";
 import {
   ApiResponseError,
@@ -135,20 +136,20 @@ export default async function WorkspaceJobPage({
               items={[
                 { label: "AI task", value: <span data-testid="workspace-runs-job-task">{executionLabel}</span> },
                 ...(envelope.job.agentId
-                  ? [{ label: "AI agent", value: <span data-testid="workspace-runs-job-agent-id">{envelope.job.agentId}</span> }]
+                  ? [{ label: "AI agent", value: <span data-testid="workspace-runs-job-agent-id"><DataValue value={envelope.job.agentId} tone="id" /></span> }]
                   : []),
                 { label: "Job kind", value: <span data-testid="workspace-runs-job-kind">{envelope.job.jobKind}</span> },
                 { label: "Execution", value: <span data-testid="workspace-runs-job-execution">{formatJobExecutionMode(envelope.job)}</span> },
                 ...(envelope.job.claimedRunnerId
-                  ? [{ label: "Worker", value: <span data-testid="workspace-runs-job-worker">{envelope.job.claimedRunnerId}</span> }]
+                  ? [{ label: "Worker", value: <span data-testid="workspace-runs-job-worker"><DataValue value={envelope.job.claimedRunnerId} tone="id" /></span> }]
                   : []),
                 { label: "Runtime", value: <span data-testid="workspace-runs-job-runtime">{envelope.job.runtimeMode}</span> },
-                { label: "Source", value: <span data-testid="workspace-runs-job-source">{envelope.job.sourceLocation}</span> },
+                { label: "Source", value: <span data-testid="workspace-runs-job-source"><DataPath value={envelope.job.sourceLocation} /></span> },
                 ...(envelope.job.companionSourceLocation
-                  ? [{ label: "Companion", value: <span data-testid="workspace-runs-job-companion">{envelope.job.companionSourceLocation}</span> }]
+                  ? [{ label: "Companion", value: <span data-testid="workspace-runs-job-companion"><DataPath value={envelope.job.companionSourceLocation} /></span> }]
                   : []),
                 ...(envelope.job.parentReportId
-                  ? [{ label: "Parent report", value: <span data-testid="workspace-runs-job-parent-report">{envelope.job.parentReportId}</span> }]
+                  ? [{ label: "Parent report", value: <span data-testid="workspace-runs-job-parent-report"><DataValue value={envelope.job.parentReportId} tone="id" /></span> }]
                   : []),
               ]}
             />
@@ -168,7 +169,7 @@ export default async function WorkspaceJobPage({
                 <div className="portal-record-card__header">
                   <div className="portal-record-card__title">
                     <strong>Latest remediation changeset</strong>
-                    <p>{changesetBranchName ?? "Branch not created yet"}</p>
+                    <p><DataValue value={changesetBranchName ?? "Branch not created yet"} /></p>
                   </div>
                   <div className="portal-record-card__meta">
                     <span className="tag tag--info">
@@ -181,17 +182,18 @@ export default async function WorkspaceJobPage({
                 </div>
                 <PortalMetaList
                   items={[
-                    { label: "Branch", value: changesetBranchName ?? "not created" },
-                    { label: "Compare base", value: envelope.job.changeset.baseRef?.trim() ? envelope.job.changeset.baseRef : "No base ref recorded" },
+                    { label: "Branch", value: <DataValue value={changesetBranchName ?? "not created"} /> },
+                    { label: "Compare base", value: <DataValue value={envelope.job.changeset.baseRef?.trim() ? envelope.job.changeset.baseRef : "No base ref recorded"} /> },
                     { label: "Stop reason", value: envelope.job.changeset.stopReason },
                     {
                       label: "Validation commands",
-                      value: envelope.job.changeset.validationCommands.length > 0
-                        ? envelope.job.changeset.validationCommands.join(", ")
-                        : "No validation commands recorded",
+                      value: <DataCommandList commands={envelope.job.changeset.validationCommands} />,
                     },
                   ]}
                 />
+                {envelope.job.changeset.changedFiles.length > 0 ? (
+                  <DataChipList items={envelope.job.changeset.changedFiles} />
+                ) : null}
               </article>
             ) : null}
             <div className="portal-action-bar">
@@ -265,10 +267,10 @@ export default async function WorkspaceJobPage({
               {envelope.artifacts.map((artifact, index) => (
                 <article className="portal-record-card" data-testid={`workspace-runs-job-artifact-${index}`} key={`${artifact.key}:${index}`}>
                   <div className="portal-record-card__header">
-                    <div className="portal-record-card__title">
-                      <strong>{artifact.kind}</strong>
-                      <p>{artifact.key}</p>
-                    </div>
+                  <div className="portal-record-card__title">
+                    <strong>{artifact.kind}</strong>
+                    <p><DataPath value={artifact.key} /></p>
+                  </div>
                     <div className="portal-record-card__meta">
                       <span className="tag tag--neutral">{artifact.kind}</span>
                       <span className="tag tag--info">{artifact.mimeType}</span>

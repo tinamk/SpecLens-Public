@@ -7,7 +7,7 @@ import type { Source } from "@speclens/contracts";
 import type { ObjectStorageConfig } from "@speclens/db";
 import { createHomeTempDirSync } from "@speclens/core";
 import * as gitReviewNamespace from "../apps/api/src/services/git-review";
-import { createCommittedGitFixture, toFileGitUrl } from "./helpers/git-fixtures";
+import { createCommittedGitArchiveFixture, createCommittedGitFixture, toFileGitUrl } from "./helpers/git-fixtures";
 
 const gitReviewModule = ("default" in gitReviewNamespace
   ? gitReviewNamespace.default
@@ -65,6 +65,21 @@ function setTempCacheRoot(t: TestContext): string {
   return cacheRoot;
 }
 
+function setTempStateRoot(t: TestContext): string {
+  const previousStateRoot = process.env.SPECLENS_STATE_ROOT;
+  const stateRoot = createHomeTempDirSync("speclens-git-review-state-");
+  process.env.SPECLENS_STATE_ROOT = stateRoot;
+  t.after(() => {
+    if (previousStateRoot === undefined) {
+      delete process.env.SPECLENS_STATE_ROOT;
+    } else {
+      process.env.SPECLENS_STATE_ROOT = previousStateRoot;
+    }
+    fs.rmSync(stateRoot, { recursive: true, force: true });
+  });
+  return stateRoot;
+}
+
 function createSource(repoPath: string, sourceId: string): Source {
   return {
     id: sourceId,
@@ -77,6 +92,22 @@ function createSource(repoPath: string, sourceId: string): Source {
     verificationError: null,
     githubInstallationId: null,
     uploadObjectKey: null,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function createUploadArchiveSource(location: string, objectKey: string, sourceId: string): Source {
+  return {
+    id: sourceId,
+    workspaceId: "workspace-test",
+    type: "upload-archive",
+    displayName: location,
+    location,
+    visibility: "private",
+    verificationStatus: "verified",
+    verificationError: null,
+    githubInstallationId: null,
+    uploadObjectKey: objectKey,
     createdAt: new Date().toISOString(),
   };
 }
@@ -163,6 +194,25 @@ test("git review rejects missing compare refs instead of returning an empty diff
       return true;
     },
   );
+});
+
+test("git review recognizes prewarmed upload archives after cache metadata is written", async t => {
+  setTempCacheRoot(t);
+  const stateRoot = setTempStateRoot(t);
+  const { archivePath } = createCommittedGitArchiveFixture(fixturePath, "speclens-git-review-upload-archive-");
+  const objectKey = `uploads/workspace-test/${path.basename(archivePath)}`;
+  const objectPath = path.join(stateRoot, "object-storage", objectKey);
+  fs.mkdirSync(path.dirname(objectPath), { recursive: true });
+  fs.copyFileSync(archivePath, objectPath);
+
+  const source = createUploadArchiveSource(path.basename(archivePath), objectKey, "source-upload-archive-cache-marker");
+  await prewarmCodeReviewSource(source, unusedStorageConfig);
+
+  const review = await readCodeReviewFromSource(source, unusedStorageConfig, {
+    requireReadyCache: true,
+  });
+
+  assert.equal(review.tree.some(entry => entry.path === "README.md"), true);
 });
 
 test("git review refreshes missing mirror refs instead of falling back to the cached head", async t => {

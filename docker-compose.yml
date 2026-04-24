@@ -207,6 +207,53 @@ services:
       keycloak-seed:
         condition: service_completed_successfully
 
+  job-dind:
+    image: docker:27-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - dockerd
+      - --host=tcp://0.0.0.0:2375
+      - --tls=false
+    volumes:
+      - job-dind-data:/var/lib/docker
+      - ${RUNNER_HOST_TEMP_ROOT:-./.speclens-workspace/host-temp/runner}:/app/.speclens-workspace/host-temp/runner
+      - ${AI_WORKER_HOST_TEMP_ROOT:-./.speclens-workspace/host-temp/ai-worker}:/app/.speclens-workspace/host-temp/ai-worker
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - DOCKER_HOST=tcp://127.0.0.1:2375 docker info >/dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  runner-sandbox-image-init:
+    image: docker:27-cli
+    working_dir: /workspace
+    environment:
+      DOCKER_HOST: tcp://job-dind:2375
+    command: >
+      sh -lc "docker build -t speclens/analysis-runner:local -f apps/runner/docker/Dockerfile ."
+    volumes:
+      - .:/workspace
+    depends_on:
+      job-dind:
+        condition: service_healthy
+
+  ai-agent-sandbox-image-init:
+    image: docker:27-cli
+    working_dir: /workspace
+    environment:
+      DOCKER_HOST: tcp://job-dind:2375
+    command: >
+      sh -lc "docker build -t speclens/ai-agent-sandbox:local -f apps/ai-worker/docker/agent-sandbox.Dockerfile ."
+    volumes:
+      - .:/workspace
+    depends_on:
+      job-dind:
+        condition: service_healthy
+
   runner:
     build:
       context: .
@@ -220,13 +267,14 @@ services:
       RUNNER_MAX_CONCURRENCY: 2
       RUNNER_HEALTH_PORT: 4510
       CODEX_HOME: /codex-host
+      DOCKER_HOST: tcp://job-dind:2375
       RUNNER_TEMP_ROOT: /app/.speclens-workspace/host-temp/runner
       SANDBOX_IMAGE: speclens/analysis-runner:local
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/speclens
       OBJECT_STORAGE_PROVIDER: s3-compatible
       OBJECT_STORAGE_BUCKET: speclens-artifacts
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
-      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-19000}
       OBJECT_STORAGE_REGION: us-east-1
       OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
       OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
@@ -237,12 +285,15 @@ services:
       - .:/app
       - root-node-modules:/app/node_modules
       - ${HOME}/.codex:/codex-host:ro
-      - /var/run/docker.sock:/var/run/docker.sock
       - ${RUNNER_HOST_TEMP_ROOT:-./.speclens-workspace/host-temp/runner}:/app/.speclens-workspace/host-temp/runner
     depends_on:
       api:
         condition: service_healthy
       minio-init:
+        condition: service_completed_successfully
+      job-dind:
+        condition: service_healthy
+      runner-sandbox-image-init:
         condition: service_completed_successfully
 
   ai-worker:
@@ -261,14 +312,21 @@ services:
       OBJECT_STORAGE_PROVIDER: s3-compatible
       OBJECT_STORAGE_BUCKET: speclens-artifacts
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
-      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-19000}
       OBJECT_STORAGE_REGION: us-east-1
       OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
       OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
       OBJECT_STORAGE_SECRET_ACCESS_KEY: minioadmin
       AI_WORKER_HEALTH_PORT: 4520
+      DOCKER_HOST: tcp://job-dind:2375
       AI_WORKER_MAX_CONCURRENCY: ${LOCAL_AI_WORKER_MAX_CONCURRENCY:-1}
+      AI_WORKER_ROLE_MAX_CONCURRENCY: ${AI_WORKER_ROLE_MAX_CONCURRENCY:-4}
       AI_WORKER_TEMP_ROOT: /app/.speclens-workspace/host-temp/ai-worker
+      AI_WORKER_SANDBOX_IMAGE: speclens/ai-agent-sandbox:local
+      AI_WORKER_SANDBOX_NETWORK: host
+      AI_WORKER_SANDBOX_TIMEOUT_MS: ${AI_WORKER_SANDBOX_TIMEOUT_MS:-3600000}
+      AI_WORKER_SANDBOX_OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      AI_WORKER_CODEX_STREAM_LOGS: ${AI_WORKER_CODEX_STREAM_LOGS:-false}
       AI_WORKER_CODEX_BYPASS_SANDBOX: "false"
       SPECLENS_EXPOSE_E2E_TASKS: ${SPECLENS_EXPOSE_E2E_TASKS:-false}
     ports:
@@ -281,6 +339,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      job-dind:
+        condition: service_healthy
+      ai-agent-sandbox-image-init:
+        condition: service_completed_successfully
       minio-init:
         condition: service_completed_successfully
 
@@ -289,3 +351,4 @@ volumes:
   minio-data:
   root-node-modules:
   next-cache:
+  job-dind-data:

@@ -212,10 +212,68 @@ function collectFiles(rootDir: string): string[] {
   return results.sort();
 }
 
-function buildArtifactReferences(workspace: WorkspaceHandle, jobId: string, runDir: string, generatedPackPath: string): ArtifactReference[] {
+function collectRouteMap(report: AnalysisReport): Array<{ path: string; purpose: string | null; requiresAuth: boolean | null; source: string | null }> {
+  const routes = new Map<string, { path: string; purpose: string | null; requiresAuth: boolean | null; source: string | null }>();
+  for (const section of report.sections) {
+    const candidates = Array.isArray(section.data.navigationTargets)
+      ? section.data.navigationTargets
+      : Array.isArray(section.data.pages)
+        ? section.data.pages
+        : [];
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+        continue;
+      }
+      const record = candidate as Record<string, unknown>;
+      const pathValue = typeof record.path === "string"
+        ? record.path
+        : typeof record.url === "string"
+          ? record.url
+          : null;
+      if (!pathValue) {
+        continue;
+      }
+      routes.set(pathValue, {
+        path: pathValue,
+        purpose: typeof record.purpose === "string" ? record.purpose : null,
+        requiresAuth: typeof record.requiresAuth === "boolean" ? record.requiresAuth : null,
+        source: typeof record.source === "string" ? record.source : section.title,
+      });
+    }
+  }
+  return [...routes.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function writeDerivedGeneratedArtifacts(workspace: WorkspaceHandle, report: AnalysisReport): string[] {
+  const paths: string[] = [];
+  const routeMap = collectRouteMap(report);
+  if (routeMap.length > 0) {
+    const routeMapPath = path.join(workspace.generatedDir, `${report.jobId}.route-map.json`);
+    writeJsonFile(routeMapPath, {
+      schemaVersion: "speclens.route-map.v1",
+      jobId: report.jobId,
+      generatedAt: new Date().toISOString(),
+      routes: routeMap,
+    });
+    paths.push(routeMapPath);
+  }
+  if (report.summary.remediationPacks.length > 0) {
+    const remediationPackPath = path.join(workspace.generatedDir, `${report.jobId}.remediation-pack.json`);
+    writeJsonFile(remediationPackPath, {
+      schemaVersion: "speclens.remediation-pack.v1",
+      jobId: report.jobId,
+      generatedAt: new Date().toISOString(),
+      remediationPacks: report.summary.remediationPacks,
+    });
+    paths.push(remediationPackPath);
+  }
+  return paths;
+}
+
+function buildArtifactReferences(workspace: WorkspaceHandle, jobId: string, runDir: string, generatedArtifactPaths: string[]): ArtifactReference[] {
   const browserDir = path.join(workspace.generatedDir, "browser", jobId);
   const artifactFiles = [
-    generatedPackPath,
+    ...generatedArtifactPaths,
     ...collectFiles(runDir),
     ...collectFiles(browserDir),
   ];
@@ -238,6 +296,9 @@ export function writeRunArtifacts({ workspace, envelope, generatedSpecPack }: Wr
 
   const generatedPackPath = path.join(workspace.generatedDir, `${envelope.job.id}.generated-spec-pack.json`);
   writeJsonFile(generatedPackPath, generatedSpecPack);
+  const generatedArtifactPaths = envelope.report
+    ? [generatedPackPath, ...writeDerivedGeneratedArtifacts(workspace, envelope.report)]
+    : [generatedPackPath];
 
   if (envelope.report) {
     writeJsonFile(path.join(runDir, "report.json"), envelope.report);
@@ -249,10 +310,10 @@ export function writeRunArtifacts({ workspace, envelope, generatedSpecPack }: Wr
     ? {
         ...envelope,
         report: {
-          ...envelope.report,
-          artifacts: buildArtifactReferences(workspace, envelope.job.id, runDir, generatedPackPath),
-        },
-      }
+        ...envelope.report,
+        artifacts: buildArtifactReferences(workspace, envelope.job.id, runDir, generatedArtifactPaths),
+      },
+    }
     : envelope;
 
   if (nextEnvelope.report) {

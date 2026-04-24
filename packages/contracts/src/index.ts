@@ -809,6 +809,39 @@ export const createRemediationTaskInputSchema = z.object({
 });
 export type CreateRemediationTaskInput = z.infer<typeof createRemediationTaskInputSchema>;
 
+export const persistedCodexAuthBindingSchema = z.object({
+  scope: z.enum(["user", "workspace", "global"]),
+  recordId: z.string(),
+});
+export type PersistedCodexAuthBinding = z.infer<typeof persistedCodexAuthBindingSchema>;
+
+export const persistedRemediationMetadataSchema = z.object({
+  reportId: z.string(),
+  sourceId: z.string(),
+  baseRef: z.string().default("HEAD"),
+  selectionMode: remediationSelectionModeSchema.default("auto-priority"),
+  selectedFindingIds: z.array(z.string()).default([]),
+  maxIterations: z.number().int().min(1).max(2).default(2),
+  outputMode: remediationOutputModeSchema.default("changeset"),
+  publishRemote: z.boolean().default(false),
+  changeset: changesetSummarySchema.nullable().default(null),
+}).superRefine((value, ctx) => {
+  if (value.selectionMode === "selected-findings" && value.selectedFindingIds.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "selectedFindingIds must be provided when selectionMode is selected-findings.",
+      path: ["selectedFindingIds"],
+    });
+  }
+});
+export type PersistedRemediationMetadata = z.infer<typeof persistedRemediationMetadataSchema>;
+
+export const jobExecutionMetadataSchema = z.object({
+  remediation: persistedRemediationMetadataSchema.nullable().optional(),
+  codexAuth: persistedCodexAuthBindingSchema.nullable().optional(),
+});
+export type JobExecutionMetadata = z.infer<typeof jobExecutionMetadataSchema>;
+
 export const billingCheckoutInputSchema = z.object({
   workspaceId: z.string().optional(),
   plan: z.literal("pro").default("pro"),
@@ -970,6 +1003,39 @@ export const aiAgentSchema = z.object({
   updatedAt: z.string(),
 });
 export type AiAgent = z.infer<typeof aiAgentSchema>;
+
+export const aiAgentExecutionPlanSkillSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  instructions: z.string(),
+  toolCapabilities: z.array(aiToolCapabilitySchema).default([]),
+  order: z.number().int().nonnegative().default(0),
+});
+export type AiAgentExecutionPlanSkill = z.infer<typeof aiAgentExecutionPlanSkillSchema>;
+
+export const aiAgentExecutionPlanRoleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable().default(null),
+  prompt: z.string(),
+  order: z.number().int().nonnegative().default(0),
+  consoleVisibility: aiRoleConsoleVisibilitySchema.default("normal"),
+  executorKind: aiRoleExecutorKindSchema.default("codex"),
+  nativeExecutorId: z.string().nullable().default(null),
+  dependsOnRoleIds: z.array(roleIdSchema).default([]),
+  skills: z.array(aiAgentExecutionPlanSkillSchema).default([]),
+});
+export type AiAgentExecutionPlanRole = z.infer<typeof aiAgentExecutionPlanRoleSchema>;
+
+export const aiAgentExecutionPlanSchema = z.object({
+  agent: z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().default(null),
+  }),
+  roles: z.array(aiAgentExecutionPlanRoleSchema).default([]),
+});
+export type AiAgentExecutionPlan = z.infer<typeof aiAgentExecutionPlanSchema>;
 
 export const createAiSkillInputSchema = z.object({
   name: z.string().min(2),
@@ -1290,3 +1356,35 @@ export const sandboxSecretSchema = z.object({
   name: z.string().optional(),
 });
 export type SandboxSecret = z.infer<typeof sandboxSecretSchema>;
+
+export const agentSandboxExecutionSnapshotSchema = z.object({
+  job: analysisJobSchema,
+  workspace: workspaceSchema,
+  source: sourceSchema,
+  companionSource: sourceSchema.nullable().default(null),
+  parentReport: analysisReportSchema.nullable().default(null),
+  metadata: jobExecutionMetadataSchema.default({}),
+  secrets: z.array(sandboxSecretSchema).default([]),
+  plan: aiAgentExecutionPlanSchema,
+  roleDefinitions: z.array(roleDefinitionSchema).default([]),
+  learnables: z.array(learnableSchema).default([]),
+  codexAuthPath: z.string().nullable().default(null),
+  outputRoot: z.string(),
+  timeoutMs: z.number().int().positive().nullable().default(null),
+});
+export type AgentSandboxExecutionSnapshot = z.infer<typeof agentSandboxExecutionSnapshotSchema>;
+
+export const agentSandboxRequestSchema = z.object({
+  schemaVersion: z.literal("speclens.agent-sandbox.v1"),
+  execution: agentSandboxExecutionSnapshotSchema,
+});
+export type AgentSandboxRequest = z.infer<typeof agentSandboxRequestSchema>;
+
+export const agentSandboxResultSchema = z.object({
+  schemaVersion: z.literal("speclens.agent-sandbox-result.v1"),
+  status: z.enum(["succeeded", "failed", "cancelled"]),
+  failureReason: z.string().nullable().default(null),
+  envelope: jobEnvelopeSchema,
+  learnables: z.array(learnableSchema).default([]),
+});
+export type AgentSandboxResult = z.infer<typeof agentSandboxResultSchema>;

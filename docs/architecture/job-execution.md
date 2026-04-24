@@ -12,7 +12,8 @@ flowchart TD
   Dispatch[Queue dispatch loop]
   PgBoss[(pg-boss queues)]
   Runner[apps/runner]
-  AiWorker[apps/ai-worker]
+  AiWorker[apps/ai-worker controller]
+  AgentSandbox[agent job sandbox]
   Report[(AnalysisReport)]
   Logs[(AnalysisJobLog)]
 
@@ -22,8 +23,9 @@ flowchart TD
   Dispatch --> PgBoss
   PgBoss --> Runner
   PgBoss --> AiWorker
+  AiWorker --> AgentSandbox
   Runner --> Repo
-  AiWorker --> Repo
+  AgentSandbox --> Repo
   Runner --> Logs
   AiWorker --> Logs
   Runner --> Report
@@ -63,10 +65,10 @@ Instead it:
 4. publishes a queue message containing `jobId`
 5. lets the correct worker claim and execute it
 
-For unified-agent hosted jobs, execution now has two phases:
+For unified-agent hosted jobs, execution now has controller and sandbox phases:
 
-1. Codex-driven role synthesis
-2. worker-side runtime and browser execution based on the canonical handoff
+1. `apps/ai-worker` claims the queued job, resolves the agent plan, stages auth, starts the job sandbox, streams logs, and finalizes durable state.
+2. The one-shot hosted agent sandbox materializes source, runs Codex/native roles, starts runtime processes, runs Playwright/browser checks, writes artifacts, and emits a result bundle.
 
 For universal audit bundles, the persisted report also includes:
 
@@ -76,7 +78,7 @@ For universal audit bundles, the persisted report also includes:
 - an artifact audit against expected report and browser outputs
 - a release-gate decision with confidence and blocking findings
 
-If an AI-agent job fails or is cancelled before a report is available, the worker still replays its duplicate-safe in-memory log timeline into finalization and uploads `jobs/{jobId}/agent-failure.json` as a `runtime-log` artifact. The diagnostic artifact contains the status, failure reason, execution steps, and logs needed to review the interrupted role chain.
+If an AI-agent job fails or is cancelled before a report is available, the sandbox writes `agent-failure.json` into the mounted output root and the controller mirrors it as a `runtime-log` artifact. The diagnostic artifact contains the status, failure reason, execution steps, and logs needed to review the interrupted role chain.
 
 ## Paired Sources
 

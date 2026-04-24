@@ -73,6 +73,7 @@ import {
   listAiSkills,
   listJobLogsAfterWithVisibility,
   listRemediationJobsForSourceForUser,
+  getWorkspaceConsoleForUser,
   getWorkspaceDetailForUser,
   listArtifactsForJobForUser,
   listJobsPageForUser,
@@ -422,7 +423,10 @@ function isFinalStatus(status: string): boolean {
   return status === "succeeded" || status === "failed" || status === "cancelled";
 }
 
-function resolveLogVisibility(value: unknown): "default" | "verbose" {
+function resolveLogVisibility(value: unknown): "default" | "verbose" | "all" {
+  if (value === "all") {
+    return "all";
+  }
   return value === "verbose" ? "verbose" : "default";
 }
 
@@ -867,9 +871,9 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
   app.get("/api/workspaces/:workspaceId", async request => {
     const user = await currentUser(request);
     const workspaceId = (request.params as { workspaceId: string }).workspaceId;
-    const detail = await getWorkspaceDetailForUser(workspaceId, user.id);
-    schedulePendingSourceVerifications(detail.sources, workspaceId, user.id);
-    return detail;
+    const consoleDetail = await getWorkspaceConsoleForUser(workspaceId, user.id);
+    schedulePendingSourceVerifications(consoleDetail.sources, workspaceId, user.id);
+    return consoleDetail;
   });
 
   app.get("/api/workspaces/:workspaceId/members", async request => {
@@ -1074,25 +1078,40 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const resolvedRef = requestedRef ?? pullRequestDetail?.headRef ?? null;
     let review: Awaited<ReturnType<typeof readCodeReviewFromSource>>;
     let usingUnavailableRequestedRefFallback = false;
+    const storageConfig = getConfig();
+    const readCodeReview = async (options: {
+      ref: string | null;
+      path: string | null;
+      compare?: string | null;
+    }) => {
+      try {
+        return await readCodeReviewFromSource(source, storageConfig, {
+          ...options,
+          requireReadyCache: true,
+        });
+      } catch (error) {
+        if (!(error instanceof CodeReviewCacheNotReadyError)) {
+          throw error;
+        }
+        return await readCodeReviewFromSource(source, storageConfig, {
+          ...options,
+          requireReadyCache: false,
+        });
+      }
+    };
     try {
-      review = await readCodeReviewFromSource(source, getConfig(), {
+      review = await readCodeReview({
         ref: resolvedRef,
         path: requestedPath,
         compare: resolvedCompareRef,
-        requireReadyCache: true,
       });
     } catch (error) {
-      if (error instanceof CodeReviewCacheNotReadyError) {
-        void scheduleCodeReviewPrewarm(source, getConfig()).catch(() => undefined);
-        throw statusError(409, error.message);
-      }
       if (error instanceof CodeReviewReferenceNotFoundError) {
         if (resolvedRef && resolvedCompareRef) {
           try {
-            review = await readCodeReviewFromSource(source, getConfig(), {
+            review = await readCodeReview({
               ref: resolvedCompareRef,
               path: requestedPath,
-              requireReadyCache: true,
             });
             usingUnavailableRequestedRefFallback = true;
           } catch (fallbackError) {
@@ -1490,9 +1509,6 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const user = await currentUser(request);
     const { jobId, artifactIndex } = request.params as { jobId: string; artifactIndex: string };
     const artifact = await getArtifactForJobForUser(jobId, Number.parseInt(artifactIndex, 10), user.id);
-    if (artifact.signedUrl) {
-      return reply.redirect(artifact.signedUrl);
-    }
     const config = getConfig();
     const absolutePath = resolveObjectStoragePath(config, artifact.key);
     const tempDownloadPath = path.resolve(
@@ -1548,8 +1564,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         },
       });
       const artifacts = await listArtifactsForJobForUser(report.jobId, user.id);
-      const downloadUrl = persistedArtifact.signedUrl
-        ?? durableArtifactHelpers.buildJobArtifactProxyDownloadUrl(report.jobId, persistedArtifact.id, artifacts);
+      const downloadUrl = durableArtifactHelpers.buildJobArtifactProxyDownloadUrl(report.jobId, persistedArtifact.id, artifacts);
       return reportExportResponseSchema.parse({
         artifact: {
           id: persistedArtifact.id,
@@ -1931,7 +1946,7 @@ async function streamLogs(
   reply: FastifyReply,
   userId: string,
   jobId: string,
-  visibility: "default" | "verbose",
+  visibility: "default" | "verbose" | "all",
 ) {
   const initialEnvelope = await getJobEnvelopeForUser(jobId, userId, { logVisibility: visibility });
 

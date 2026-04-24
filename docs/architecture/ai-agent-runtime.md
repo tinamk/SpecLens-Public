@@ -4,14 +4,15 @@ The AI worker is the agent-driven execution plane for SpecLens.
 
 ## Purpose
 
-`apps/ai-worker` runs ordered role-based analysis steps using Codex CLI, validates the canonical runtime handoff, executes that handoff when possible, and persists the resulting role-based report plus browser/runtime artifacts.
+`apps/ai-worker` is the long-lived controller for hosted agent jobs. It claims `unified-agent` queue work, builds an immutable execution snapshot, launches a job-scoped Docker sandbox, streams logs, collects the result bundle, and persists the resulting report, changeset, logs, and artifacts.
 
 ## Execution Shape
 
 ```mermaid
 flowchart TD
   Job[AnalysisJob unified-agent]
-  Worker[apps/ai-worker]
+  Worker[apps/ai-worker controller]
+  Sandbox[Job-scoped Docker sandbox]
   Plan[AiAgent + AiRole + AiSkill plan]
   Source[Materialized repository]
   Auth[Staged Codex auth.json]
@@ -26,17 +27,21 @@ flowchart TD
 
   Job --> Worker
   Worker --> Plan
-  Worker --> Source
   Worker --> Auth
-  Worker --> Role1
-  Worker --> RoleN
+  Worker --> Sandbox
+  Plan --> Sandbox
+  Auth --> Sandbox
+  Sandbox --> Source
+  Sandbox --> Role1
+  Sandbox --> RoleN
   Role1 --> Codex
   RoleN --> Codex
   Codex --> Output
-  Output --> Worker
-  Worker --> Execute
+  Output --> Sandbox
+  Sandbox --> Execute
   Execute --> Artifacts
-  Worker --> Report
+  Sandbox --> Report
+  Report --> Worker
   Worker --> Learnables
 ```
 
@@ -48,15 +53,17 @@ Each agent run:
 2. loads the selected `AiAgent`
 3. resolves its ordered `AiRole` definitions
 4. expands linked `AiSkill` instructions and tool capability hints
-5. materializes the repository source into a temp workspace, optionally bundling a companion source alongside it
-6. stages Codex auth from persisted OAuth tokens
-7. executes each role in order
-8. validates the `Standardized JSON handoff` emitted by the universal audit agent
-9. executes documented install/start/browser steps from that handoff when they are concrete enough
-10. captures runtime logs, browser screenshots, storage state, traces, and any copied Playwright artifacts
-11. normalizes role output plus execution evidence into sections/findings, execution coverage, remediation packs, artifact audits, and a release gate
-12. persists the final role-based report
-13. derives and stores learnables for future runs
+5. stages Codex auth from persisted OAuth tokens into the per-job temp root
+6. builds an internal sandbox request containing the claimed job, resolved plan, role/skill definitions, source metadata, secrets, learnables, auth path, output root, and timeout policy
+7. launches `speclens/ai-agent-sandbox:local` through the shared nested Docker daemon
+8. materializes the repository source inside the sandbox, optionally bundling a companion source alongside it
+9. executes each role in order inside the sandbox
+10. validates the `Standardized JSON handoff` emitted by the universal audit agent
+11. executes documented install/start/browser steps from that handoff when they are concrete enough
+12. captures runtime logs, browser screenshots, storage state, traces, and any copied Playwright artifacts inside the sandbox output root
+13. normalizes role output plus execution evidence into sections/findings, execution coverage, remediation packs, artifact audits, and a release gate
+14. writes a structured sandbox result bundle
+15. has the controller persist the final report, changeset, artifacts, diagnostics, and learnables
 
 ## Universal Audit Bundles
 
@@ -106,6 +113,14 @@ When a paired source run is used, the materialized workspace exposes:
 - reports carry structured audit metadata including `auditBundleId`, categorized findings, execution coverage, remediation packs, artifact expectations, and a release-gate decision
 - execution artifacts are written into the hosted artifact pipeline so the portal can audit what the worker actually observed
 - logs are written continuously for live job visibility
+- all repository access, Codex execution, shell commands, app/runtime startup, and Playwright work happen inside a job-scoped Docker sandbox
+- roles execute through an explicit dependency graph inside the sandbox; independent roles may run concurrently up to `AI_WORKER_ROLE_MAX_CONCURRENCY`, while report sections and findings remain ordered by the agent role list
+- runtime/browser/Playwright roles get synthetic graph ordering edges so parallelism does not create dev-server, port, or artifact races
+- `AI_WORKER_CODEX_BYPASS_SANDBOX=true` is injected only into the job sandbox so Codex can rely on the outer container boundary
+
+The April 24, 2026 SpecLens self-audit baseline completed the full 22-role standard browser job in 21m16s with `AI_WORKER_ROLE_MAX_CONCURRENCY=4`. The hosted run used safe Playwright verification (`npm run e2e:hosted:local -- --list`), produced ready sandbox evidence, downloaded 57 artifacts, and kept `artifact-auditor` deterministic/native at about 1s instead of the prior 3m59s Codex baseline. The remaining slow roles were `remediation-planner`, `navigation-qa-planner`, `ux-friction-reviewer`, `component-cartographer`, and `code-health-reviewer`; future speed work should target those roles before increasing concurrency.
+
+Shell command execution runs in a killable process group. Timeout handling must terminate the full process tree, not only the shell wrapper, so nested Playwright/npm descendants cannot keep stdout open after timeout.
 
 ## Separation From Runner
 
@@ -114,6 +129,9 @@ The AI worker is the active hosted execution runtime.
 - hosted analysis and remediation jobs are queued onto the unified agent path
 - `runner` remains an isolated deterministic executor surface and historical execution dependency, not a second hosted submission model
 - the active hosted product does not expose dual `core` versus `agent` job submission semantics
+- local compose and the single-node deploy use a shared `job-dind` daemon for runner and hosted agent sandboxes
+- neither `runner` nor `ai-worker` mounts `/var/run/docker.sock`
+- `ai-worker` remains the controller; repo work runs inside the one-shot hosted agent sandbox image
 
 ## AI Control Plane Entities
 
@@ -129,7 +147,7 @@ The AI worker is the active hosted execution runtime.
 
 ## Current Operational Note
 
-The worker currently depends on Codex CLI runtime behavior and local token staging, so changes to:
+The hosted agent sandbox image currently depends on Codex CLI runtime behavior, Playwright browser availability, Docker CLI availability, and local token staging, so changes to:
 
 - Codex auth handling
 - output normalization

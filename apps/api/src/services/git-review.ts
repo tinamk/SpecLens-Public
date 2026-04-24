@@ -347,7 +347,11 @@ async function resolveGitTransport(source: Source): Promise<{
 }
 
 function collapseSingleRoot(extractedDir: string): string {
-  const entries = fs.readdirSync(extractedDir, { withFileTypes: true }).filter(entry => entry.name !== "__MACOSX");
+  const entries = fs.readdirSync(extractedDir, { withFileTypes: true }).filter(entry =>
+    entry.name !== "__MACOSX"
+    && entry.name !== path.basename(cacheAccessMarkerPath(extractedDir))
+    && entry.name !== path.basename(cacheFetchMarkerPath(extractedDir)),
+  );
   if (entries.length === 1 && entries[0]?.isDirectory()) {
     return path.join(extractedDir, entries[0].name);
   }

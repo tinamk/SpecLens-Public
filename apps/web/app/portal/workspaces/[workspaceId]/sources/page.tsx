@@ -1,6 +1,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { DataPath } from "../../../../../components/data-visuals";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
 import { CreateSourceForm, ManageSourceActions, SourceVerificationAction } from "../../../../../components/portal-actions";
 import {
@@ -191,7 +192,7 @@ export default async function WorkspaceSourcesPage({
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
                         <strong>{source.displayName}</strong>
-                        <p>{source.location}</p>
+                        <p><DataPath value={source.location} /></p>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className={getSourceVerificationTagClass(source.verificationStatus)}>{source.verificationStatus}</span>

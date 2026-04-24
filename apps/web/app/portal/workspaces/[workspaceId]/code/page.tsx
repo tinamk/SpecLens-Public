@@ -1,6 +1,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { DataChipList, DataCommandList, DataPath, DataValue } from "../../../../../components/data-visuals";
 import { WorkspaceCodePrPanel } from "../../../../../components/workspace-code-pr-panel";
 import { ApiResponseError, getCurrentUser, getWorkspaceCodeReview, getWorkspaceConsole } from "../../../../../lib/api";
 import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
@@ -32,6 +33,14 @@ function buildCodeHref(workspaceId: string, query: {
   if (query.findingId) params.set("findingId", query.findingId);
   if (query.pr) params.set("pr", query.pr);
   return `/portal/workspaces/${workspaceId}/code?${params.toString()}`;
+}
+
+function toStableId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-");
+}
+
+function getFindingDomId(findingId: string, index: number): string {
+  return `${toStableId(findingId)}-${index + 1}`;
 }
 
 export default async function WorkspaceCodePage({
@@ -103,7 +112,7 @@ export default async function WorkspaceCodePage({
                     href={buildCodeHref(workspaceId, { sourceId: source.id }) as Route}
                     title={source.displayName}
                     eyebrow={formatSourceType(source.type)}
-                    description={source.location}
+                    description={<DataPath value={source.location} />}
                     testId={`workspace-code-source-${source.id}`}
                     tone="info"
                   />
@@ -169,7 +178,7 @@ export default async function WorkspaceCodePage({
           <article className="portal-stat" data-testid="workspace-code-stat-refs">
             <span className="portal-stat__label">Refs</span>
             <span className="portal-stat__value">{review.refs.length}</span>
-            <p>{review.compareRef ? `${review.compareRef} vs ${review.selectedRef}` : review.selectedRef}</p>
+            <p>{review.compareRef ? <DataValue value={`${review.compareRef} vs ${review.selectedRef}`} /> : <DataValue value={review.selectedRef} />}</p>
           </article>
           <article className="portal-stat" data-testid="workspace-code-stat-tree">
             <span className="portal-stat__label">Entries</span>
@@ -199,7 +208,7 @@ export default async function WorkspaceCodePage({
                   href={buildCodeHref(workspaceId, { sourceId: source.id }) as Route}
                   title={source.displayName}
                   eyebrow={formatSourceType(source.type)}
-                  description={source.location}
+                  description={<DataPath value={source.location} />}
                   active={source.id === review.source.id}
                   testId={`workspace-code-source-${source.id}`}
                   tone="info"
@@ -214,9 +223,9 @@ export default async function WorkspaceCodePage({
             />
             <PortalMetaList
               items={[
-                { label: "Selected ref", value: review.selectedRef },
-                ...(review.compareRef ? [{ label: "Diff base", value: review.compareRef }] : []),
-                ...(review.activeReportId ? [{ label: "Report context", value: review.activeReportId }] : []),
+                { label: "Selected ref", value: <DataValue value={review.selectedRef} /> },
+                ...(review.compareRef ? [{ label: "Diff base", value: <DataValue value={review.compareRef} /> }] : []),
+                ...(review.activeReportId ? [{ label: "Report context", value: <DataValue value={review.activeReportId} tone="id" /> }] : []),
               ]}
             />
             <PortalLinkGrid>
@@ -230,11 +239,11 @@ export default async function WorkspaceCodePage({
                     reportId: review.activeReportId,
                     findingId: review.activeFindingId,
                   }) as Route}
-                  title={gitRef.name}
+                  title={<DataValue value={gitRef.name} />}
                   eyebrow={gitRef.isHead ? "head ref" : "available ref"}
                   {...(review.compareRef === gitRef.name ? { description: "current diff base" } : {})}
                   active={gitRef.name === review.selectedRef}
-                  testId={`workspace-code-ref-${gitRef.name.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
+                  testId={`workspace-code-ref-${toStableId(gitRef.name)}`}
                   tone={gitRef.name === review.selectedRef ? "success" : "neutral"}
                 />
               ))}
@@ -249,7 +258,7 @@ export default async function WorkspaceCodePage({
             <PortalMetaList
               items={[
                 { label: "Mode", value: canMutate ? "Owner" : "read-only" },
-                ...(review.selectedPath ? [{ label: "Selected path", value: review.selectedPath }] : []),
+                ...(review.selectedPath ? [{ label: "Selected path", value: <DataPath value={review.selectedPath} /> }] : []),
               ]}
             />
           </article>
@@ -273,7 +282,7 @@ export default async function WorkspaceCodePage({
                     reportId: review.activeReportId,
                     findingId: review.activeFindingId,
                   }) as Route}
-                  title={entry.path}
+                  title={<DataPath value={entry.path} />}
                   eyebrow={entry.kind === "directory" ? "directory" : "file"}
                   {...(entry.changed && entry.hasFindings
                     ? { description: "changed · has findings" }
@@ -283,7 +292,7 @@ export default async function WorkspaceCodePage({
                         ? { description: "has findings" }
                         : {})}
                   active={entry.path === review.selectedPath}
-                  testId={`workspace-code-tree-entry-${entry.path.replace(/[^a-zA-Z0-9_-]+/g, "-")}`}
+                  testId={`workspace-code-tree-entry-${toStableId(entry.path)}`}
                   tone={entry.hasFindings ? "warning" : entry.changed ? "info" : "neutral"}
                 />
               ))}
@@ -297,7 +306,7 @@ export default async function WorkspaceCodePage({
               badgeClassName="tag tag--success"
               title={review.selectedPath ?? "Select a file to inspect"}
             />
-            {review.compareRef ? <p data-testid="workspace-code-diff-header"><strong>Diff:</strong> {review.compareRef} {"->"} {review.selectedRef}</p> : null}
+            {review.compareRef ? <p data-testid="workspace-code-diff-header"><strong>Diff:</strong> <DataValue value={review.compareRef} /> {"->"} <DataValue value={review.selectedRef} /></p> : null}
             {review.diff ? <pre className="data-preview" data-testid="workspace-code-diff">{review.diff}</pre> : null}
             {!review.diff && review.fileContent ? <pre className="data-preview" data-testid="workspace-code-file">{review.fileContent}</pre> : null}
             {!review.diff && !review.fileContent ? <p className="subtle-note">Select a file or compare a PR to inspect code here.</p> : null}
@@ -331,7 +340,7 @@ export default async function WorkspaceCodePage({
                           branchName: changeset.branchName,
                           pullInstructions: changeset.pullInstructions,
                         }) ?? "No branch created"}</strong>
-                        <p>Run {changeset.jobId.slice(0, 8)}</p>
+                        <p>Run <DataValue value={changeset.jobId} tone="id" /></p>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className={changeset.validationPassed ? "tag tag--success" : "tag tag--warning"}>
@@ -344,7 +353,7 @@ export default async function WorkspaceCodePage({
                       items={[
                         { label: "Changed files", value: changeset.changedFiles.length },
                         ...(changeset.validationCommands.length > 0
-                          ? [{ label: "Validation", value: changeset.validationCommands.join(", ") }]
+                          ? [{ label: "Validation", value: <DataCommandList commands={changeset.validationCommands} /> }]
                           : []),
                       ]}
                     />
@@ -365,15 +374,15 @@ export default async function WorkspaceCodePage({
             />
             <PortalMetaList
               items={[
-                { label: "Active report", value: review.activeReportId ?? "none selected" },
+                { label: "Active report", value: review.activeReportId ? <DataValue value={review.activeReportId} tone="id" /> : "none selected" },
                 { label: "Remediation packs", value: review.remediationPacks.length },
                 { label: "Fix handoff entries", value: review.fixHandoff?.entries.length ?? 0 },
               ]}
             />
             {findings.length > 0 ? (
               <div className="portal-record-grid">
-                {findings.map(finding => (
-                  <article className="portal-record-card" data-testid={`workspace-code-finding-${finding.id}`} key={finding.id}>
+                {findings.map((finding, index) => (
+                  <article className="portal-record-card" data-testid={`workspace-code-finding-${getFindingDomId(finding.id, index)}`} key={`${finding.id}:${index}`}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
                         <strong>{finding.title}</strong>
@@ -384,9 +393,10 @@ export default async function WorkspaceCodePage({
                           {finding.severity}
                         </span>
                         <span className="tag tag--neutral">{finding.paths.length} path{finding.paths.length === 1 ? "" : "s"}</span>
-                      </div>
-                    </div>
-                    {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
+	                      </div>
+	                    </div>
+	                    {finding.paths.length > 0 ? <DataChipList items={finding.paths} /> : null}
+	                    {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
                     <div className="portal-record-card__actions">
                       <Link
                         className="button-ghost"
@@ -414,8 +424,8 @@ export default async function WorkspaceCodePage({
               <>
                 <p><strong>Unattributed findings:</strong> {unattributedFindings.length}</p>
                 <div className="portal-record-grid">
-                  {unattributedFindings.map(finding => (
-                    <article className="portal-record-card" data-testid={`workspace-code-unattributed-finding-${finding.id}`} key={finding.id}>
+                  {unattributedFindings.map((finding, index) => (
+                    <article className="portal-record-card" data-testid={`workspace-code-unattributed-finding-${getFindingDomId(finding.id, index)}`} key={`${finding.id}:${index}`}>
                       <div className="portal-record-card__header">
                         <div className="portal-record-card__title">
                           <strong>{finding.title}</strong>
@@ -426,9 +436,10 @@ export default async function WorkspaceCodePage({
                             {finding.severity}
                           </span>
                           <span className="tag tag--neutral">source attribution pending</span>
-                        </div>
-                      </div>
-                      {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
+	                        </div>
+	                      </div>
+	                      {finding.paths.length > 0 ? <DataChipList items={finding.paths} /> : null}
+	                      {finding.id === review.activeFindingId ? <p className="subtle-note">Focused finding</p> : null}
                       <div className="portal-record-card__actions">
                         <Link
                           className="button-ghost"
@@ -457,7 +468,7 @@ export default async function WorkspaceCodePage({
       </PortalShell>
     );
   } catch (error) {
-    if (error instanceof ApiResponseError && (error.status === 400 || error.status === 403 || error.status === 404 || error.status === 409)) {
+    if (error instanceof ApiResponseError && (error.status === 400 || error.status === 403 || error.status === 404)) {
       const retryHref = (() => {
         const sourceId = typeof query.sourceId === "string" ? query.sourceId : null;
         if (!sourceId) {
@@ -477,13 +488,11 @@ export default async function WorkspaceCodePage({
         <PortalShell
           eyebrow="Workspace code"
           title={
-            error.status === 409
-              ? "Code review warming"
-              : error.status === 400
-                ? "Code review unavailable"
-                : error.status === 404
-                  ? "Code review target not found"
-                  : "Access denied"
+            error.status === 400
+              ? "Code review unavailable"
+              : error.status === 404
+                ? "Code review target not found"
+                : "Access denied"
           }
           pageTestId="workspace-code-access-denied-page"
           primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
@@ -492,20 +501,16 @@ export default async function WorkspaceCodePage({
           <PortalNoticePanel
             actions={(
               <>
-                {error.status === 409 ? (
-                  <Link className="button-secondary" href={retryHref as Route}>Retry code review</Link>
-                ) : null}
-                <Link className={error.status === 409 ? "button-ghost" : "button-secondary"} href={`/portal/workspaces/${workspaceId}` as Route}>
+                <Link className="button-secondary" href={retryHref as Route}>Retry code review</Link>
+                <Link className="button-ghost" href={`/portal/workspaces/${workspaceId}` as Route}>
                   Back to workspace
                 </Link>
               </>
             )}
-            badgeClassName={error.status === 409 ? "tag tag--info" : error.status === 400 || error.status === 404 ? "tag tag--warning" : "tag tag--warning"}
-            badgeLabel={error.status === 409 ? "Warming" : error.status === 400 || error.status === 404 ? "Unavailable" : "Restricted"}
+            badgeClassName={error.status === 400 || error.status === 404 ? "tag tag--warning" : "tag tag--warning"}
+            badgeLabel={error.status === 400 || error.status === 404 ? "Unavailable" : "Restricted"}
             description={
-              error.status === 409
-                ? error.message
-                : error.status === 400
+              error.status === 400
                 ? error.message
                 : error.status === 404
                   ? "The requested target is unavailable."
@@ -513,13 +518,11 @@ export default async function WorkspaceCodePage({
             }
             descriptionTestId="workspace-code-access-denied"
             title={
-              error.status === 409
-                ? "Refresh code review"
-                : error.status === 400
-                  ? "Cannot open target"
-                  : error.status === 404
-                    ? "Target not found"
-                    : "Access denied"
+              error.status === 400
+                ? "Cannot open target"
+                : error.status === 404
+                  ? "Target not found"
+                  : "Access denied"
             }
           />
         </PortalShell>

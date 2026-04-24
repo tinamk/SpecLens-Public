@@ -161,6 +161,10 @@ function buildRuntimeContract(context: BrowserAnalysisContext): RuntimeContract 
   const baseUrl = `http://127.0.0.1:${port}`;
   const candidates = [
     "speclens:start",
+    "dev:web",
+    "web:dev",
+    "web:start",
+    "start:web",
     "start",
     "preview",
     "dev",
@@ -585,7 +589,7 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
         "browser-self-check",
         "high",
         "Browser runtime boot command could not be resolved",
-        "SpecLens could not find a runnable script such as speclens:start, start, preview, or dev for hosted browser analysis.",
+        "SpecLens could not find a runnable script such as speclens:start, dev:web, web:start, start, preview, or dev for hosted browser analysis.",
         "Add a bootable app script or provide a preset-specific runtime contract.",
       ));
       sections.push(createSection(
@@ -594,7 +598,7 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
         "planned",
         "The repository could not be booted for browser analysis because no supported runtime script was found.",
         {
-          expectedScripts: ["speclens:start", "start", "preview", "dev"],
+          expectedScripts: ["speclens:start", "dev:web", "web:dev", "web:start", "start:web", "start", "preview", "dev"],
         },
       ));
     }
@@ -694,16 +698,18 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
       ignoreHTTPSErrors: true,
       ...contextOptions,
     });
+    const tracePath = path.join(artifactsDir, "browser-trace.zip");
+    await browserContext.tracing.start({ screenshots: true, snapshots: true });
     const page = await browserContext.newPage();
     const credentials = chooseCredentialSecret(context.secrets);
     const authenticated = await attemptCredentialLogin(page, runtimeContract.baseUrl, credentials);
     if (authenticated) {
       logs.push(createLog(context.jobId, "auth", "Credential-backed login succeeded for browser analysis."));
-      const savedStatePath = path.join(artifactsDir, "captured-storage-state.json");
-      await browserContext.storageState({ path: savedStatePath });
     } else if (credentials) {
       logs.push(createLog(context.jobId, "auth", "Credential-backed login did not complete; continuing with anonymous coverage.", "warn"));
     }
+    const capturedStorageStatePath = path.join(artifactsDir, "captured-storage-state.json");
+    await browserContext.storageState({ path: capturedStorageStatePath }).catch(() => undefined);
 
     const pages: BrowserPageRecord[] = [];
     const interactions: BrowserInteractionRecord[] = [];
@@ -870,6 +876,7 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
       }
     }
 
+    await browserContext.tracing.stop({ path: tracePath }).catch(() => undefined);
     await browser.close();
 
     const visualSummary = browserRoles.includes("visual-inspection") && pages.length > 0 && reserveAiCall("visual-inspection")
@@ -950,6 +957,8 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
           baseUrl: runtimeContract.baseUrl,
           scriptName: runtimeContract.scriptName,
           authenticated,
+          tracePath: toRelativeArtifact(context.workspace, tracePath),
+          capturedStorageStatePath: toRelativeArtifact(context.workspace, capturedStorageStatePath),
           pages,
         },
       ));

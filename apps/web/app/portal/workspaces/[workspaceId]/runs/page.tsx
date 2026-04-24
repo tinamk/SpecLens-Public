@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { QueueAnalysisForm } from "../../../../../components/portal-actions";
 import { PaginationLinks } from "../../../../../components/portal-pagination";
+import { DataPath } from "../../../../../components/data-visuals";
 import {
   ApiResponseError,
   getCurrentUser,
@@ -66,9 +67,9 @@ export default async function WorkspaceRunsPage({
       || !isWorkspaceScopedEntityPage(workspaceId, secrets)) {
       throw new ApiResponseError(404, `Workspace runs payload does not belong to workspace ${workspaceId}.`);
     }
-    const activeRuns = workspaceConsole.jobs.filter(entry => ["pending", "queued", "running"].includes(entry.job.status)).length;
-    const completedRuns = workspaceConsole.jobs.filter(entry => entry.job.status === "succeeded").length;
-    const reportBackedRuns = workspaceConsole.jobs.filter(entry => entry.report != null).length;
+    const activeRuns = workspaceConsole.stats.activeJobs;
+    const completedRuns = workspaceConsole.stats.completedJobs;
+    const reportBackedRuns = workspaceConsole.stats.reportBackedJobs;
 
     return (
       <PortalShell
@@ -242,7 +243,7 @@ export default async function WorkspaceRunsPage({
                   <div className="portal-record-card__header">
                     <div className="portal-record-card__title">
                       <strong>{formatJobLabel(job.job, tasks)}</strong>
-                      <p>{job.job.sourceLocation}</p>
+                      <p><DataPath value={job.job.sourceLocation} /></p>
                     </div>
                     <div className="portal-record-card__meta">
                       <span className={getJobStatusTagClass(job.job.status)}>{job.job.status}</span>
@@ -253,7 +254,7 @@ export default async function WorkspaceRunsPage({
                   {job.job.companionSourceLocation ? (
                     <PortalMetaList
                       items={[
-                        { label: "Companion source", value: job.job.companionSourceLocation },
+                        { label: "Companion source", value: <DataPath value={job.job.companionSourceLocation} /> },
                       ]}
                     />
                   ) : null}

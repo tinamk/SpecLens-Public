@@ -2,10 +2,8 @@ import type { Route } from "next";
 import type { JobStatus } from "@speclens/contracts";
 import type { PortalNavItem } from "@speclens/ui";
 import {
-  getGithubRepositories,
   getPortalAnalysisTasks,
   getWorkspaceConsole,
-  getWorkspaceSecrets,
   type PortalAnalysisTask,
 } from "./api";
 
@@ -510,19 +508,12 @@ export function buildAdminNav(): PortalNavItem[] {
 }
 
 export async function getWorkspacePageData(workspaceId: string) {
-  const [workspaceConsole, tasks, secrets] = await Promise.all([
+  const [workspaceConsole, tasks] = await Promise.all([
     getWorkspaceConsole(workspaceId),
     getPortalAnalysisTasks(),
-    getWorkspaceSecrets(workspaceId),
   ]);
-  const githubRepositories = workspaceConsole.installations.length > 0
-    ? await getGithubRepositories(workspaceId)
-    : [];
-
   return {
     workspaceConsole,
     tasks,
-    secrets,
-    githubRepositories,
   };
 }
