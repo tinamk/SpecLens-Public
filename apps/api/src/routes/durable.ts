@@ -5,11 +5,11 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import * as tar from "tar";
 import {
   addSourceInputSchema,
+  adminRunAgentInputSchema,
   billingPortalSessionInputSchema,
   codeReviewPayloadSchema,
   billingCheckoutInputSchema,
   commercialContactInputSchema,
-  createAgentJobInputSchema,
   createWorkspaceMemberInputSchema,
   createRemediationTaskInputSchema,
   createAiAgentInputSchema,
@@ -168,12 +168,30 @@ function logSourceVerificationFailure(source: Pick<Source, "id" | "displayName">
   console.warn(`[source-verification] verify failed for ${source.id} (${source.displayName}): ${message}`);
 }
 
-function parsePositiveQueryInt(value: unknown, fallback: number): number {
+function parsePositiveQueryInt(value: unknown, fallback: number, options: { max?: number } = {}): number {
   if (typeof value !== "string") {
     return fallback;
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  if (!/^\d+$/u.test(value.trim())) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return options.max ? Math.min(parsed, options.max) : parsed;
+}
+
+function parseStrictInteger(value: string, label: string, options: { min?: number } = {}): number {
+  if (!/^\d+$/u.test(value.trim())) {
+    throw statusError(400, `${label} must be an integer.`);
+  }
+  const parsed = Number(value);
+  const min = options.min ?? 0;
+  if (!Number.isSafeInteger(parsed) || parsed < min) {
+    throw statusError(400, `${label} must be an integer greater than or equal to ${min}.`);
+  }
+  return parsed;
 }
 
 function resolveListQuery(query: Record<string, unknown> | undefined): {
@@ -184,7 +202,7 @@ function resolveListQuery(query: Record<string, unknown> | undefined): {
   return {
     q: typeof query?.q === "string" ? query.q.trim() : "",
     page: parsePositiveQueryInt(query?.page, 1),
-    pageSize: parsePositiveQueryInt(query?.pageSize, 25),
+    pageSize: parsePositiveQueryInt(query?.pageSize, 25, { max: 100 }),
   };
 }
 
@@ -333,25 +351,35 @@ function safeFilename(value: string): string {
   return path.basename(value).replace(/[^a-zA-Z0-9._-]+/g, "-") || "upload.bin";
 }
 
-function getCodexAuthConfig() {
-  const deviceCodeUrl = process.env.CODEX_OAUTH_DEVICE_CODE_URL ?? null;
-  const tokenUrl = process.env.CODEX_OAUTH_TOKEN_URL ?? null;
-  const clientId = process.env.CODEX_OAUTH_CLIENT_ID ?? null;
-  const scope = process.env.CODEX_OAUTH_SCOPES ?? null;
-  const audience = process.env.CODEX_OAUTH_AUDIENCE ?? null;
-  if (!deviceCodeUrl || !tokenUrl || !clientId) {
-    throw statusError(500, "CODEX_OAUTH_DEVICE_CODE_URL, CODEX_OAUTH_TOKEN_URL, and CODEX_OAUTH_CLIENT_ID are required.");
+function readCodexAuthEnv(name: "CODEX_OAUTH_DEVICE_CODE_URL" | "CODEX_OAUTH_TOKEN_URL" | "CODEX_OAUTH_CLIENT_ID"): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw statusError(503, "Codex OAuth is not configured. Set CODEX_OAUTH_DEVICE_CODE_URL, CODEX_OAUTH_TOKEN_URL, and CODEX_OAUTH_CLIENT_ID before starting device auth.");
   }
+  return value;
+}
+
+function parseCodexAuthUrl(name: "CODEX_OAUTH_DEVICE_CODE_URL" | "CODEX_OAUTH_TOKEN_URL", value: string): URL {
+  try {
+    return new URL(value);
+  } catch {
+    throw statusError(503, `Codex OAuth is not configured correctly. ${name} must be a valid absolute URL.`);
+  }
+}
+
+function getCodexAuthConfig() {
+  const deviceCodeUrl = readCodexAuthEnv("CODEX_OAUTH_DEVICE_CODE_URL");
+  const tokenUrl = readCodexAuthEnv("CODEX_OAUTH_TOKEN_URL");
+  const clientId = readCodexAuthEnv("CODEX_OAUTH_CLIENT_ID");
+  const scope = process.env.CODEX_OAUTH_SCOPES?.trim() || null;
+  const audience = process.env.CODEX_OAUTH_AUDIENCE?.trim() || null;
+  parseCodexAuthUrl("CODEX_OAUTH_DEVICE_CODE_URL", deviceCodeUrl);
+  parseCodexAuthUrl("CODEX_OAUTH_TOKEN_URL", tokenUrl);
   return { deviceCodeUrl, tokenUrl, clientId, scope, audience };
 }
 
 function resolveCodexDeviceFlowUrls(config: ReturnType<typeof getCodexAuthConfig>) {
-  let deviceUrl: URL;
-  try {
-    deviceUrl = new URL(config.deviceCodeUrl);
-  } catch (error) {
-    throw statusError(500, `CODEX_OAUTH_DEVICE_CODE_URL must be a valid URL. ${(error as Error).message}`);
-  }
+  const deviceUrl = parseCodexAuthUrl("CODEX_OAUTH_DEVICE_CODE_URL", config.deviceCodeUrl);
   const deviceAuthTokenUrl = new URL(deviceUrl.toString());
   if (deviceAuthTokenUrl.pathname.endsWith("/deviceauth/usercode")) {
     deviceAuthTokenUrl.pathname = deviceAuthTokenUrl.pathname.replace(/\/deviceauth\/usercode$/, "/deviceauth/token");
@@ -364,6 +392,32 @@ function resolveCodexDeviceFlowUrls(config: ReturnType<typeof getCodexAuthConfig
     verificationUri: `${issuer}/codex/device`,
     redirectUri: `${issuer}/deviceauth/callback`,
   };
+}
+
+function codexOAuthTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.CODEX_OAUTH_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15_000;
+}
+
+async function fetchCodexOAuth(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, {
+      ...init,
+      cache: "no-store",
+      signal: init.signal ?? AbortSignal.timeout(codexOAuthTimeoutMs()),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown upstream error.";
+    throw statusError(502, `Codex OAuth upstream request failed: ${message}`);
+  }
+}
+
+async function readCodexOAuthJson<T>(response: Response, context: string): Promise<T> {
+  try {
+    return await response.json() as T;
+  } catch {
+    throw statusError(502, `${context} returned malformed JSON.`);
+  }
 }
 
 async function queueJob(jobId: string) {
@@ -419,6 +473,24 @@ async function createDurableExport(report: Awaited<ReturnType<typeof getReportFo
     operations,
   };
 }
+
+async function forwardGithubWebhookToLocalTargets(rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
+  const targets = (await listActiveGithubWebhookTargets()).filter(target => target.kind === "local");
+  const results = await Promise.all(targets.map(async target => {
+    const result = await forwardGithubWebhookToTarget(target, rawBody, headers);
+    if (!result.ok) {
+      console.warn(`[github-webhook] forwarding to ${target.environmentLabel} failed: ${result.status ?? "network"} ${result.error ?? ""}`.trim());
+    }
+    return {
+      environmentLabel: target.environmentLabel,
+      kind: target.kind,
+      ok: result.ok,
+      status: result.status,
+      error: result.error,
+    };
+  }));
+  return results;
+}
 function isFinalStatus(status: string): boolean {
   return status === "succeeded" || status === "failed" || status === "cancelled";
 }
@@ -463,17 +535,16 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const body = JSON.stringify({
       client_id: config.clientId,
     });
-    const response = await fetch(config.deviceCodeUrl, {
+    const response = await fetchCodexOAuth(config.deviceCodeUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body,
-      cache: "no-store",
     });
     if (!response.ok) {
       const message = await response.text();
       throw statusError(502, message || `Device auth request failed: ${response.status}`);
     }
-    const payload = await response.json() as {
+    const payload = await readCodexOAuthJson<{
       device_auth_id?: string;
       device_code?: string;
       user_code?: string;
@@ -482,7 +553,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
       verification_uri_complete?: string;
       expires_in?: number;
       interval?: number | string;
-    };
+    }>(response, "Device auth request");
     const deviceCode = payload.device_auth_id ?? payload.device_code ?? null;
     const userCode = payload.user_code ?? payload.usercode ?? null;
     if (!deviceCode || !userCode) {
@@ -529,11 +600,10 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
       device_auth_id: record.deviceCode,
       user_code: record.userCode,
     });
-    const deviceAuthResponse = await fetch(deviceFlowUrls.deviceAuthTokenUrl, {
+    const deviceAuthResponse = await fetchCodexOAuth(deviceFlowUrls.deviceAuthTokenUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: deviceAuthBody,
-      cache: "no-store",
     });
     if (deviceAuthResponse.status === 403 || deviceAuthResponse.status === 404) {
       return { auth: await options.getStatus() };
@@ -542,12 +612,12 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
       const message = await deviceAuthResponse.text();
       return { auth: await options.setError(message || `Device auth polling failed: ${deviceAuthResponse.status}`) };
     }
-    const devicePayload = await deviceAuthResponse.json() as {
+    const devicePayload = await readCodexOAuthJson<{
       authorization_code?: string;
       code_verifier?: string;
       error?: string;
       error_description?: string;
-    };
+    }>(deviceAuthResponse, "Device auth polling");
     if (!devicePayload.authorization_code || !devicePayload.code_verifier) {
       const message = devicePayload.error_description ?? devicePayload.error ?? "Device auth response missing authorization code.";
       return { auth: await options.setError(message) };
@@ -559,20 +629,19 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
       client_id: config.clientId,
       code_verifier: devicePayload.code_verifier,
     });
-    const tokenResponse = await fetch(config.tokenUrl, {
+    const tokenResponse = await fetchCodexOAuth(config.tokenUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: tokenBody,
-      cache: "no-store",
     });
-    const payload = await tokenResponse.json() as {
+    const payload = await readCodexOAuthJson<{
       access_token?: string;
       refresh_token?: string;
       id_token?: string;
       account_id?: string;
       error?: string;
       error_description?: string;
-    };
+    }>(tokenResponse, "Token exchange");
     if (!tokenResponse.ok) {
       const message = payload.error_description ?? payload.error ?? `Token exchange failed: ${tokenResponse.status}`;
       return { auth: await options.setError(message) };
@@ -813,12 +882,8 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     await currentAdminUser(request);
     const user = await currentUser(request);
     const agentId = (request.params as { agentId: string }).agentId;
-    const input = createAgentJobInputSchema.parse(request.body);
-    if (!("workspaceId" in (request.body as Record<string, unknown>))) {
-      throw statusError(400, "workspaceId is required.");
-    }
-    const workspaceId = String((request.body as Record<string, unknown>).workspaceId);
-    const job = await createAgentJobForUser(workspaceId, user.id, agentId, {
+    const input = adminRunAgentInputSchema.parse(request.body);
+    const job = await createAgentJobForUser(input.workspaceId, user.id, agentId, {
       sourceId: input.sourceId,
       companionSourceId: input.companionSourceId,
       runtimeMode: input.runtimeMode,
@@ -1011,7 +1076,9 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const compareRef = typeof query.compare === "string" ? query.compare : null;
     const activeReportId = typeof query.reportId === "string" ? query.reportId : null;
     const activeFindingId = typeof query.findingId === "string" ? query.findingId : null;
-    const requestedPr = typeof query.pr === "string" ? Number.parseInt(query.pr, 10) : Number.NaN;
+    const requestedPr = typeof query.pr === "string" && query.pr.trim()
+      ? parseStrictInteger(query.pr, "pr", { min: 1 })
+      : null;
 
     const workspaceDetail = await getWorkspaceDetailForUser(workspaceId, user.id);
     if (workspaceDetail.sources.length === 0) {
@@ -1066,7 +1133,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         prUrl: job.job.changeset?.prUrl ?? null,
       }));
 
-    const selectedPullRequest = Number.isFinite(requestedPr) ? requestedPr : null;
+    const selectedPullRequest = requestedPr;
     const githubBackedSource = isGithubRepoLocation(source.location);
     if (selectedPullRequest && !githubBackedSource) {
       throw statusError(400, "Pull request review is only available for GitHub-backed sources.");
@@ -1480,12 +1547,13 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     const user = await currentUser(request);
     const jobId = (request.params as { jobId: string }).jobId;
     const visibility = resolveLogVisibility((request.query as Record<string, unknown> | undefined)?.verbosity);
+    const initialEnvelope = await getJobEnvelopeForUser(jobId, user.id, { logVisibility: visibility });
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       Connection: "keep-alive",
       "Cache-Control": "no-cache",
     });
-    await streamLogs(request, reply, user.id, jobId, visibility);
+    await streamLogs(request, reply, user.id, jobId, visibility, initialEnvelope);
     return reply;
   });
 
@@ -1508,7 +1576,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
   app.get("/api/jobs/:jobId/artifacts/:artifactIndex", async (request, reply) => {
     const user = await currentUser(request);
     const { jobId, artifactIndex } = request.params as { jobId: string; artifactIndex: string };
-    const artifact = await getArtifactForJobForUser(jobId, Number.parseInt(artifactIndex, 10), user.id);
+    const artifact = await getArtifactForJobForUser(jobId, parseStrictInteger(artifactIndex, "artifactIndex"), user.id);
     const config = getConfig();
     const absolutePath = resolveObjectStoragePath(config, artifact.key);
     const tempDownloadPath = path.resolve(
@@ -1729,9 +1797,17 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
   });
 
   app.post("/api/integrations/github/link", async request => {
+    const user = await currentUser(request);
     const body = githubLinkInstallationInputSchema.parse(request.body);
-    const installation = await getGithubInstallation(body.installationId);
     const statePayload = parseSignedGithubInstallState(body.state);
+    const intent = await getGithubInstallIntentById(statePayload.intentId);
+    if (!intent || intent.nonce !== statePayload.nonce) {
+      throw statusError(400, "GitHub install intent was not found.");
+    }
+    if (intent.requestedByUserId !== user.id) {
+      throw statusError(403, "GitHub install intent belongs to a different authenticated user.");
+    }
+    const installation = await getGithubInstallation(body.installationId);
     const result = await registerGithubInstallationForIntent(statePayload.intentId, statePayload.nonce, {
       installationId: String(installation.id),
       accountLogin: installation.accountLogin,
@@ -1858,30 +1934,24 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
     recordWebhookEvent("github", parsedWebhook.eventName);
 
     const gatewayHost = isGithubGatewayHost(request.hostname);
+    let forwardedTargets: Awaited<ReturnType<typeof forwardGithubWebhookToLocalTargets>> = [];
 
     if (payload.action === "deleted") {
       const result = await removeGithubInstallationByInstallationId(payload.installationId);
       if (gatewayHost && request.rawBody) {
-        const targets = await listActiveGithubWebhookTargets();
-        const localTargets = targets.filter(target => target.kind === "local");
-        for (const target of localTargets) {
-          void forwardGithubWebhookToTarget(target, request.rawBody, request.headers);
-        }
+        forwardedTargets = await forwardGithubWebhookToLocalTargets(request.rawBody, request.headers);
       }
       return {
         received: true,
         provider: "github",
         installationCount: result.installationCount,
+        forwardedTargets,
       };
     }
 
     if (!("workspaceId" in payload) || typeof payload.workspaceId !== "string" || payload.workspaceId.length === 0) {
       if (gatewayHost && request.rawBody) {
-        const targets = await listActiveGithubWebhookTargets();
-        const localTargets = targets.filter(target => target.kind === "local");
-        for (const target of localTargets) {
-          void forwardGithubWebhookToTarget(target, request.rawBody, request.headers);
-        }
+        forwardedTargets = await forwardGithubWebhookToLocalTargets(request.rawBody, request.headers);
       }
       return {
         received: true,
@@ -1890,6 +1960,7 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
         eventName: "installation",
         action: payload.action,
         reason: "installation-created-awaiting-callback-link",
+        forwardedTargets,
       };
     }
 
@@ -1900,13 +1971,12 @@ export async function registerDurableRoutes(app: FastifyInstance): Promise<void>
       accountLogin: payload.accountLogin,
     });
     if (gatewayHost && request.rawBody) {
-      const targets = await listActiveGithubWebhookTargets();
-      const localTargets = targets.filter(target => target.kind === "local");
-      for (const target of localTargets) {
-        void forwardGithubWebhookToTarget(target, request.rawBody, request.headers);
-      }
+      forwardedTargets = await forwardGithubWebhookToLocalTargets(request.rawBody, request.headers);
     }
-    return result;
+    return {
+      ...result,
+      forwardedTargets,
+    };
   });
 
   app.get("/auth/github/callback", async (request, reply) => {
@@ -1947,9 +2017,8 @@ async function streamLogs(
   userId: string,
   jobId: string,
   visibility: "default" | "verbose" | "all",
+  initialEnvelope: Awaited<ReturnType<typeof getJobEnvelopeForUser>>,
 ) {
-  const initialEnvelope = await getJobEnvelopeForUser(jobId, userId, { logVisibility: visibility });
-
   const lastEventHeader = request.headers["last-event-id"];
   let lastEventId = Array.isArray(lastEventHeader) ? lastEventHeader[0] : lastEventHeader;
   let lastStatus = initialEnvelope.job.status;
@@ -1976,18 +2045,28 @@ async function streamLogs(
     reply.raw.write(`data: ${JSON.stringify({ ok: true, ts: Date.now() })}\n\n`);
   };
 
+  const writeStreamError = (error: unknown) => {
+    const statusCode = typeof (error as { statusCode?: unknown })?.statusCode === "number"
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+    reply.raw.write("event: error\n");
+    reply.raw.write(`data: ${JSON.stringify({ statusCode, message: statusCode === 500 ? "Log stream failed." : "Log stream access changed." })}\n\n`);
+    reply.raw.end();
+    closed = true;
+  };
+
   const poll = async () => {
     if (inFlight || closed) {
       return;
     }
     inFlight = true;
     try {
+      const envelope = await getJobEnvelopeForUser(jobId, userId, { logVisibility: visibility });
       const logs = await listJobLogsAfterWithVisibility(jobId, lastEventId, visibility);
       for (const log of logs) {
         writeEvent(log);
         lastEventId = log.id;
       }
-      const envelope = await getJobEnvelopeForUser(jobId, userId, { logVisibility: visibility });
       if (envelope.job.status !== lastStatus) {
         writeStatus(envelope.job.status);
         lastStatus = envelope.job.status;
@@ -1998,6 +2077,8 @@ async function streamLogs(
         reply.raw.end();
         closed = true;
       }
+    } catch (error) {
+      writeStreamError(error);
     } finally {
       inFlight = false;
     }

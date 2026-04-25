@@ -8,7 +8,8 @@ services:
       - "80:80"
       - "443:443"
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -99,7 +100,8 @@ services:
     command: >
       bash -lc "npm run api:start"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       PORT: 4000
       API_URL: https://${API_DOMAIN}
@@ -146,7 +148,8 @@ services:
     command: >
       bash -lc "npm run web:start"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
@@ -231,7 +234,8 @@ services:
     command: >
       bash -lc "npm run runner:start"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       API_URL: http://api:4000
       CODEX_HOME: /codex-host
@@ -275,7 +279,8 @@ services:
     command: >
       bash -lc "npm run ai-worker:start"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       CODEX_HOME: /codex-host

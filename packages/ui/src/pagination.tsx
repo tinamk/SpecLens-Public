@@ -48,28 +48,49 @@ export function PaginationLinks({
     return null;
   }
 
+  const previousDisabled = pageInfo.page <= 1;
+  const nextDisabled = pageInfo.page >= pageInfo.totalPages;
+  const previousHref = buildHref(pathname, searchParams, { [pageParamKey]: Math.max(1, pageInfo.page - 1) });
+  const nextHref = buildHref(pathname, searchParams, { [pageParamKey]: Math.min(pageInfo.totalPages, pageInfo.page + 1) });
+
+  const renderPageAction = (
+    label: "Previous" | "Next",
+    href: Route,
+    disabled: boolean,
+    testId: string,
+  ) => {
+    if (disabled) {
+      return (
+        <button
+          disabled
+          className="button-ghost button-disabled"
+          data-testid={testId}
+          type="button"
+        >
+          {label}
+        </button>
+      );
+    }
+
+    return (
+      <Link className="button-ghost" data-testid={testId} href={href}>
+        {label}
+      </Link>
+    );
+  };
+
   return (
-    <div className="portal-inline-actions" data-testid={`${testIdPrefix}-pagination`}>
-      <span className="subtle-note">
+    <nav
+      aria-label={`${testIdPrefix.replaceAll("-", " ")} pagination`}
+      className="portal-inline-actions"
+      data-testid={`${testIdPrefix}-pagination`}
+    >
+      <span className="subtle-note portal-pagination__note">
         Page {pageInfo.page} of {pageInfo.totalPages} · {pageInfo.total} total
       </span>
-      <Link
-        className="button-ghost"
-        data-testid={`${testIdPrefix}-page-prev`}
-        aria-disabled={pageInfo.page <= 1}
-        href={buildHref(pathname, searchParams, { [pageParamKey]: Math.max(1, pageInfo.page - 1) })}
-      >
-        Previous
-      </Link>
-      <Link
-        className="button-ghost"
-        data-testid={`${testIdPrefix}-page-next`}
-        aria-disabled={pageInfo.page >= pageInfo.totalPages}
-        href={buildHref(pathname, searchParams, { [pageParamKey]: Math.min(pageInfo.totalPages, pageInfo.page + 1) })}
-      >
-        Next
-      </Link>
-    </div>
+      {renderPageAction("Previous", previousHref, previousDisabled, `${testIdPrefix}-page-prev`)}
+      {renderPageAction("Next", nextHref, nextDisabled, `${testIdPrefix}-page-next`)}
+    </nav>
   );
 }
 

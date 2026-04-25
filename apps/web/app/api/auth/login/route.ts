@@ -1,7 +1,22 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { buildCsrfToken, buildLocalDevSession, csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, resolveConfiguredUrlForRequest, resolveSafeReturnTo, sessionCookieName, stateCookieName } from "../../../../lib/auth";
+import { buildCsrfToken, buildLocalDevSession, canUseLocalDevPortalSession, csrfCookieName, getKeycloakConfig, idTokenCookieName, resolveAuthBaseUrl, resolveConfiguredUrlForRequest, resolveSafeReturnTo, sessionCookieName, stateCookieName } from "../../../../lib/auth";
 import { resolvePublicRequestOrigin } from "../../../../lib/request-origin";
+
+function appendAuthFailureReason(returnTo: string, reason: string): string {
+  const [path = "/portal/workspaces", query = ""] = returnTo.split("?", 2);
+  const params = new URLSearchParams(query);
+  params.set("auth", reason);
+  const nextQuery = params.toString();
+  return nextQuery ? `${path}?${nextQuery}` : path;
+}
+
+function buildPublicAuthFailureUrl(appBaseUrl: string, returnTo: string, reason: string): URL {
+  const failureUrl = new URL("/login", appBaseUrl);
+  failureUrl.searchParams.set("auth", reason);
+  failureUrl.searchParams.set("returnTo", appendAuthFailureReason(returnTo, reason));
+  return failureUrl;
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -25,6 +40,9 @@ export async function GET(request: Request) {
   const returnTo = resolveSafeReturnTo(requestedReturnTo, appBaseUrl);
 
   if (!config.enabled || !issuer || !config.clientId) {
+    if (!canUseLocalDevPortalSession()) {
+      return NextResponse.redirect(buildPublicAuthFailureUrl(appBaseUrl, returnTo, "auth-config-required"));
+    }
     const response = NextResponse.redirect(new URL(returnTo, appBaseUrl));
     const sessionValue = buildLocalDevSession();
     response.cookies.set(sessionCookieName(), sessionValue, {

@@ -1,9 +1,9 @@
-import type { Route } from "next";
 import Link from "next/link";
-import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { DataPath } from "../../../../../components/data-visuals";
-import { PaginationLinks } from "../../../../../components/portal-pagination";
+import { buildSearchHref, PaginationLinks } from "@speclens/ui";
 import { CreateSourceForm, ManageSourceActions, SourceVerificationAction } from "../../../../../components/portal-actions";
+import { WorkspaceRouteState } from "../../../../../components/workspace-route-state";
 import {
   ApiResponseError,
   getCurrentUser,
@@ -19,6 +19,7 @@ import {
   formatSourceType,
   getEntitlementTagClass,
   getSourceVerificationTagClass,
+  getWorkspaceSourcesEmptyState,
   isWorkspaceScopedSourcesPageContext,
 } from "../../../../../lib/portal";
 
@@ -62,10 +63,14 @@ export default async function WorkspaceSourcesPage({
       sources.map(async source => [source.id, await getSourceLearnables(workspaceId, source.id)] as const),
     );
     const sourceLearnablesById = new Map(sourceLearnableEntries);
-    const verifiedSources = sources.filter(source => source.verificationStatus === "verified").length;
-    const pendingSources = sources.filter(source => source.verificationStatus === "pending").length;
-    const failedSources = sources.filter(source => source.verificationStatus === "failed").length;
+    const verifiedSources = workspaceConsole.sources.filter(source => source.verificationStatus === "verified").length;
+    const pendingSources = workspaceConsole.sources.filter(source => source.verificationStatus === "pending").length;
+    const failedSources = workspaceConsole.sources.filter(source => source.verificationStatus === "failed").length;
     const totalLearnables = Array.from(sourceLearnablesById.values()).reduce((sum, learnables) => sum + learnables.length, 0);
+    const sourcesEmptyState = getWorkspaceSourcesEmptyState({
+      query: sourceQuery.q,
+      type: sourceQuery.type,
+    });
 
     return (
       <PortalShell
@@ -77,10 +82,11 @@ export default async function WorkspaceSourcesPage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="sources"
       >
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Workspace sources summary">
           <article className="portal-stat" data-testid="workspace-sources-stat-total">
             <span className="portal-stat__label">Sources</span>
-            <span className="portal-stat__value">{sources.length}</span>
+            <span className="portal-stat__value">{workspaceConsole.sources.length}</span>
+            {sources.length !== workspaceConsole.sources.length ? <p>{sources.length} visible</p> : null}
           </article>
           <article className="portal-stat" data-testid="workspace-sources-stat-verified">
             <span className="portal-stat__label">Verified</span>
@@ -113,7 +119,7 @@ export default async function WorkspaceSourcesPage({
               />
             ) : (
               <p className="subtle-note" data-testid="workspace-sources-read-only">
-                Owner only.
+                Workspace owners manage sources. Ask the owner to add or repair a source before queueing new runs.
               </p>
             )}
           </article>
@@ -122,7 +128,16 @@ export default async function WorkspaceSourcesPage({
               badgeLabel="Readiness"
               badgeClassName="tag tag--info"
               title="Status"
+              description={verifiedSources > 0
+                ? "Verified sources are ready for AI runs. Failed sources should be repaired before they become queueable again."
+                : "At least one verified source is required before the run queue can start work."}
             />
+            {workspaceConsole.sources.length === 0 ? (
+              <p className="subtle-note">Start by adding a source. Public Git repositories, private GitHub sources, and uploaded Git archives all run through the same verification gate.</p>
+            ) : null}
+            {workspaceConsole.sources.length > 0 && verifiedSources === 0 ? (
+              <p className="inline-error" role="alert">No verified sources are queueable yet. Use the repair or readiness check action on a source below.</p>
+            ) : null}
             {failedSources > 0 ? (
               <PortalMetaList
                 items={[
@@ -135,7 +150,7 @@ export default async function WorkspaceSourcesPage({
                 eyebrow="Owner"
                 href={`/portal/workspaces/${workspaceId}/settings`}
                 testId="workspace-sources-open-settings"
-                title="Settings"
+                title="Workspace settings"
                 tone="warning"
               />
               <PortalLinkCard
@@ -158,7 +173,7 @@ export default async function WorkspaceSourcesPage({
             badgeLabel="Inventory"
             title="Sources"
           />
-          <form className="stack-form form-shell" method="GET">
+          <form aria-label="Search sources" className="stack-form form-shell" method="GET" role="search">
             <div className="form-grid">
               <label className="field">
                 <span>Search sources</span>
@@ -174,15 +189,35 @@ export default async function WorkspaceSourcesPage({
                 <span>Source type</span>
                 <select data-testid="workspace-sources-type-filter" defaultValue={sourceQuery.type} name="type">
                   <option value="">All types</option>
-                  <option value="git-public">public git</option>
+                  <option value="git-public">public Git repository</option>
                   <option value="github-private">private GitHub</option>
-                  <option value="upload-archive">git repo archive</option>
+                  <option value="upload-archive">Git archive upload</option>
                 </select>
               </label>
             </div>
-            <button className="button-ghost" data-testid="workspace-sources-search-submit" type="submit">Apply source filter</button>
+            <div className="portal-inline-actions">
+              <button className="button-ghost" data-testid="workspace-sources-search-submit" type="submit">Apply source filter</button>
+              {sourceQuery.q || sourceQuery.type ? (
+                <Link
+                  className="button-secondary"
+                  data-testid="workspace-sources-clear-filters"
+                  href={buildSearchHref(`/portal/workspaces/${workspaceId}/sources`, query, {
+                    page: undefined,
+                    q: undefined,
+                    type: undefined,
+                  })}
+                >
+                  Clear filters
+                </Link>
+              ) : null}
+            </div>
           </form>
-          {sources.length === 0 ? <p className="subtle-note">No sources matched this filter yet.</p> : null}
+          {sources.length === 0 ? (
+            <div className="subtle-note" data-testid="workspace-sources-empty-state">
+              <p><strong>{sourcesEmptyState.title}</strong></p>
+              <p>{sourcesEmptyState.detail}</p>
+            </div>
+          ) : null}
           {sources.length > 0 ? (
             <div className="portal-record-grid">
               {sources.map(source => {
@@ -191,7 +226,7 @@ export default async function WorkspaceSourcesPage({
                   <article className="portal-record-card" data-testid={`workspace-sources-row-${source.id}`} key={source.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{source.displayName}</strong>
+                        <h3>{source.displayName}</h3>
                         <p><DataPath value={source.location} /></p>
                       </div>
                       <div className="portal-record-card__meta">
@@ -231,24 +266,18 @@ export default async function WorkspaceSourcesPage({
           />
         </section>
       </PortalShell>
-      );
-    } catch (error) {
+    );
+  } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
+      const isMissing = error.status === 404;
       return (
-        <PortalShell
+        <WorkspaceRouteState
           eyebrow="Workspace sources"
-          title="Access denied"
+          isAdmin={isPortalAdminSession(session)}
+          isMissing={isMissing}
           pageTestId="workspace-sources-access-denied-page"
-          primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
-          activePrimaryNavKey="workspaces"
-        >
-          <PortalNoticePanel
-            actions={<Link className="button-secondary" href={"/portal/workspaces" as Route}>Back to workspaces</Link>}
-            description="You do not have access to this workspace."
-            descriptionTestId="workspace-sources-access-denied"
-            title="Access denied"
-          />
-        </PortalShell>
+          descriptionTestId="workspace-sources-access-denied"
+        />
       );
     }
     throw error;

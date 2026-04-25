@@ -33,8 +33,14 @@ export function WorkspaceCodePrPanel(props: {
 }) {
   const [pullRequests, setPullRequests] = useState<GitPullRequestSummary[]>(props.initialPullRequest ? [props.initialPullRequest] : []);
   const [loadRequested, setLoadRequested] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const requestPullRequests = () => {
+    setLoadRequested(true);
+    setLoadAttempt(attempt => attempt + 1);
+  };
 
   useEffect(() => {
     if (props.prSupport !== "available" || !loadRequested) {
@@ -73,7 +79,7 @@ export function WorkspaceCodePrPanel(props: {
     return () => {
       cancelled = true;
     };
-  }, [loadRequested, props.prSupport, props.sourceId, props.workspaceId]);
+  }, [loadAttempt, loadRequested, props.prSupport, props.sourceId, props.workspaceId]);
 
   return (
     <article className="portal-panel" data-testid="workspace-code-pr-panel">
@@ -86,13 +92,20 @@ export function WorkspaceCodePrPanel(props: {
       {props.prSupport === "unavailable" ? <p className="subtle-note">PR metadata is only available for GitHub-backed sources.</p> : null}
       {props.prSupport === "available" && !loadRequested ? (
         <p>
-          <button className="button-secondary" type="button" onClick={() => setLoadRequested(true)}>
+          <button className="button-secondary" type="button" onClick={requestPullRequests}>
             Load pull requests
           </button>
         </p>
       ) : null}
       {loading ? <p className="subtle-note">Loading pull requests…</p> : null}
-      {error ? <p className="inline-error">{error}</p> : null}
+      {error ? (
+        <div className="stack-form">
+          <p className="inline-error" role="alert">{error}</p>
+          <button className="button-secondary" type="button" onClick={requestPullRequests}>
+            Retry loading pull requests
+          </button>
+        </div>
+      ) : null}
       {!loading && !error && loadRequested && pullRequests.length === 0 && props.prSupport === "available" ? (
         <p className="subtle-note">No pull requests are available for this source.</p>
       ) : null}
@@ -100,11 +113,11 @@ export function WorkspaceCodePrPanel(props: {
         <div className="portal-record-grid">
           {pullRequests.map(prItem => (
             <article className="portal-record-card" data-testid={`workspace-code-pr-${prItem.number}`} key={prItem.number}>
-              <div className="portal-record-card__header">
-                <div className="portal-record-card__title">
-                  <strong>#{prItem.number} {prItem.title}</strong>
-                  <p>Pull the review context directly into the code route without losing the active workspace source.</p>
-                </div>
+                <div className="portal-record-card__header">
+                  <div className="portal-record-card__title">
+                    <h3>#{prItem.number} {prItem.title}</h3>
+                    <p>Pull the review context directly into the code route without losing the active workspace source.</p>
+                  </div>
                 <div className="portal-record-card__meta">
                   <span className={prItem.state === "open" ? "tag tag--success" : "tag tag--neutral"}>{prItem.state}</span>
                   <span className="tag tag--info">{prItem.headRef} {"->"} {prItem.baseRef}</span>

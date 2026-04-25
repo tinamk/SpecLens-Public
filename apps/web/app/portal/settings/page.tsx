@@ -20,7 +20,7 @@ export default async function PortalSettingsPage() {
       primaryNav={buildPortalPrimaryNav(isAdmin)}
       activePrimaryNavKey="settings"
     >
-      <section className="portal-stat-grid">
+      <section className="portal-stat-grid" aria-label="Account summary">
         <article className="portal-stat" data-testid="portal-settings-stat-entitlement">
           <span className="portal-stat__label">Entitlement</span>
           <span className="portal-stat__value">{user.entitlement}</span>

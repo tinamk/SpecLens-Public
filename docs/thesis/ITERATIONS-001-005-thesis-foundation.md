@@ -395,7 +395,7 @@ ADR-0004 captures the architectural decision clearly. SpecLens would adopt:
 - S3-compatible object storage for persistent artifacts
 - Keycloak for identity
 - Stripe for self-serve Pro billing
-- GitHub App integration for private repositories
+- GitHub App integration for private GitHub repositories
 - a dual-license model for the codebase
 
 This is the strongest architecture pivot in the project. The artifact boundary expanded from local interfaces and managed workspace state into a multi-service hosted product model.

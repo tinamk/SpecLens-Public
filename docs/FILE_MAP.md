@@ -9,6 +9,7 @@ This map reflects the Iteration 5 hosted SaaS + behavioral parity layout.
 | `apps/web/` | Next.js marketing site, portal, pricing, legal pages, and report UI |
 | `apps/api/` | Fastify control plane, API routes, webhooks, and hosted service integrations |
 | `apps/runner/` | Runner process for queued Docker sandbox jobs |
+| `apps/ai-worker/` | Hosted AI job controller, sandbox orchestration, role execution core, and remediation worker |
 
 ## Packages
 
@@ -25,6 +26,7 @@ This map reflects the Iteration 5 hosted SaaS + behavioral parity layout.
 |---|---|
 | `deploy/digitalocean/` | App Platform and runner deployment scaffolding |
 | `apps/runner/docker/` | Runner image scaffolding |
+| `apps/ai-worker/docker/` | Long-lived AI worker and one-shot hosted agent sandbox image scaffolding |
 | `deploy/observability/` | Prometheus scrape + alerting starter config |
 
 ## Legal and pricing

@@ -1,7 +1,8 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalLinkCard, PortalLinkGrid, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { PortalLinkCard, PortalLinkGrid, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { DataPath } from "../../../../components/data-visuals";
+import { WorkspaceRouteState } from "../../../../components/workspace-route-state";
 import { ApiResponseError } from "../../../../lib/api";
 import { requirePortalSession, isPortalAdminSession } from "../../../../lib/auth";
 import {
@@ -27,6 +28,8 @@ export default async function WorkspaceOverviewPage({
       throw new ApiResponseError(404, `Workspace overview payload does not belong to workspace ${workspaceId}.`);
     }
     const completedJobs = workspaceConsole.stats.completedJobs;
+    const verifiedSources = workspaceConsole.sources.filter(source => source.verificationStatus === "verified").length;
+    const failedSources = workspaceConsole.sources.filter(source => source.verificationStatus === "failed").length;
 
     return (
       <PortalShell
@@ -39,7 +42,7 @@ export default async function WorkspaceOverviewPage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="overview"
       >
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Workspace overview summary">
           <article className="portal-stat" data-testid="workspace-overview-stat-entitlement">
             <span className="portal-stat__label">Entitlement</span>
             <span className="portal-stat__value">{workspaceConsole.workspace.entitlement}</span>
@@ -47,6 +50,7 @@ export default async function WorkspaceOverviewPage({
           <article className="portal-stat" data-testid="workspace-overview-stat-sources">
             <span className="portal-stat__label">Sources</span>
             <span className="portal-stat__value">{workspaceConsole.sources.length}</span>
+            <p>{verifiedSources} verified</p>
           </article>
           <article className="portal-stat" data-testid="workspace-overview-stat-jobs">
             <span className="portal-stat__label">Runs</span>
@@ -60,7 +64,12 @@ export default async function WorkspaceOverviewPage({
         </section>
 
         <section className="portal-panel" data-testid="workspace-overview-next-panel">
-          <PortalSectionHeader title="Jump to" />
+          <PortalSectionHeader
+            title="Jump to"
+            description={verifiedSources > 0
+              ? "Workspace routes are separated by job stage: intake, execution, decisions, code review, access, and settings."
+              : "Start with Sources. A verified source unlocks the run queue and report workflow."}
+          />
           <PortalLinkGrid testId="workspace-overview-route-grid">
             <PortalLinkCard
               eyebrow="Intake"
@@ -68,12 +77,7 @@ export default async function WorkspaceOverviewPage({
               testId="workspace-overview-open-sources"
               title="Sources"
               tone="info"
-            />
-            <PortalLinkCard
-              eyebrow="Review"
-              href={`/portal/workspaces/${workspaceId}/code`}
-              testId="workspace-overview-open-code"
-              title="Code"
+              description={failedSources > 0 ? `${failedSources} source(s) need repair` : `${verifiedSources} verified source(s)`}
             />
             <PortalLinkCard
               eyebrow="Execution"
@@ -81,6 +85,7 @@ export default async function WorkspaceOverviewPage({
               testId="workspace-overview-open-runs"
               title="Runs"
               tone="success"
+              description={`${workspaceConsole.stats.activeJobs} active · ${completedJobs} completed`}
             />
             <PortalLinkCard
               eyebrow="Decisions"
@@ -88,19 +93,29 @@ export default async function WorkspaceOverviewPage({
               testId="workspace-overview-open-reports"
               title="Reports"
               tone="warning"
+              description={`${workspaceConsole.stats.reportBackedJobs} report-backed run(s)`}
+            />
+            <PortalLinkCard
+              eyebrow="Review"
+              href={`/portal/workspaces/${workspaceId}/code`}
+              testId="workspace-overview-open-code"
+              title="Code"
+              description="Browse source and remediation changes."
             />
             <PortalLinkCard
               eyebrow="Collaboration"
               href={`/portal/workspaces/${workspaceId}/access`}
               testId="workspace-overview-open-access"
               title="Access"
+              description={`${workspaceConsole.members.length} member(s)`}
             />
             <PortalLinkCard
               eyebrow="Ownership"
               href={`/portal/workspaces/${workspaceId}/settings`}
               testId="workspace-overview-open-settings"
-              title="Settings"
+              title="Workspace settings"
               tone="info"
+              description="Auth, GitHub, secrets, and workspace controls."
             />
           </PortalLinkGrid>
         </section>
@@ -110,14 +125,19 @@ export default async function WorkspaceOverviewPage({
             <PortalSectionHeader
               title="Recent runs"
             />
-            {workspaceConsole.jobs.length === 0 ? <p className="subtle-note">No jobs queued yet.</p> : null}
+            {workspaceConsole.jobs.length === 0 ? (
+              <div className="subtle-note">
+                <p><strong>No runs queued yet.</strong></p>
+                <p>Add and verify a source, then queue an AI task from the Runs page.</p>
+              </div>
+            ) : null}
             {workspaceConsole.jobs.length > 0 ? (
               <div className="portal-record-grid">
                 {workspaceConsole.jobs.slice(0, 4).map(job => (
                   <article className="portal-record-card" data-testid={`workspace-overview-job-${job.job.id}`} key={job.job.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{formatJobLabel(job.job, tasks)}</strong>
+                        <h3>{formatJobLabel(job.job, tasks)}</h3>
                         <p><DataPath value={job.job.sourceLocation} /></p>
                       </div>
                       <div className="portal-record-card__meta">
@@ -159,7 +179,7 @@ export default async function WorkspaceOverviewPage({
                   <article className="portal-record-card" key={member.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{member.displayName}</strong>
+                        <h3>{member.displayName}</h3>
                         <p>{member.email}</p>
                       </div>
                       <div className="portal-record-card__meta">
@@ -177,21 +197,16 @@ export default async function WorkspaceOverviewPage({
     );
   } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
+      const isMissing = error.status === 404;
       return (
-        <PortalShell
+        <WorkspaceRouteState
           eyebrow="Workspace"
-          title="Access denied"
+          isAdmin={isPortalAdminSession(session)}
+          isMissing={isMissing}
           pageTestId="workspace-overview-access-denied-page"
-          primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
-          activePrimaryNavKey="workspaces"
-        >
-          <PortalNoticePanel
-            actions={<Link className="button-secondary" href={"/portal/workspaces" as Route}>Back to workspaces</Link>}
-            description="You do not have access to this workspace."
-            descriptionTestId="workspace-overview-access-denied"
-            title="This workspace is not available to your account"
-          />
-        </PortalShell>
+          descriptionTestId="workspace-overview-access-denied"
+          deniedNoticeTitle="This workspace is not available to your account"
+        />
       );
     }
     throw error;

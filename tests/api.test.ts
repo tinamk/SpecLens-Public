@@ -9,11 +9,16 @@ import Stripe from "stripe";
 import { createHomeTempDirSync } from "@speclens/core";
 import {
   appendAnalysisJobLogs,
+  claimAgentJob,
   createAgentJobForUser,
   createAiAgent,
   createWorkspaceForUser,
   disconnectDatabase,
+  finalizeAnalysisJobFailure,
+  finalizeAnalysisJobSuccess,
+  getJobEnvelopeForUser,
   getPrismaClient,
+  listJobLogsAfterWithVisibility,
   listAiAgents,
   replaceSourceLearnables,
 } from "@speclens/db";
@@ -1138,6 +1143,12 @@ test("hosted API can generate a bounded remediation changeset from a completed r
   });
   assert.equal(remediationArtifactContentResponse.statusCode, 200);
 
+  const malformedArtifactContentResponse: any = await authenticatedInject(app, {
+    method: "GET",
+    url: `/api/jobs/${remediatePayload.job.job.id}/artifacts/0abc`,
+  });
+  assert.equal(malformedArtifactContentResponse.statusCode, 400);
+
   const codeReviewResponse: any = await waitForCodeReview(
     app,
     `/api/workspaces/${workspacePayload.workspace.id}/code/review?sourceId=${encodeURIComponent(sourcePayload.source.id)}&reportId=${encodeURIComponent(reportId)}`,
@@ -1614,6 +1625,12 @@ test("workspace code review rejects invalid source selections and navigates nest
   });
   assert.equal([400, 404].includes(invalidPrResponse.statusCode), true);
 
+  const malformedPrResponse: any = await authenticatedInject(app, {
+    method: "GET",
+    url: `/api/workspaces/${workspacePayload.workspace.id}/code/review?sourceId=${encodeURIComponent(sourcePayload.source.id)}&pr=12abc`,
+  });
+  assert.equal(malformedPrResponse.statusCode, 400);
+
   const nestedDirectoryResponse: any = await authenticatedInject(app, {
     method: "GET",
     url: `/api/workspaces/${workspacePayload.workspace.id}/code/review?sourceId=${encodeURIComponent(sourcePayload.source.id)}&path=${encodeURIComponent("packages")}`,
@@ -1780,6 +1797,72 @@ test("hosted API filters default versus verbose logs and exposes source-scoped l
   );
 });
 
+test("hosted API log cursor is job-scoped and preserves same-timestamp events", async t => {
+  const instance = await createApiAppInstance();
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const user = await ensureAuthenticatedPortalUser();
+  const workspace = await createWorkspaceForUser(user, {
+    name: "Log Cursor Workspace",
+  });
+  const source = await createSourceForUserForTests(workspace.id, user.id, {
+    type: "git-public",
+    displayName: "Browser fixture",
+    location: browserFixtureUrl,
+  });
+  const job = await createAgentJobForUser(workspace.id, user.id, "agent-universal-standard", {
+    sourceId: source.id,
+  });
+  const otherJob = await createAgentJobForUser(workspace.id, user.id, "agent-universal-standard", {
+    sourceId: source.id,
+  });
+  const createdAt = "2026-04-25T00:00:00.000Z";
+
+  await appendAnalysisJobLogs(job.job.id, [
+    {
+      id: "log_cursor_same_time_a",
+      jobId: job.job.id,
+      level: "info",
+      scope: "agent",
+      message: "First same-timestamp event.",
+      visibility: "default",
+      createdAt,
+    },
+    {
+      id: "log_cursor_same_time_b",
+      jobId: job.job.id,
+      level: "info",
+      scope: "agent",
+      message: "Second same-timestamp event.",
+      visibility: "default",
+      createdAt,
+    },
+  ]);
+  await appendAnalysisJobLogs(otherJob.job.id, [{
+    id: "log_cursor_other_job",
+    jobId: otherJob.job.id,
+    level: "info",
+    scope: "agent",
+    message: "Other job cursor should not affect this job.",
+    visibility: "default",
+    createdAt: "2026-04-25T00:00:01.000Z",
+  }]);
+
+  const afterSameTimestamp = await listJobLogsAfterWithVisibility(job.job.id, "log_cursor_same_time_a", "default");
+  assert.deepEqual(
+    afterSameTimestamp.map(log => log.id).filter(id => id.startsWith("log_cursor_")),
+    ["log_cursor_same_time_b"],
+  );
+
+  const afterOtherJobCursor = await listJobLogsAfterWithVisibility(job.job.id, "log_cursor_other_job", "default");
+  assert.deepEqual(
+    afterOtherJobCursor.map(log => log.id).filter(id => id.startsWith("log_cursor_")),
+    ["log_cursor_same_time_a", "log_cursor_same_time_b"],
+  );
+});
+
 test("hosted API provisions the current user from the portal session cookie", async t => {
   const instance = await createStubbedAiWorkerApiAppInstance();
   const { app } = instance;
@@ -1822,6 +1905,65 @@ test("hosted API provisions the current user from the portal session cookie", as
   assert.equal(workspaceResponse.statusCode, 200);
   const workspacePayload = workspaceResponse.json() as { workspace: { ownerUserId: string } };
   assert.equal(workspacePayload.workspace.ownerUserId, mePayload.user.id);
+});
+
+test("hosted API rejects cookie-auth mutations without a matching CSRF token", async t => {
+  const instance = await createApiAppInstance();
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const cookie = makePortalSessionCookie({
+    provider: "keycloak",
+    subject: "csrf-user",
+    email: "csrf@example.com",
+    displayName: "CSRF User",
+  });
+
+  const response: any = await app.inject({
+    method: "POST",
+    url: "/api/workspaces",
+    headers: {
+      cookie,
+    },
+    payload: {
+      name: "Blocked CSRF workspace",
+      description: "This request intentionally omits the matching CSRF header and cookie.",
+    },
+  });
+  assert.equal(response.statusCode, 403);
+  assert.match(response.body, /Invalid CSRF token/);
+});
+
+test("hosted API does not let non-bearer Authorization bypass cookie CSRF", async t => {
+  const instance = await createApiAppInstance();
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const cookie = makePortalSessionCookie({
+    provider: "keycloak",
+    subject: "csrf-header-user",
+    email: "csrf-header@example.com",
+    displayName: "CSRF Header User",
+  });
+
+  const response: any = await app.inject({
+    method: "POST",
+    url: "/api/workspaces",
+    headers: {
+      authorization: "Token not-a-bearer-token",
+      cookie,
+    },
+    payload: {
+      name: "Blocked non-bearer CSRF workspace",
+      description: "A non-bearer Authorization header must not suppress cookie CSRF checks.",
+    },
+  });
+  assert.equal(response.statusCode, 403);
+  assert.match(response.body, /Invalid CSRF token/);
 });
 
 test("hosted API can run browser parity analysis with stored workspace credentials", async t => {
@@ -2201,7 +2343,7 @@ test("hosted API aggregates repositories across linked GitHub installations and 
       githubInstallationId: string;
       githubAccountLogin: string;
     }>;
-    pageInfo: { total: number };
+    pageInfo: { total: number; pageSize: number };
   };
   assert.deepEqual(
     repositoriesPayload.items.map(repository => ({
@@ -2223,6 +2365,15 @@ test("hosted API aggregates repositories across linked GitHub installations and 
     ],
   );
   assert.equal(repositoriesPayload.pageInfo.total, 2);
+  assert.equal(repositoriesPayload.pageInfo.pageSize, 10);
+
+  const cappedRepositoriesResponse: any = await authenticatedInject(app, {
+    method: "GET",
+    url: `/api/workspaces/${workspacePayload.workspace.id}/integrations/github/repositories?page=1&pageSize=10000`,
+  });
+  assert.equal(cappedRepositoriesResponse.statusCode, 200);
+  const cappedRepositoriesPayload = cappedRepositoriesResponse.json() as { pageInfo: { pageSize: number } };
+  assert.equal(cappedRepositoriesPayload.pageInfo.pageSize, 100);
 
   const filteredRepositoriesResponse: any = await authenticatedInject(app, {
     method: "GET",
@@ -2441,6 +2592,32 @@ test("hosted API verifies GitHub webhook signatures and safely acknowledges inst
   assert.equal(invalidSignatureResponse.statusCode, 401);
 });
 
+test("hosted API rejects malformed signed GitHub webhook JSON with a controlled client error", async t => {
+  const instance = await createApiAppInstance(undefined, {
+    GITHUB_APP_WEBHOOK_SECRET: "github_webhook_secret_test",
+  });
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const malformedPayload = "{\"action\":\"created\"";
+  const validSignature = `sha256=${createHmac("sha256", "github_webhook_secret_test").update(malformedPayload).digest("hex")}`;
+
+  const webhookResponse: any = await authenticatedInject(app, {
+    method: "POST",
+    url: "/api/webhooks/github",
+    payload: malformedPayload,
+    headers: {
+      "content-type": "text/plain",
+      "x-github-event": "installation",
+      "x-hub-signature-256": validSignature,
+    },
+  });
+  assert.equal(webhookResponse.statusCode, 400);
+  assert.match(String((webhookResponse.json() as { error?: string }).error ?? ""), /Malformed GitHub webhook JSON payload/);
+});
+
 test("hosted API rejects GitHub webhooks when no webhook secret is configured", async t => {
   const instance = await createApiAppInstance(undefined, {
     GITHUB_APP_WEBHOOK_SECRET: "",
@@ -2471,6 +2648,30 @@ test("hosted API rejects GitHub webhooks when no webhook secret is configured", 
     },
   });
   assert.equal(webhookResponse.statusCode, 503);
+});
+
+test("hosted API reports Codex auth configuration gaps without a raw server error", async t => {
+  const instance = await createApiAppInstance(undefined, {
+    ADMIN_EMAILS: "portal-admin@speclens.test",
+    CODEX_OAUTH_DEVICE_CODE_URL: "",
+    CODEX_OAUTH_TOKEN_URL: "",
+    CODEX_OAUTH_CLIENT_ID: "",
+  });
+  const { app } = instance;
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const response: any = await authenticatedInject(app, {
+    method: "POST",
+    url: "/api/admin/ai/auth/device",
+    headers: {
+      cookie: workspaceAdminCookie,
+    },
+  });
+  assert.equal(response.statusCode, 503);
+  const payload = response.json() as { error: string };
+  assert.match(payload.error, /Codex OAuth is not configured/);
 });
 
 test("hosted API can retry pending public source verification from the sources surface", async t => {
@@ -2584,6 +2785,7 @@ test("hosted API registers local webhook targets and redirects gateway callbacks
     GITHUB_GATEWAY_URL: "https://github.speclens.tinamk.no",
     GITHUB_GATEWAY_DOMAIN: "github.speclens.tinamk.no",
     GITHUB_GATEWAY_REGISTRATION_TOKEN: "gateway-register-secret",
+    GITHUB_GATEWAY_FORWARD_TIMEOUT_MS: "100",
   });
   const { app } = instance;
   t.after(async () => {
@@ -2628,7 +2830,7 @@ test("hosted API registers local webhook targets and redirects gateway callbacks
     payload: {
       environmentLabel: "local-test",
       appUrl: "http://localhost:8080",
-      webhookForwardUrl: "https://smee.io/example",
+      webhookForwardUrl: "http://127.0.0.1:1/example",
       kind: "local",
     },
   });
@@ -2648,6 +2850,35 @@ test("hosted API registers local webhook targets and redirects gateway callbacks
     callbackResponse.headers.location,
     `http://localhost:8080/auth/github/callback?state=${encodeURIComponent(installUrlPayload.state)}&installation_id=12345&setup_action=install`,
   );
+
+  const installPayload = JSON.stringify({
+    action: "created",
+    installation: {
+      id: 12345,
+      account: {
+        login: "example-org",
+      },
+    },
+  });
+  const validSignature = `sha256=${createHmac("sha256", defaultGithubWebhookSecret).update(installPayload).digest("hex")}`;
+  const webhookResponse: any = await app.inject({
+    method: "POST",
+    url: "/api/webhooks/github",
+    payload: installPayload,
+    headers: {
+      host: "github.speclens.tinamk.no",
+      "content-type": "application/json",
+      "x-github-event": "installation",
+      "x-hub-signature-256": validSignature,
+    },
+  });
+  assert.equal(webhookResponse.statusCode, 200);
+  const webhookPayload = webhookResponse.json() as {
+    forwardedTargets: Array<{ environmentLabel: string; ok: boolean; status: number | null; error: string | null }>;
+  };
+  assert.equal(webhookPayload.forwardedTargets.length, 1);
+  assert.equal(webhookPayload.forwardedTargets[0]?.environmentLabel, "local-test");
+  assert.equal(webhookPayload.forwardedTargets[0]?.ok, false);
 });
 
 test("hosted API persists workspace state across app restarts", async t => {
@@ -2884,4 +3115,46 @@ test("hosted API supports queued job cancellation and retry", async t => {
   const retriedCompleted = await waitForJob(app, retryPayload.job.job.id);
   assert.equal(retriedCompleted.job.job.status, "succeeded");
   assert.equal(retriedCompleted.job.job.executionPath, "unified-agent");
+});
+
+test("hosted job lifecycle mutations are guarded by current state", async t => {
+  const instance = await createApiAppInstance(createTestDatabaseName("speclens_lifecycle_guards"));
+  t.after(async () => {
+    await instance.close();
+  });
+
+  const owner = await ensureAuthenticatedPortalUser();
+  const workspace = await createWorkspaceForUser(owner, {
+    name: "Lifecycle Guard Workspace",
+    description: "Verifies atomic hosted job state transitions.",
+  });
+  const sourceRecord = await createSourceForUserForTests(workspace.id, owner.id, {
+    type: "git-public",
+    displayName: "Lifecycle guard fixture",
+    location: fixtureUrl,
+  });
+  const job = await createAgentJobForUser(workspace.id, owner.id, "agent-universal-standard", {
+    sourceId: sourceRecord.id,
+  });
+
+  const firstClaim = await claimAgentJob(job.job.id, "worker-a", "message-a");
+  assert.ok(firstClaim, "first claim should win");
+  const secondClaim = await claimAgentJob(job.job.id, "worker-b", "message-b");
+  assert.equal(secondClaim, null, "second claim must not overwrite a running claim");
+
+  const runningEnvelope = await getJobEnvelopeForUser(job.job.id, owner.id);
+  assert.equal(runningEnvelope.job.status, "running");
+  assert.equal(runningEnvelope.job.claimedRunnerId, "worker-a");
+  assert.equal(runningEnvelope.job.queueMessageId, "message-a");
+
+  await finalizeAnalysisJobFailure(job.job.id, {
+    failureReason: "Lifecycle guard failure.",
+  });
+  const failedEnvelope = await getJobEnvelopeForUser(job.job.id, owner.id);
+  assert.equal(failedEnvelope.job.status, "failed");
+
+  await finalizeAnalysisJobSuccess(job.job.id, runningEnvelope);
+  const finalEnvelope = await getJobEnvelopeForUser(job.job.id, owner.id);
+  assert.equal(finalEnvelope.job.status, "failed");
+  assert.equal(finalEnvelope.job.failureReason, "Lifecycle guard failure.");
 });

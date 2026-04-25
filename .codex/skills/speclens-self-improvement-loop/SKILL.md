@@ -70,6 +70,19 @@ The same pass exposed and fixed two runtime issues:
 - Final standardized handoff must run a safe Playwright verification command, not the first full-suite command proposed by a role.
 - Shell command timeouts must kill the whole process group so orphaned Playwright descendants cannot hold stdout open after the wrapper exits.
 
+On the April 25, 2026 full SpecLens dogfood run (`job_20ec8400-931c-4e32-b0c2-6e04ba9995ee`), the 22-role standard browser job completed in 21m31s with observed role parallelism of 2.19. The run produced 60 downloaded artifacts with no required artifact-kind gaps, but the release gate still failed because Codex roles inspected project-root artifact paths instead of trusting the sandbox artifact-auditor handoff. Treat this as a role-contract issue, not as proof that controller artifact mirroring failed.
+
+The April 25 pass also established these loop rules:
+
+- `playwright-operator` must not run transient `npx playwright` probes before locked dependencies are installed. Prefer repo scripts and worker-provided preflight evidence.
+- `release-gate-scorer` must use artifact-auditor fields (`generatedArtifacts`, `sourcePaths`, `presentGeneratedKinds`, `missingGeneratedKinds`) as the canonical evidence for already-executed sandbox artifacts.
+- Runner and agent queue concurrency must be validated end-to-end; logged `*_MAX_CONCURRENCY` values are not enough unless the queue worker batch size uses them.
+- GUI/report recommendations are in scope when they improve report comprehension, actionability, accessibility, or the trustworthiness of the hosted job evidence trail.
+- Missing Docker Compose inside the per-job sandbox is not itself a release blocker for hosted jobs. Compose/DinD readiness is controller-side preflight evidence; inside the job sandbox, use direct runtime, browser executor, Playwright preflight, artifact-auditor, and controller-collected sandbox evidence.
+- Missing Keycloak or Codex OAuth environment is a deployment readiness prerequisite when the UI/API fails closed with a public recovery page or controlled 503. Treat it as a high defect only when configured deployments break, users can loop without recovery, secrets are mishandled, or no actionable recovery is visible.
+
+On the April 25, 2026 full SpecLens dogfood run (`job_4736ce3f-24de-4623-a918-e8dba69a5c0d`), the 22-role standard browser job completed in 16m51s with quality score 96 and release gate `warn`. The run proved the sandbox launch, wait, result collection, artifact mirroring, direct browser executor, Playwright preflight, and artifact auditor paths. Its remaining capability gap was authenticated browser coverage: when a role claims portal UX confidence, require either real authenticated Playwright evidence, direct browser evidence with usable auth material, or an explicit scoped limitation in the release gate. Treat copy/accessibility findings as loop-improvement inputs when they make reports, filters, outage recovery, or artifact review harder to act on.
+
 For fast runtime/tooling work, prefer:
 
 ```bash
@@ -100,6 +113,14 @@ node .codex/skills/speclens-self-improvement-loop/scripts/run-cycle.mjs analyze 
   --ref HEAD
 ```
 
+To dogfood local uncommitted changes without creating a commit, add:
+
+```bash
+--include-dirty
+```
+
+This overlays tracked diffs and untracked non-ignored files onto the archived ref before upload. Use it only for local self-improvement runs; committed refs remain the default for reproducible evidence.
+
 What it does:
 
 1. Reuse or create the workspace.
@@ -110,6 +131,8 @@ What it does:
 6. Wait for completion by default.
 7. Download logs, report payloads, sandbox evidence, and job artifacts into `.speclens-workspace/self-improvement/`.
 8. Fail the cycle if sandbox launch/result evidence is missing unless `--no-strict-sandbox-evidence` is passed.
+
+During long standard runs the helper polls with full log visibility and prints a deterministic wait heartbeat roughly once per minute with the current job status, visible log count, and active execution step. The heartbeat prefers live role/executor work over controller lifecycle wait stages, so a healthy sandbox should show the actual role that is making progress. In Keycloak mode it refreshes the portal bearer token before expiry so long polling should not generate avoidable `401` noise.
 
 If local API restarts or the helper loses its polling connection after queueing, collect the completed job evidence without creating a new job:
 
@@ -174,7 +197,7 @@ If the patch is acceptable, apply it explicitly and then rerun the loop.
 
 ## Notes
 
-- The upload path accepts Git repository archives, so the helper audits committed refs such as `HEAD`. If you want the loop to include new local changes, commit them first or be explicit that the current cycle is evaluating the last committed state.
+- The upload path accepts Git repository archives, so the helper audits committed refs such as `HEAD` by default. Use `--include-dirty` for local-only dogfood cycles that must evaluate uncommitted worktree changes without creating a commit.
 - If workspace auth import fails because no local Codex auth file exists, resolve that first with local Codex login and rerun the helper.
 - Prefer the helper script over ad hoc API calls so cycle output lands in a deterministic local evidence directory.
 - Treat a successful job without sandbox evidence as a tooling failure. Hosted job quality is not acceptable unless the artifacts prove the run entered the Docker sandbox.

@@ -36,6 +36,56 @@ const browserFixtureRepoPath = createCommittedGitFixture(
 );
 const browserFixtureRepoUrl = toFileGitUrl(browserFixtureRepoPath);
 
+test("ai-worker derives finding paths and role categories from normalized role output", () => {
+  assert.deepEqual(
+    aiWorker.extractFindingPathsForTest([
+      "`docs/FILE_MAP.md` app inventory is stale.",
+      "primary/apps/web/app/page.tsx renders the route.",
+    ]),
+    ["docs/FILE_MAP.md", "apps/web/app/page.tsx"],
+  );
+
+  assert.deepEqual(
+    aiWorker.buildFindingEvidenceRefsForTest(
+      ["GET https://example.test/api failed", "`docs/FILE_MAP.md` app inventory is stale."],
+      ["playwright-report/index.html"],
+    ).map(ref => ({ kind: ref.kind, value: ref.value, sourcePath: ref.sourcePath })),
+    [
+      { kind: "test-report", value: "playwright-report/index.html", sourcePath: "playwright-report/index.html" },
+      { kind: "repo-file", value: "docs/FILE_MAP.md", sourcePath: "docs/FILE_MAP.md" },
+      { kind: "network", value: "GET https://example.test/api failed", sourcePath: null },
+    ],
+  );
+
+  const output = aiWorker.normalizeRoleOutputForTest({
+    summary: "Dependency review complete.",
+    sections: [],
+    findings: [{
+      severity: "medium",
+      title: "Dependency issue",
+      message: "package.json needs review.",
+      suggestion: "Review the dependency contract.",
+      evidence: ["package.json"],
+    }],
+  }, "dependency-risk-reviewer");
+
+  assert.equal(output.findings[0]?.category, "dependency");
+});
+
+test("ai-worker does not promote unknown role section statuses to ready", () => {
+  const output = aiWorker.normalizeRoleOutputForTest({
+    summary: "Partial review complete.",
+    sections: [{
+      title: "Unknown state section",
+      status: "needs-human-review",
+      summary: "This status is not part of the role contract.",
+    }],
+    findings: [],
+  }, "runtime-scout");
+
+  assert.equal(output.sections[0]?.status, "planned");
+});
+
 function writeCodexStub(stubPath: string): void {
   const script = [
     "#!/usr/bin/env node",
@@ -99,7 +149,7 @@ function writeCodexStub(stubPath: string): void {
     "      status: 'ready',",
     "      summary: 'Route and journey coverage prepared.',",
     "      data: {",
-    "        navigationTargets: [{ path: '/', purpose: 'home', requiresAuth: false, source: 'router' }, { path: '/settings', purpose: 'settings', requiresAuth: false, source: 'router' }, { path: '/secure', purpose: 'secure workspace', requiresAuth: true, source: 'router' }, { path: '/broken', purpose: 'console error route', requiresAuth: false, source: 'router' }, { path: '/portal/:path* (middleware redirect to /api/auth/login when session cookie is missing)', purpose: 'route pattern', requiresAuth: true, source: 'docs' }, { path: '/workspaces/[workspaceId]', purpose: 'dynamic route pattern', requiresAuth: true, source: 'router' }, { path: '/api/status', purpose: 'api health', requiresAuth: false, source: 'docs' }],",
+    "        navigationTargets: [{ path: '/', purpose: 'home', requiresAuth: false, source: 'router' }, { path: '/settings', purpose: 'settings', requiresAuth: false, source: 'router' }, { path: '/secure', purpose: 'secure workspace', requiresAuth: true, source: 'router' }, { path: '/broken', purpose: 'console error route', requiresAuth: false, source: 'router' }, { path: '/portal/:path* (middleware redirect to /api/auth/login when session cookie is missing)', purpose: 'route pattern', requiresAuth: true, source: 'docs' }, { path: '/, /pricing, /license', purpose: 'bad prose route list', requiresAuth: false, source: 'docs' }, { path: '/workspaces/[workspaceId]', purpose: 'dynamic route pattern', requiresAuth: true, source: 'router' }, { path: '/api/status', purpose: 'api health', requiresAuth: false, source: 'docs' }],",
     "        journeys: [{ title: 'Login and inspect secure workspace', steps: ['Open /login', 'Submit credentials', 'Open /secure'], requiresAuth: true, priority: 'high', successSignals: ['Secure workspace heading visible'] }],",
     "        assertions: ['Home page loads with an h1.', 'Secure workspace is reachable after login.', 'Console errors are captured when they occur.'],",
     "        detectedSurfaces: [{ label: 'Fixture app', kind: 'repo-app', location: '.', companion: false, confidence: 'high' }],",
@@ -128,7 +178,7 @@ function writeCodexStub(stubPath: string): void {
     "        reporters: [],",
     "        artifacts: ['browser screenshots', 'trace', 'storage state'],",
     "        prerequisites: ['Runtime target must be reachable on the documented base URL.'],",
-    "        coverageGaps: ['No repository-native Playwright suite is present in the fixture app.'],",
+    "        coverageGaps: ['No repository-native Playwright suite is present in the fixture app.', 'No Playwright execution was performed in this role pass; readiness is based on repo contracts and existing artifacts only.', 'No newly generated browser artifacts were produced in this run.', JSON.stringify({ gap: 'No Playwright suite executed in this role handoff step.', evidence: ['No `npm run e2e:*` command executed in this step'] })],",
     "      },",
     "    }],",
     "    findings: [{ severity: 'low', title: 'Stub finding playwright-operator', message: 'Stub message', suggestion: 'Stub suggestion', evidence: ['package.json'] }],",
@@ -348,6 +398,11 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     assert.equal(firstResult.report?.summary.auditBundleId, "standard");
     assert.equal(Boolean(firstResult.report?.summary.releaseGateDecision), true);
     assert.equal((firstResult.report?.summary.remediationPacks.length ?? 0) > 0, true);
+    const firstCapturedPrompts = readPromptCapture(promptCapturePath);
+    const navigationPrompt = firstCapturedPrompts.find(item => item.roleId === "navigation-qa-planner");
+    const remediationPrompt = firstCapturedPrompts.find(item => item.roleId === "remediation-planner");
+    assert.equal(navigationPrompt?.prompt.includes("Preferred limits: at most 12 navigation targets"), true);
+    assert.equal(remediationPrompt?.prompt.includes("Preferred limits: at most 5 packs"), true);
     assert.ok(firstResult.report?.summary.qualityScorecard, "Expected a computed quality scorecard.");
     assert.equal((firstResult.report?.summary.qualityScorecard?.overallScore ?? 0) > 0, true);
     assert.ok(
@@ -357,6 +412,21 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     assert.ok(firstResult.report?.summary.artifactAnalysis, "Expected artifact analysis in the report summary.");
     assert.equal((firstResult.report?.summary.artifactAnalysis?.producedCount ?? 0) >= 0, true);
     assert.ok(Array.isArray(firstResult.report?.summary.capabilityGaps), "Expected capability gap analysis on the report summary.");
+    assert.equal(
+      firstResult.report?.summary.capabilityGaps.some(gap => gap.summary.includes("No Playwright execution was performed")),
+      false,
+      "Expected live sandbox browser execution evidence to suppress stale role-level Playwright coverage gaps.",
+    );
+    assert.equal(
+      firstResult.report?.summary.capabilityGaps.some(gap => gap.summary.includes("No newly generated browser artifacts")),
+      false,
+      "Expected generated browser artifacts to suppress stale role-level browser artifact gaps.",
+    );
+    assert.equal(
+      firstResult.report?.summary.capabilityGaps.some(gap => gap.summary.includes("No Playwright suite executed")),
+      false,
+      "Expected repository-native Playwright execution evidence to suppress stale role-handoff Playwright gaps.",
+    );
     assert.ok((firstResult.report?.summary.executionSteps.length ?? 0) > 0, "Expected persisted execution steps in the report summary.");
     assert.equal(firstResult.report?.summary.executionSteps.some(step => step.agentId === agentId), true);
     assert.equal(firstResult.report?.summary.executionSteps.some(step => step.executorKind === "native"), true);
@@ -389,9 +459,14 @@ test("ai-worker persists learnables and injects them into follow-up runtime agen
     assert.equal((browserExecutionSection?.data.authenticated as boolean | undefined), true);
     const browserNavigationTargets = (browserExecutionSection?.data.navigationTargets as string[] | undefined) ?? [];
     assert.equal(
-      browserNavigationTargets.some(target => target.includes(":path") || target.includes("[workspaceId]") || target.includes("/api/status")),
+      browserNavigationTargets.some(target =>
+        target.includes(":path")
+        || target.includes("[workspaceId]")
+        || target.includes("/api/status")
+        || target.includes("%2C")
+        || target.includes("/,%20/pricing")),
       false,
-      "Expected hosted browser QA to skip API endpoints and unresolved route patterns.",
+      "Expected hosted browser QA to skip API endpoints, unresolved route patterns, and prose route lists.",
     );
     const skippedNavigationTargets = (browserExecutionSection?.data.skippedNavigationTargets as Array<{ reason?: string }> | undefined) ?? [];
     assert.equal(

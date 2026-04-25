@@ -1,8 +1,9 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { PortalMetaList, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { DataChipList, DataCommandList, DataPath, DataValue } from "../../../../../../components/data-visuals";
 import { JobLifecycleActions, JobLogConsole } from "../../../../../../components/portal-actions";
+import { WorkspaceRouteState } from "../../../../../../components/workspace-route-state";
 import {
   ApiResponseError,
   getCurrentUser,
@@ -28,6 +29,76 @@ function formatBytes(sizeBytes: number): string {
   if (sizeBytes < 1024) return `${sizeBytes} bytes`;
   if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getRunOutcome(input: {
+  artifactCount: number;
+  changesetReady: boolean;
+  jobKind: string;
+  reportReady: boolean;
+  status: string;
+}): {
+  badge: string;
+  detail: string;
+  tone: "danger" | "info" | "neutral" | "success" | "warning";
+  title: string;
+} {
+  if (input.status === "succeeded" && input.changesetReady) {
+    return {
+      badge: "Reviewable fix",
+      detail: "The remediation run finished with a changeset. Review the changed files, validation status, and artifacts before merging.",
+      tone: "success",
+      title: "Remediation changes are ready",
+    };
+  }
+  if (input.status === "succeeded" && input.reportReady) {
+    return {
+      badge: "Report ready",
+      detail: "The analysis run produced a durable report. Open it first for findings, release-gate status, artifacts, and remediation handoff.",
+      tone: "success",
+      title: "Analysis output is ready to review",
+    };
+  }
+  if (input.status === "succeeded") {
+    return {
+      badge: "Finished",
+      detail: input.artifactCount > 0
+        ? "The run finished without a linked report. Inspect artifacts and logs to confirm whether that was expected."
+        : "The run finished without report or artifact output. Inspect the live stream before trusting this result.",
+      tone: "warning",
+      title: "Run finished without a primary review artifact",
+    };
+  }
+  if (input.status === "failed") {
+    return {
+      badge: "Needs attention",
+      detail: "The run failed before producing a trusted final result. Start with the execution board and latest log entries, then retry after the blocker is fixed.",
+      tone: "danger",
+      title: "Run failed before completion",
+    };
+  }
+  if (input.status === "cancelled") {
+    return {
+      badge: "Stopped",
+      detail: "The run was cancelled. Review the partial logs and artifacts before deciding whether to queue it again.",
+      tone: "neutral",
+      title: "Run was cancelled",
+    };
+  }
+  if (input.status === "running") {
+    return {
+      badge: "In progress",
+      detail: "The sandbox is still executing. Watch the execution board for the active role, slow steps, and artifact/log updates.",
+      tone: "info",
+      title: "Run is still executing",
+    };
+  }
+  return {
+    badge: input.jobKind === "remediation" ? "Waiting for fix" : "Waiting for analysis",
+    detail: "The job has not reached a terminal state yet. Keep this page open to follow queue claim, sandbox launch, role execution, and finalization.",
+    tone: "warning",
+    title: "Run is queued",
+  };
 }
 
 export default async function WorkspaceJobPage({
@@ -70,18 +141,26 @@ export default async function WorkspaceJobPage({
     const codeReviewHref = `/portal/workspaces/${workspaceId}/code?${codeReviewParams.toString()}` as Route;
     const artifactCount = envelope.artifacts.length;
     const learnableCount = sourceLearnables.length;
+    const runOutcome = getRunOutcome({
+      artifactCount,
+      changesetReady: Boolean(envelope.job.changeset && envelope.job.changeset.changedFiles.length > 0),
+      jobKind: envelope.job.jobKind,
+      reportReady: Boolean(envelope.report),
+      status: envelope.job.status,
+    });
 
     return (
       <PortalShell
         eyebrow="Workspace run"
-        title={envelope.job.id}
+        title={executionLabel}
+        lede={`Job ${envelope.job.id}`}
         pageTestId="workspace-runs-job-page"
         primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
         activePrimaryNavKey="workspaces"
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="runs"
       >
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Run summary">
           <article className="portal-stat" data-testid="workspace-runs-job-stat-status">
             <span className="portal-stat__label">Status</span>
             <span className="portal-stat__value">{envelope.job.status}</span>
@@ -99,6 +178,42 @@ export default async function WorkspaceJobPage({
             <span className="portal-stat__label">Lifecycle</span>
             <span className="portal-stat__value">{canManageLifecycle ? "Owner" : "Read-only"}</span>
           </article>
+        </section>
+
+        <section className={`run-decision-board run-decision-board--${runOutcome.tone}`} data-testid="workspace-runs-job-decision">
+          <div className="run-decision-board__copy">
+            <span className={getJobStatusTagClass(envelope.job.status)}>{runOutcome.badge}</span>
+            <h2>{runOutcome.title}</h2>
+            <p>{runOutcome.detail}</p>
+          </div>
+          <div className="run-decision-board__facts">
+            <PortalMetaList
+              items={[
+                { label: "Status", value: envelope.job.status },
+                { label: "Kind", value: envelope.job.jobKind },
+                { label: "Execution", value: formatJobExecutionMode(envelope.job) },
+                { label: "Runtime", value: envelope.job.runtimeMode },
+                { label: "Source", value: <DataPath value={envelope.job.sourceLocation} /> },
+              ]}
+            />
+          </div>
+          <div className="run-decision-board__actions">
+            {envelope.report ? (
+              <Link
+                className="button"
+                data-testid="workspace-runs-job-decision-open-report"
+                href={`/portal/workspaces/${workspaceId}/reports/${envelope.report.id}` as Route}
+              >
+                Open report
+              </Link>
+            ) : null}
+            <Link className={envelope.report ? "button-secondary" : "button"} data-testid="workspace-runs-job-decision-open-code" href={codeReviewHref}>
+              Open code review
+            </Link>
+            <Link className="button-ghost" data-testid="workspace-runs-job-decision-back" href={`/portal/workspaces/${workspaceId}/runs` as Route}>
+              Back to runs
+            </Link>
+          </div>
         </section>
 
         <section className="portal-grid">
@@ -155,7 +270,7 @@ export default async function WorkspaceJobPage({
             />
             {!canManageLifecycle ? (
               <p className="subtle-note" data-testid="workspace-runs-job-lifecycle-read-only">
-                Owner only.
+                Workspace owners can cancel or retry jobs. Open access settings if ownership needs to change.
               </p>
             ) : null}
             <JobLifecycleActions
@@ -267,10 +382,10 @@ export default async function WorkspaceJobPage({
               {envelope.artifacts.map((artifact, index) => (
                 <article className="portal-record-card" data-testid={`workspace-runs-job-artifact-${index}`} key={`${artifact.key}:${index}`}>
                   <div className="portal-record-card__header">
-                  <div className="portal-record-card__title">
-                    <strong>{artifact.kind}</strong>
-                    <p><DataPath value={artifact.key} /></p>
-                  </div>
+                    <div className="portal-record-card__title">
+                      <strong>{artifact.kind}</strong>
+                      <p><DataPath value={artifact.key} /></p>
+                    </div>
                     <div className="portal-record-card__meta">
                       <span className="tag tag--neutral">{artifact.kind}</span>
                       <span className="tag tag--info">{artifact.mimeType}</span>
@@ -295,21 +410,20 @@ export default async function WorkspaceJobPage({
     );
   } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
+      const isMissing = error.status === 404;
       return (
-        <PortalShell
+        <WorkspaceRouteState
+          backHref={`/portal/workspaces/${workspaceId}/runs` as Route}
+          backLabel="Back to runs"
+          deniedDescription="You do not have access to this job."
           eyebrow="Workspace run"
-          title="Access denied"
+          isAdmin={isPortalAdminSession(session)}
+          isMissing={isMissing}
+          missingDescription="This run could not be found in the current workspace."
+          missingTitle="Run not found"
           pageTestId="workspace-runs-job-access-denied-page"
-          primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
-          activePrimaryNavKey="workspaces"
-        >
-          <PortalNoticePanel
-            actions={<Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/runs` as Route}>Back to runs</Link>}
-            description="You do not have access to this job."
-            descriptionTestId="workspace-runs-job-access-denied"
-            title="Access denied"
-          />
-        </PortalShell>
+          descriptionTestId="workspace-runs-job-access-denied"
+        />
       );
     }
     throw error;

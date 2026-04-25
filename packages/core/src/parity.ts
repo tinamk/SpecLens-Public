@@ -156,11 +156,11 @@ function buildLabelVariants(values: string[]): Map<string, Set<string>> {
   return variants;
 }
 
-function loadLicensePolicy(): {
+function loadLicensePolicy(repoPath: string): {
   classifications: { allow: string[]; review: string[]; block: string[] };
   aliases: Record<string, string>;
 } {
-  return loadJsonIfExists(path.resolve(process.cwd(), "policies/license-policy.json"), {
+  return loadJsonIfExists(path.resolve(repoPath, "policies/license-policy.json"), {
     classifications: { allow: ["MIT", "Apache-2.0", "UNLICENSED"], review: ["MPL-2.0"], block: ["GPL-3.0-only"] },
     aliases: {},
   });
@@ -171,14 +171,39 @@ function normalizeLicense(value: string | null, aliases: Record<string, string>)
   return aliases[value] ?? value;
 }
 
+function isReferencePath(relativePath: string): boolean {
+  return (
+    relativePath.startsWith("archive/")
+    || relativePath.startsWith("fixtures/")
+    || relativePath.startsWith("tests/fixtures/")
+    || relativePath.startsWith(".speclens-workspace/")
+  );
+}
+
+function isReferenceManifestPath(relativePath: string): boolean {
+  return isReferencePath(relativePath);
+}
+
+function isUiSourcePath(relativePath: string): boolean {
+  return /\.(tsx|jsx|svelte)$/.test(relativePath) && !isReferencePath(relativePath);
+}
+
+function isComponentLikeFile(file: SourceFileRecord): boolean {
+  if (/(^|\/)[A-Z][A-Za-z0-9_-]*\.(tsx|jsx|svelte)$/.test(file.relativePath)) {
+    return true;
+  }
+  return /\bexport\s+(?:default\s+)?function\s+[A-Z][A-Za-z0-9_]*/.test(file.text)
+    || /\bexport\s+const\s+[A-Z][A-Za-z0-9_]*\s*=/.test(file.text);
+}
+
 export async function analyzeRoles(context: RoleAnalysisContext): Promise<RoleAnalysisResult> {
   const files = scanSourceFiles(context.repoPath);
-  const uiFiles = files.filter(file => /\.(tsx|jsx|svelte)$/.test(file.relativePath));
-  const componentFiles = uiFiles.filter(file => /(^|\/)[A-Z][A-Za-z0-9_-]*\.(tsx|jsx|svelte)$/.test(file.relativePath));
+  const uiFiles = files.filter(file => isUiSourcePath(file.relativePath));
+  const componentFiles = uiFiles.filter(file => isComponentLikeFile(file));
   const allStrings = uiFiles.flatMap(file => extractQuotedStrings(file.text));
   const labelStrings = allStrings.filter(value => /^[A-Z][A-Za-z0-9 ,./()&:-]+$/.test(value));
   const labelVariants = buildLabelVariants(labelStrings);
-  const licensePolicy = loadLicensePolicy();
+  const licensePolicy = loadLicensePolicy(context.repoPath);
 
   const findings: AnalysisFinding[] = [];
   const sections: AnalysisReportSection[] = [];
@@ -351,21 +376,26 @@ export async function analyzeRoles(context: RoleAnalysisContext): Promise<RoleAn
   if (context.roles.includes("license-policy")) {
     const licenseRecords = context.inventory.manifests.map(manifest => {
       const normalized = normalizeLicense(manifest.license, licensePolicy.aliases);
-      const classification = licensePolicy.classifications.block.includes(normalized)
-        ? "block"
-        : licensePolicy.classifications.review.includes(normalized)
-          ? "review"
-          : "allow";
+      const policyScope = isReferenceManifestPath(manifest.relativePath) ? "reference" : "active";
+      const classification = policyScope === "reference"
+        ? "reference"
+        : licensePolicy.classifications.block.includes(normalized)
+          ? "block"
+          : licensePolicy.classifications.review.includes(normalized)
+            ? "review"
+            : "allow";
       return {
         path: manifest.relativePath,
         name: manifest.name,
         raw: manifest.license,
         normalized,
         classification,
+        policyScope,
       };
     });
     const blocked = licenseRecords.filter(item => item.classification === "block");
     const review = licenseRecords.filter(item => item.classification === "review");
+    const reference = licenseRecords.filter(item => item.classification === "reference");
     if (blocked.length > 0) {
       findings.push(createFinding(
         "license-policy",
@@ -390,7 +420,7 @@ export async function analyzeRoles(context: RoleAnalysisContext): Promise<RoleAn
       "license-policy",
       "License policy review",
       "ready",
-      `${licenseRecords.length} manifest license signal(s) evaluated with ${blocked.length} blocked and ${review.length} review-required result(s).`,
+      `${licenseRecords.length} manifest license signal(s) evaluated with ${blocked.length} blocked, ${review.length} review-required, and ${reference.length} reference-only result(s).`,
       {
         policyPath: "policies/license-policy.json",
         records: licenseRecords,

@@ -5,7 +5,7 @@ source-available license.
 
 Commercial licensing is intended for cases such as:
 
-- internal company deployment or self-hosting
+- internal company deployment or self-hosting for commercial purposes
 - offering SpecLens or a derivative as a commercial service
 - embedding SpecLens in a commercial product
 - client delivery, paid consulting, or resale scenarios

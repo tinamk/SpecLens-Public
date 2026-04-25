@@ -7,7 +7,6 @@ import {
   MarketingShell,
   PricingCard,
 } from "@speclens/ui";
-import { CheckoutButton } from "../../components/portal-actions";
 import { SiteFooter } from "../../components/site-footer";
 import { SiteHeader } from "../../components/site-header";
 
@@ -15,13 +14,13 @@ export default function PricingPage() {
   return (
     <MarketingShell testId="public-pricing-page">
       <SiteHeader />
-      <main data-testid="public-pricing-main">
+      <main data-testid="public-pricing-main" id="main-content" tabIndex={-1}>
         <MarketingPageHero
           eyebrow="Pricing"
           title="Hosted plans for specification-driven QA."
-          description="Free for public repos. Pro for private repos and archive uploads. Commercial is a separate contract path for codebase rights."
+          description="Free for approved public Git hosts. Pro for private GitHub repositories and archive uploads. Commercial is a separate contract path for codebase rights."
           asideLabel="Quick rule"
-          asideValue="Hosted plans cover execution. Commercial covers rights and self-hosting."
+          asideValue="Hosted plans cover execution. Commercial covers rights and commercial-purpose self-hosting."
           testId="public-pricing-hero"
         />
 
@@ -29,25 +28,25 @@ export default function PricingPage() {
           <MarketingRoutePanel
             badgeLabel="Hosted SaaS"
             badgeClassName="tag tag--success"
-            description="Public GitHub on Free. Private GitHub and archive uploads on Pro."
-            title="Choose Pro if you need hosted access to private repos."
+            description="Approved public Git hosts on Free. Private GitHub and archive uploads on Pro."
+            title="Choose Pro if you need hosted access to private GitHub repos."
             actions={
               <>
-                <Link className="button" href="/api/auth/login">Start hosted</Link>
-                <Link className="button-ghost" href="#pricing-plans">Compare plans</Link>
+                <Link className="button" data-testid="public-pricing-open-portal" href="/login">Open hosted portal</Link>
+                <Link className="button-ghost" data-testid="public-pricing-compare-plans" href="#pricing-plans">Compare plans</Link>
               </>
             }
           />
           <MarketingRoutePanel
             badgeLabel="Commercial rights"
             badgeClassName="tag tag--warning"
-            description="Codebase rights, self-hosting, and procurement review live on a separate contract path."
-            title="Choose Commercial for company rights or self-hosting."
+            description="Codebase rights, commercial-purpose self-hosting, and procurement review live on a separate contract path."
+            title="Choose Commercial for company rights or commercial-purpose self-hosting."
             tone="commercial"
             actions={
               <>
-                <Link className="button" href="/commercial">Contact us</Link>
-                <Link className="button-ghost" href="/license">License details</Link>
+                <Link className="button" data-testid="public-pricing-commercial-licensing" href="/commercial">Commercial licensing</Link>
+                <Link className="button-ghost" data-testid="public-pricing-license-details" href="/license">License details</Link>
               </>
             }
           />
@@ -68,35 +67,35 @@ export default function PricingPage() {
               price="$0"
               description="For public-repository QA."
               bullets={[
-                "Public GitHub repositories",
+                "Approved public Git repositories from GitHub, GitLab, Bitbucket, or Codeberg",
                 "Shared workspaces",
                 "Hosted reports and logs",
               ]}
-              cta={<Link className="button-secondary" data-testid="public-pricing-free-cta" href="/api/auth/login">Use Free</Link>}
+              cta={<Link className="button-secondary" data-testid="public-pricing-free-cta" href="/login">Open hosted portal</Link>}
             />
             <PricingCard
               name="Pro"
               price="$19.99"
               description="per month, for private-repository QA and archive uploads."
               bullets={[
-                "Private GitHub repos",
-                "ZIP/TAR Git repo uploads",
+                "Private GitHub via the GitHub App",
+                "ZIP/TAR Git archive uploads",
                 "Shared workspaces",
                 "Approx. 200 NOK billed monthly in USD",
               ]}
-              cta={<CheckoutButton label="Start Pro" testId="public-pricing-pro-checkout" />}
+              cta={<Link className="button" data-testid="public-pricing-pro-checkout" href="/login">Open portal to start Pro</Link>}
               tone="featured"
             />
             <PricingCard
-              name="Commercial rights & self-hosting"
+              name="Commercial rights & deployments"
               price="Talk to us"
-              description="Company usage rights, self-hosting, or procurement review."
+              description="Company usage rights, commercial-purpose self-hosting, or procurement review."
               bullets={[
                 "Commercial rights for company usage of the codebase",
-                "Self-hosted deployment discussions",
+                "Commercial-purpose self-hosted deployment discussions",
                 "Procurement-friendly agreement path",
               ]}
-              cta={<Link className="button-secondary" data-testid="public-pricing-commercial-cta" href="/commercial">Contact us</Link>}
+              cta={<Link className="button-secondary" data-testid="public-pricing-commercial-cta" href="/commercial">Commercial licensing</Link>}
               tone="contrast"
             />
           </div>
@@ -107,38 +106,43 @@ export default function PricingPage() {
             kicker="Comparison"
             title="Hosted plans vs. commercial licensing"
           />
-          <div className="comparison-table">
-            <div className="comparison-row comparison-row--head">
-              <div className="comparison-cell comparison-cell--plan"><strong>Capability</strong></div>
-              <div className="comparison-cell"><strong>Free</strong></div>
-              <div className="comparison-cell"><strong>Pro</strong></div>
-              <div className="comparison-cell"><strong>Commercial</strong></div>
-            </div>
-            <div className="comparison-row">
-              <div className="comparison-cell comparison-cell--plan">Repository access</div>
-              <div className="comparison-cell">Public GitHub</div>
-              <div className="comparison-cell">Public + private GitHub</div>
-              <div className="comparison-cell">Per agreement</div>
-            </div>
-            <div className="comparison-row">
-              <div className="comparison-cell comparison-cell--plan">Source intake</div>
-              <div className="comparison-cell">Public Git URLs</div>
-              <div className="comparison-cell">Git URLs + ZIP/TAR uploads</div>
-              <div className="comparison-cell">Self-hosted / internal</div>
-            </div>
-            <div className="comparison-row">
-              <div className="comparison-cell comparison-cell--plan">Billing</div>
-              <div className="comparison-cell">Free</div>
-              <div className="comparison-cell">Self-serve Stripe</div>
-              <div className="comparison-cell">Contract + procurement</div>
-            </div>
-            <div className="comparison-row">
-              <div className="comparison-cell comparison-cell--plan">Codebase rights</div>
-              <div className="comparison-cell">—</div>
-              <div className="comparison-cell">—</div>
-              <div className="comparison-cell">Negotiated</div>
-            </div>
-          </div>
+          <table className="comparison-table">
+            <caption>Capability comparison for hosted and commercial SpecLens paths.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                <th scope="col">Free</th>
+                <th scope="col">Pro</th>
+                <th scope="col">Commercial</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Repository access</th>
+                <td>Approved public Git hosts</td>
+                <td>Approved public Git hosts + private GitHub</td>
+                <td>Per agreement</td>
+              </tr>
+              <tr>
+                <th scope="row">Source intake</th>
+                <td>Public GitHub, GitLab, Bitbucket, and Codeberg</td>
+                <td>Public Git + private GitHub + ZIP/TAR Git archives</td>
+                <td>Self-hosted / internal under contract</td>
+              </tr>
+              <tr>
+                <th scope="row">Billing</th>
+                <td>Free</td>
+                <td>Self-serve Stripe</td>
+                <td>Contract + procurement</td>
+              </tr>
+              <tr>
+                <th scope="row">Codebase rights</th>
+                <td>Not included</td>
+                <td>Not included</td>
+                <td>Negotiated</td>
+              </tr>
+            </tbody>
+          </table>
         </section>
       </main>
       <SiteFooter />

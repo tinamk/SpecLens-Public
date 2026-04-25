@@ -176,8 +176,8 @@ enable_docker() {
 
 install_repo_dependencies() {
   if [ "$INSTALL_NPM_DEPS" -eq 1 ]; then
-    log "Installing npm dependencies"
-    (cd "$ROOT_DIR" && npm install)
+    log "Installing npm dependencies from package-lock.json"
+    (cd "$ROOT_DIR" && npm ci)
   fi
 
   if [ "$INSTALL_ANSIBLE_COLLECTIONS" -eq 1 ]; then

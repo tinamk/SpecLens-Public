@@ -15,16 +15,27 @@ import {
 } from "@speclens/contracts";
 import { PortalMetaList } from "@speclens/ui";
 import type { PortalAnalysisTask } from "../lib/api";
+import { deleteJson, getApiBaseUrl, patchJson, postFormData, postJson, readApiErrorMessage } from "../lib/client-api";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
-
-function getApiBaseUrl(): string {
-  return "/api/proxy";
-}
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 
 function scopedTestId(prefix: string, suffix: string): string {
   return `${prefix}-${suffix}`;
+}
+
+function InlineStatus({
+  children,
+  testId,
+}: {
+  children: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <p className="subtle-note" data-testid={testId} role="status" aria-live="polite">
+      {children}
+    </p>
+  );
 }
 
 function encodeGithubRepositorySelection(repository: GithubRepository): string {
@@ -76,6 +87,66 @@ function formatStepDuration(step: AnalysisExecutionStep): string {
   }
   const seconds = Math.round(step.durationMs / 1000);
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function getCodexAuthOptionState(option: CodexAuthSelection["options"][number]): string {
+  if (option.selectable) {
+    return option.status.authMode ? `${option.status.status} via ${option.status.authMode}` : option.status.status;
+  }
+  if (option.status.disabled) {
+    return "disabled by admin policy";
+  }
+  if (option.status.lastError) {
+    return `error: ${option.status.lastError}`;
+  }
+  if (option.status.status === "pending") {
+    return "device flow pending";
+  }
+  if (option.status.status === "unauthenticated") {
+    if (option.scope === "workspace") return "connect workspace auth in settings";
+    if (option.scope === "user") return "connect account auth in portal settings";
+    return "admin global auth not connected";
+  }
+  if (!option.available) {
+    return "not available for this workspace";
+  }
+  return option.status.status;
+}
+
+function isTerminalStepStatus(status: AnalysisExecutionStep["status"]): boolean {
+  return status === "succeeded" || status === "failed" || status === "skipped";
+}
+
+function buildStepStatusCounts(steps: AnalysisExecutionStep[]): Record<AnalysisExecutionStep["status"], number> {
+  const counts: Record<AnalysisExecutionStep["status"], number> = {
+    failed: 0,
+    pending: 0,
+    running: 0,
+    skipped: 0,
+    succeeded: 0,
+  };
+  for (const step of steps) {
+    counts[step.status] += 1;
+  }
+  return counts;
+}
+
+function isLifecycleWaitStep(step: AnalysisExecutionStep): boolean {
+  return step.id === "sandbox:wait";
+}
+
+function getPrimaryActiveStep(steps: AnalysisExecutionStep[]): AnalysisExecutionStep | null {
+  const runningSteps = steps.filter(step => step.status === "running");
+  if (runningSteps.length === 0) {
+    return null;
+  }
+
+  return runningSteps
+    .filter(step => !isLifecycleWaitStep(step))
+    .sort((left, right) => {
+      const stepTypeRank = (step: AnalysisExecutionStep) => step.stepType === "executor" ? 0 : step.stepType === "role" ? 1 : 2;
+      return stepTypeRank(left) - stepTypeRank(right) || right.order - left.order;
+    })[0] ?? runningSteps[0] ?? null;
 }
 
 function applyExecutionStep(
@@ -157,89 +228,18 @@ function mergeExecutionPlan(
   return [...merged.values()].sort((left, right) => left.order - right.order);
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    try {
-      const payload = await response.json() as { error?: string; message?: string };
-      return payload.error ?? payload.message ?? `Request failed: ${response.status}`;
-    } catch {
-      return `Request failed: ${response.status}`;
-    }
-  }
-
-  const text = (await response.text()).trim();
-  return text || `Request failed: ${response.status}`;
-}
-
-async function postJson<T>(pathname: string, payload: unknown): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${pathname}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return await response.json() as T;
-}
-
-async function patchJson<T>(pathname: string, payload: unknown): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${pathname}`, {
-    method: "PATCH",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return await response.json() as T;
-}
-
-async function deleteJson<T>(pathname: string): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${pathname}`, {
-    method: "DELETE",
-  });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return await response.json() as T;
-}
-
-async function postFormData<T>(pathname: string, payload: FormData): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${pathname}`, {
-    method: "POST",
-    body: payload,
-  });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return await response.json() as T;
-}
-
 function getJobStatusTone(status: string): string {
   if (status === "succeeded") return "status-pill status-pill--ready";
-  if (status === "pending" || status === "queued" || status === "running") return "status-pill status-pill--pending";
+  if (status === "running") return "status-pill status-pill--info";
+  if (status === "pending" || status === "queued") return "status-pill status-pill--pending";
   if (status === "failed" || status === "cancelled") return "status-pill status-pill--error";
   return "status-pill status-pill--idle";
 }
 
 function formatSourceTypeLabel(type: string): string {
-  if (type === "git-public") return "public git";
-  if (type === "github-private") return "private GitHub";
-  if (type === "upload-archive") return "git repo archive";
+  if (type === "git-public") return "public Git repository";
+  if (type === "github-private") return "private GitHub repository";
+  if (type === "upload-archive") return "Git archive upload";
   return type;
 }
 
@@ -349,6 +349,7 @@ export function CreateSourceForm({
   }, [initialGithubRepositorySelection]);
 
   const showPrivateRepositorySelect = type === "github-private" && githubRepositories.length > 0;
+  const privateGithubUnavailable = type === "github-private" && githubRepositories.length === 0;
   const requiresArchiveUpload = type === "upload-archive";
 
   return (
@@ -377,6 +378,9 @@ export function CreateSourceForm({
               await postFormData(`/api/workspaces/${workspaceId}/uploads`, uploadPayload);
               setSuccess(`${archive.name} uploaded and added as a source.`);
             } else {
+              if (privateGithubUnavailable) {
+                throw new Error("Connect the GitHub App in workspace settings before adding a private GitHub source.");
+              }
               if (type === "github-private" && showPrivateRepositorySelect) {
                 const selection = decodeGithubRepositorySelection(String(formData.get("githubRepository") ?? ""));
                 location = selection.location;
@@ -404,7 +408,7 @@ export function CreateSourceForm({
         <PortalMetaList
           items={[
             { label: "Workspace tier", value: entitlement },
-            { label: "Current source mode", value: type === "upload-archive" ? "git repo archive upload" : type === "github-private" ? "private GitHub repo" : "public Git repo" },
+            { label: "Current source mode", value: type === "upload-archive" ? "Git archive upload" : type === "github-private" ? "private GitHub repository" : "public Git repository" },
             { label: "Connected GitHub repos", value: githubRepositories.length },
           ]}
         />
@@ -418,20 +422,20 @@ export function CreateSourceForm({
             value={type}
             onChange={event => setType(event.target.value as typeof type)}
           >
-            <option value="upload-archive" disabled={entitlement === "free"}>Git repo archive upload</option>
-            <option value="git-public">Public Git repo (approved host)</option>
-            <option value="github-private" disabled={entitlement === "free"}>Private GitHub repo</option>
+            <option value="upload-archive" disabled={entitlement === "free"}>Git archive upload</option>
+            <option value="git-public">Public Git repository (approved host)</option>
+            <option value="github-private" disabled={entitlement === "free"}>Private GitHub repository</option>
           </select>
         </label>
         {entitlement === "free" ? (
-          <p className="subtle-note field--full">Free workspaces can add public Git repositories. Git repo archive upload and private GitHub repos unlock on Pro.</p>
+          <p className="subtle-note field--full">Free workspaces can add public Git repositories. Git archive uploads and private GitHub repositories unlock on Pro.</p>
         ) : null}
       </div>
 
       {requiresArchiveUpload ? (
         <div className="form-grid">
           <label className="field field--full">
-            <span>Git repo archive file</span>
+            <span>Git archive file</span>
             <input data-testid={scopedTestId(testIdPrefix, "archive-input")} name="archive" type="file" accept=".zip,.tar,.tgz,.tar.gz" required />
           </label>
         </div>
@@ -472,6 +476,14 @@ export function CreateSourceForm({
                 </p>
               ) : null}
             </>
+          ) : privateGithubUnavailable ? (
+            <div className="form-summary field--full" role="status" aria-live="polite">
+              <strong>Connect GitHub before adding private sources.</strong>
+              <p className="subtle-note">
+                Private GitHub sources must come from a linked GitHub App installation so the backend receives the required installation ID.
+              </p>
+              <a className="button-ghost" href={`/portal/workspaces/${workspaceId}/settings`}>Open workspace settings</a>
+            </div>
           ) : (
             <label className="field field--full">
               <span>Repository URL</span>
@@ -491,10 +503,10 @@ export function CreateSourceForm({
       {type === "upload-archive" ? (
         <p className="subtle-note">Upload a `.zip`, `.tar`, `.tgz`, or `.tar.gz` file that contains a Git repository, including its `.git` metadata.</p>
       ) : null}
-      <button className="button-secondary" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending}>
+      <button className="button-secondary" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending || privateGithubUnavailable}>
         {pending ? "Adding..." : "Add source"}
       </button>
-      {success ? <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "success")}>{success}</p> : null}
+      {success ? <InlineStatus testId={scopedTestId(testIdPrefix, "success")}>{success}</InlineStatus> : null}
       {error ? <p className="inline-error" data-testid={scopedTestId(testIdPrefix, "error")} role="alert">{error}</p> : null}
     </form>
   );
@@ -566,6 +578,7 @@ export function QueueAnalysisForm({
   codexAuthSelection,
   secrets = [],
   canUseSecrets = true,
+  canManageAiTasks = false,
   jobPathTemplate = "/portal/workspaces/{workspaceId}/runs/{jobId}",
   testIdPrefix = "workspace-runs",
 }: {
@@ -575,6 +588,7 @@ export function QueueAnalysisForm({
   codexAuthSelection?: CodexAuthSelection | null;
   secrets?: WorkspaceSecret[];
   canUseSecrets?: boolean;
+  canManageAiTasks?: boolean;
   jobPathTemplate?: string;
   testIdPrefix?: string;
 }) {
@@ -586,6 +600,18 @@ export function QueueAnalysisForm({
   const [selectedTaskId, setSelectedTaskId] = useState(tasks[0]?.agentId ?? "");
   const [selectedRuntimeMode, setSelectedRuntimeMode] = useState<"static" | "browser">(
     taskSupportsBrowserRuntime(tasks[0] ?? null) ? "browser" : "static",
+  );
+  const sourceReadiness = useMemo(
+    () => sources.reduce(
+      (counts, source) => {
+        if (isVerifiedSource(source)) counts.verified += 1;
+        else if (source.verificationStatus === "failed") counts.failed += 1;
+        else counts.pending += 1;
+        return counts;
+      },
+      { verified: 0, pending: 0, failed: 0 },
+    ),
+    [sources],
   );
   const availableCompanionSources = useMemo(
     () => sources.filter(source => source.id !== selectedSourceId && isVerifiedSource(source)),
@@ -602,9 +628,22 @@ export function QueueAnalysisForm({
   const [selectedCodexAuthScope, setSelectedCodexAuthScope] = useState<"" | "user" | "workspace" | "global">(
     codexAuthSelection?.selectedScope ?? "",
   );
+  const queueDisabledReason = (() => {
+    if (sources.length === 0) return "Add a source before queueing.";
+    if (sourceReadiness.verified === 0) return "Verify or repair at least one source before queueing.";
+    if (tasks.length === 0) return "Create an AI task before queueing.";
+    if (codexAuthSelection && selectableCodexAuthOptions.length === 0) return "Connect Codex auth before queueing.";
+    return null;
+  })();
 
   useEffect(() => {
     const nextReadySource = sources.find(isVerifiedSource) ?? null;
+    if (!nextReadySource) {
+      if (selectedSourceId) {
+        setSelectedSourceId("");
+      }
+      return;
+    }
     if ((!selectedSourceId || !sources.some(source => source.id === selectedSourceId && isVerifiedSource(source))) && nextReadySource) {
       setSelectedSourceId(nextReadySource.id);
     }
@@ -645,6 +684,10 @@ export function QueueAnalysisForm({
       data-testid={scopedTestId(testIdPrefix, "queue-form")}
       onSubmit={event => {
         event.preventDefault();
+        if (queueDisabledReason) {
+          setError(queueDisabledReason);
+          return;
+        }
         const formData = new FormData(event.currentTarget);
         const sourceId = String(formData.get("sourceId") ?? "");
         const companionSourceId = String(formData.get("companionSourceId") ?? "");
@@ -754,7 +797,7 @@ export function QueueAnalysisForm({
                   key={option.scope}
                   value={option.scope}
                 >
-                  {option.label} ({option.status.disabled ? "disabled" : option.status.status})
+                  {option.label} ({getCodexAuthOptionState(option)})
                 </option>
               ))}
             </select>
@@ -766,6 +809,7 @@ export function QueueAnalysisForm({
           <PortalMetaList
             items={[
               { label: "Description", value: selectedTask.description ?? "AI-defined analysis task." },
+              { label: "Source readiness", value: `${sourceReadiness.verified} verified · ${sourceReadiness.pending} pending · ${sourceReadiness.failed} failed` },
               { label: "Tool grants", value: selectedTask.toolCapabilities.join(", ") || "repo-read" },
               ...(codexAuthSelection ? [{
                 label: "Codex auth",
@@ -774,6 +818,11 @@ export function QueueAnalysisForm({
                   : codexAuthSelection.selectedScope
                     ? `Auto selects ${codexAuthSelection.options.find(option => option.scope === codexAuthSelection.selectedScope)?.label ?? codexAuthSelection.selectedScope}.`
                     : "No Codex auth is connected yet.",
+              }, {
+                label: "Auth options",
+                value: codexAuthSelection.options
+                  .map(option => `${option.label}: ${getCodexAuthOptionState(option)}`)
+                  .join(" · ") || "No Codex auth options returned.",
               }] : []),
             ]}
           />
@@ -784,9 +833,21 @@ export function QueueAnalysisForm({
           User auth stays private to your account. Workspace auth is shared only inside this workspace. Global auth is the admin-managed fallback.
         </p>
       ) : null}
+      {queueDisabledReason ? (
+        <p className="inline-guidance" data-testid={scopedTestId(testIdPrefix, "disabled-reason")} role="status">
+          {queueDisabledReason}
+          {tasks.length === 0 && canManageAiTasks ? (
+            <>
+              {" "}
+              <a href="/portal/admin/ai/agents">Open admin AI tasks.</a>
+            </>
+          ) : null}
+          {tasks.length === 0 && !canManageAiTasks ? " Ask an admin to enable an AI task for this workspace." : null}
+        </p>
+      ) : null}
       {secrets.length > 0 && canUseSecrets ? (
         <fieldset className="field selection-list" data-testid={scopedTestId(testIdPrefix, "secrets-fieldset")}>
-          <span>Workspace secrets</span>
+          <legend>Workspace secrets</legend>
           {secrets.map(secret => (
             <label className="selection-item" key={secret.id}>
               <input
@@ -802,10 +863,10 @@ export function QueueAnalysisForm({
       ) : null}
       {secrets.length > 0 && !canUseSecrets ? (
         <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "secrets-owner-only")}>
-          Owner only.
+          Workspace secrets are owner-managed. Ask the workspace owner to attach secrets needed for browser or API-authenticated runs.
         </p>
       ) : null}
-      <button className="button" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending || sources.length === 0 || tasks.length === 0}>
+      <button className="button" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending || Boolean(queueDisabledReason)}>
         {pending ? "Queueing..." : "Queue AI task"}
       </button>
       {error ? <p className="inline-error" data-testid={scopedTestId(testIdPrefix, "error")} role="alert">{error}</p> : null}
@@ -882,7 +943,7 @@ export function CreateWorkspaceSecretForm({
       <button className="button-secondary" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending}>
         {pending ? "Saving..." : "Save secret"}
       </button>
-      {success ? <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "success")}>{success}</p> : null}
+      {success ? <InlineStatus testId={scopedTestId(testIdPrefix, "success")}>{success}</InlineStatus> : null}
       {error ? <p className="inline-error" data-testid={scopedTestId(testIdPrefix, "error")} role="alert">{error}</p> : null}
     </form>
   );
@@ -986,7 +1047,7 @@ export function UpdateWorkspaceSecretForm({
           >
             {pending ? "Updating..." : "Update secret"}
           </button>
-          {success ? <p className="subtle-note">{success}</p> : null}
+          {success ? <InlineStatus>{success}</InlineStatus> : null}
           {error ? <p className="inline-error" role="alert">{error}</p> : null}
         </form>
       ) : null}
@@ -1094,7 +1155,7 @@ export function AddWorkspaceMemberForm({
       <button className="button-secondary" data-testid={scopedTestId(testIdPrefix, "submit")} type="submit" disabled={pending}>
         {pending ? "Adding…" : "Add member"}
       </button>
-      {success ? <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "success")}>{success}</p> : null}
+      {success ? <InlineStatus testId={scopedTestId(testIdPrefix, "success")}>{success}</InlineStatus> : null}
       {error ? <p className="inline-error" data-testid={scopedTestId(testIdPrefix, "error")} role="alert">{error}</p> : null}
     </form>
   );
@@ -1220,7 +1281,7 @@ export function ManageSourceActions({
       {source.type !== "git-public" ? (
         <p className="subtle-note">Verification is source-type aware. GitHub and archive sources rely on their own readiness paths instead of the public Git verification flow.</p>
       ) : null}
-      {success ? <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, `success-${source.id}`)}>{success}</p> : null}
+      {success ? <InlineStatus testId={scopedTestId(testIdPrefix, `success-${source.id}`)}>{success}</InlineStatus> : null}
       {error ? <p className="inline-error" data-testid={scopedTestId(testIdPrefix, `error-${source.id}`)} role="alert">{error}</p> : null}
     </div>
   );
@@ -1335,7 +1396,7 @@ export function ReportExportAction({
         {pending ? "Preparing export..." : "Export report bundle"}
       </button>
       {exportState ? (
-        <div className="subtle-note" data-testid={scopedTestId(testIdPrefix, "success")}>
+        <div className="subtle-note" data-testid={scopedTestId(testIdPrefix, "success")} role="status" aria-live="polite">
           <p>Export ready: {exportState.artifact.key}</p>
           <a
             className="button-ghost"
@@ -1557,6 +1618,9 @@ export function JobLogConsole({
   const [timing, setTiming] = useState(initialTiming);
   const [verbosity, setVerbosity] = useState<"default" | "all">("default");
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [streamIssue, setStreamIssue] = useState<string | null>(null);
+  const [lastStreamUpdate, setLastStreamUpdate] = useState<string | null>(null);
+  const [syncRetryToken, setSyncRetryToken] = useState(0);
   const router = useRouter();
   const plannedExecutionSteps = useMemo(
     () => buildPlannedExecutionSteps({
@@ -1570,9 +1634,29 @@ export function JobLogConsole({
   );
   const [executionSteps, setExecutionSteps] = useState(() => mergeExecutionPlan(plannedExecutionSteps, initialExecutionSteps));
   const activeStep = useMemo(
-    () => executionSteps.find(step => step.status === "running") ?? null,
+    () => getPrimaryActiveStep(executionSteps),
     [executionSteps],
   );
+  const executionProgress = useMemo(() => {
+    const statusCounts = buildStepStatusCounts(executionSteps);
+    const completedCount = executionSteps.filter(step => isTerminalStepStatus(step.status)).length;
+    const progressPercent = executionSteps.length > 0 ? Math.round((completedCount / executionSteps.length) * 100) : 0;
+    const slowestSteps = executionSteps
+      .filter(step => typeof step.durationMs === "number")
+      .sort((left, right) => (right.durationMs ?? 0) - (left.durationMs ?? 0))
+      .slice(0, 3);
+    const upcomingSteps = executionSteps
+      .filter(step => step.status === "pending" && !isLifecycleWaitStep(step))
+      .slice(0, 4);
+    return {
+      completedCount,
+      progressPercent,
+      slowestSteps,
+      statusCounts,
+      totalCount: executionSteps.length,
+      upcomingSteps,
+    };
+  }, [executionSteps]);
 
   useEffect(() => {
     setExecutionSteps(current => mergeExecutionPlan(plannedExecutionSteps, current));
@@ -1589,7 +1673,7 @@ export function JobLogConsole({
           cache: "no-store",
         });
         if (!response.ok) {
-          throw new Error(await readErrorMessage(response));
+          throw new Error(await readApiErrorMessage(response));
         }
         const payload = await response.json() as {
           job: JobEnvelope;
@@ -1601,6 +1685,8 @@ export function JobLogConsole({
         setStatus(payload.job.job.status);
         setExecutionSteps(mergeExecutionPlan(plannedExecutionSteps, payload.job.executionSteps));
         setTiming(payload.job.timing);
+        setStreamIssue(null);
+        setLastStreamUpdate(new Date().toLocaleTimeString());
 
         if (
           payload.job.job.status === "succeeded"
@@ -1615,6 +1701,8 @@ export function JobLogConsole({
         source.addEventListener("log", event => {
           const streamPayload = JSON.parse((event as MessageEvent<string>).data) as AnalysisLogEvent;
           const stepEvent = parseAnalysisExecutionStepEvent(streamPayload.message);
+          setStreamIssue(null);
+          setLastStreamUpdate(new Date().toLocaleTimeString());
           if (stepEvent) {
             setExecutionSteps(current => mergeExecutionPlan(plannedExecutionSteps, applyExecutionStep(current, stepEvent)));
             return;
@@ -1624,23 +1712,38 @@ export function JobLogConsole({
 
         source.addEventListener("status", event => {
           const streamPayload = JSON.parse((event as MessageEvent<string>).data) as { status: string };
+          setStreamIssue(null);
+          setLastStreamUpdate(new Date().toLocaleTimeString());
           setStatus(streamPayload.status);
+        });
+
+        source.addEventListener("heartbeat", event => {
+          const streamPayload = JSON.parse((event as MessageEvent<string>).data) as { ts?: number };
+          setStreamIssue(null);
+          setLastStreamUpdate(new Date(streamPayload.ts ?? Date.now()).toLocaleTimeString());
         });
 
         source.addEventListener("complete", event => {
           const streamPayload = JSON.parse((event as MessageEvent<string>).data) as { status: string };
+          setStreamIssue(null);
+          setLastStreamUpdate(new Date().toLocaleTimeString());
           setStatus(streamPayload.status);
           if (streamPayload.status === "succeeded") {
             router.refresh();
           }
           source?.close();
         });
-      } catch {
+        source.addEventListener("error", () => {
+          if (!cancelled) {
+            setStreamIssue("Live updates disconnected. Showing the last known job state; use retry or refresh if progress looks stale.");
+          }
+          source?.close();
+        });
+      } catch (requestError) {
         if (!cancelled) {
-          setLogs(getVisibleLogs(initialLogs));
-          setStatus(initialStatus);
-          setExecutionSteps(mergeExecutionPlan(plannedExecutionSteps, initialExecutionSteps));
-          setTiming(initialTiming);
+          setStreamIssue(requestError instanceof Error
+            ? `Live log sync failed: ${requestError.message}`
+            : "Live log sync failed. Showing the last known job state.");
         }
       } finally {
         if (!cancelled) {
@@ -1655,14 +1758,38 @@ export function JobLogConsole({
       cancelled = true;
       source?.close();
     };
-  }, [initialExecutionSteps, initialLogs, initialStatus, initialTiming, jobId, plannedExecutionSteps, router, verbosity]);
+  }, [initialExecutionSteps, initialLogs, initialStatus, initialTiming, jobId, plannedExecutionSteps, router, syncRetryToken, verbosity]);
 
   return (
     <>
       <div className="console-toolbar">
         <p data-testid={scopedTestId(testIdPrefix, "status")}><strong>Status:</strong> {status}</p>
         <span className={getJobStatusTone(status)}>{status}</span>
+        {lastStreamUpdate ? <span className="subtle-note">Last update {lastStreamUpdate}</span> : null}
       </div>
+      {loadingLogs ? (
+        <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "loading")} role="status" aria-live="polite">
+          Syncing the latest server log state…
+        </p>
+      ) : null}
+      {streamIssue ? (
+        <div className="banner banner--warning" data-testid={scopedTestId(testIdPrefix, "stream-warning")} role="status">
+          <strong>Live stream needs attention.</strong>
+          <p>{streamIssue}</p>
+          <button
+            className="button-ghost"
+            type="button"
+            data-testid={scopedTestId(testIdPrefix, "stream-retry")}
+            onClick={() => {
+              setStreamIssue(null);
+              setSyncRetryToken(current => current + 1);
+              router.refresh();
+            }}
+          >
+            Retry from server state
+          </button>
+        </div>
+      ) : null}
       <div className="form-summary" data-testid={scopedTestId(testIdPrefix, "execution-overview")}>
         <PortalMetaList
           items={[
@@ -1687,11 +1814,62 @@ export function JobLogConsole({
           ]}
         />
       </div>
+      <section className="job-progress-board" data-testid={scopedTestId(testIdPrefix, "progress-board")}>
+        <div className="job-progress-board__hero">
+          <div>
+            <span className="report-summary-card__label">Workflow progress</span>
+            <strong>{executionProgress.progressPercent}%</strong>
+            <p>
+              {activeStep
+                ? `Running ${activeStep.roleName ?? activeStep.title}.`
+                : `${executionProgress.completedCount}/${executionProgress.totalCount} checkpoint${executionProgress.totalCount === 1 ? "" : "s"} reached.`}
+            </p>
+          </div>
+          <div className="job-progress-board__status">
+            <span className="tag tag--success">succeeded {executionProgress.statusCounts.succeeded}</span>
+            <span className="tag tag--info">running {executionProgress.statusCounts.running}</span>
+            <span className="tag tag--neutral">pending {executionProgress.statusCounts.pending}</span>
+            <span className="tag tag--warning">skipped {executionProgress.statusCounts.skipped}</span>
+            <span className="tag tag--danger">failed {executionProgress.statusCounts.failed}</span>
+          </div>
+        </div>
+        <div className="job-progress-track" aria-hidden="true">
+          <span style={{ width: `${executionProgress.progressPercent}%` }} />
+        </div>
+        {executionProgress.slowestSteps.length > 0 ? (
+          <div className="job-progress-board__section" data-testid={scopedTestId(testIdPrefix, "slowest-steps")}>
+            <h3>Slowest completed</h3>
+            <div className="job-progress-board__slowest">
+              {executionProgress.slowestSteps.map(step => (
+                <article className="job-progress-step" key={step.id}>
+                  <strong>{step.roleName ?? step.title}</strong>
+                  <span className={getJobStatusTone(step.status)}>{step.status}</span>
+                  <p>{formatStepDuration(step)}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {executionProgress.upcomingSteps.length > 0 ? (
+          <div className="job-progress-board__section" data-testid={scopedTestId(testIdPrefix, "upcoming-steps")}>
+            <h3>Up next</h3>
+            <div className="job-progress-board__slowest">
+              {executionProgress.upcomingSteps.map(step => (
+                <article className="job-progress-step" key={step.id}>
+                  <strong>{step.roleName ?? step.title}</strong>
+                  <span className={getJobStatusTone(step.status)}>{step.status}</span>
+                  <p>{step.detail ?? step.stepType}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </section>
       <section className="step-list" data-testid={scopedTestId(testIdPrefix, "execution-steps")}>
         {executionSteps.length === 0 ? <p className="subtle-note">No execution steps recorded yet.</p> : null}
         {executionSteps.map(step => (
-          <div className="step-card" key={step.id} data-testid={scopedTestId(testIdPrefix, `step-${step.id.replace(/[^a-z0-9_-]+/gi, "-")}`)}>
-            <div className="step-card__header">
+          <div className="job-step-card" key={step.id} data-testid={scopedTestId(testIdPrefix, `step-${step.id.replace(/[^a-z0-9_-]+/gi, "-")}`)}>
+            <div className="job-step-card__header">
               <div>
                 <strong>{step.title}</strong>
                 <p className="subtle-note">
@@ -1789,6 +1967,7 @@ export function ReportRemediationForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState<"auto-priority" | "selected-findings">("auto-priority");
 
   if (!canMutate) {
     return (
@@ -1816,6 +1995,10 @@ export function ReportRemediationForm({
         const publishRemote = formData.get("publishRemote") === "on";
         setError(null);
         setSuccess(null);
+        if (selectionMode === "selected-findings" && selectedFindingIds.length === 0) {
+          setError("Select at least one finding, or switch finding selection back to Auto-priority.");
+          return;
+        }
 
         startTransition(async () => {
           try {
@@ -1834,7 +2017,7 @@ export function ReportRemediationForm({
               outputMode,
               publishRemote,
             });
-            setSuccess(`Queued remediation job ${payload.job.job.id}. Redirecting to the run detail.`);
+            setSuccess(`Queued remediation run ${payload.job.job.id}. Redirecting to the run detail.`);
             router.push(`/portal/workspaces/${workspaceId}/runs/${payload.job.job.id}`);
             router.refresh();
           } catch (requestError) {
@@ -1848,6 +2031,12 @@ export function ReportRemediationForm({
           items={[
             { label: "Source options", value: sourceOptions.length },
             { label: "Findings available", value: findingOptions.length },
+            {
+              label: "Active mode",
+              value: selectionMode === "selected-findings"
+                ? "Only checked findings will be sent to the remediation run."
+                : "SpecLens will pick the highest-priority findings from the report.",
+            },
             { label: "Default source", value: sourceOptions.find(source => source.id === defaultSourceId)?.displayName ?? defaultSourceId },
           ]}
         />
@@ -1863,27 +2052,38 @@ export function ReportRemediationForm({
         </label>
         <label className="field">
           <span>Finding selection</span>
-          <select data-testid={scopedTestId(testIdPrefix, "selection-mode-select")} name="selectionMode" defaultValue="auto-priority">
+          <select
+            data-testid={scopedTestId(testIdPrefix, "selection-mode-select")}
+            name="selectionMode"
+            value={selectionMode}
+            onChange={event => setSelectionMode(event.target.value === "selected-findings" ? "selected-findings" : "auto-priority")}
+          >
             <option value="auto-priority">Auto-priority</option>
             <option value="selected-findings">Selected findings</option>
           </select>
         </label>
       </div>
-      <fieldset className="field selection-list selection-list--bounded">
-        <span>Selected findings</span>
-        {findingOptions.map((finding, index) => (
-          <label className="selection-item" key={`${finding.id}:${index}`}>
-            <input
-              data-testid={scopedTestId(testIdPrefix, `finding-${finding.id}-${index + 1}`)}
-              name="selectedFindingIds"
-              type="checkbox"
-              value={finding.id}
-            />
-            <span>{finding.severity}: {finding.title}</span>
-          </label>
-        ))}
-        {findingOptions.length === 0 ? <p className="subtle-note">No findings available for targeted remediation on this report.</p> : null}
-      </fieldset>
+      {selectionMode === "selected-findings" ? (
+        <fieldset className="field selection-list selection-list--bounded" data-testid={scopedTestId(testIdPrefix, "selected-findings-list")}>
+          <legend>Selected findings</legend>
+          {findingOptions.map((finding, index) => (
+            <label className="selection-item" key={`${finding.id}:${index}`}>
+              <input
+                data-testid={scopedTestId(testIdPrefix, `finding-${finding.id}-${index + 1}`)}
+                name="selectedFindingIds"
+                type="checkbox"
+                value={finding.id}
+              />
+              <span>{finding.severity}: {finding.title}</span>
+            </label>
+          ))}
+          {findingOptions.length === 0 ? <p className="subtle-note">No findings available for targeted remediation on this report.</p> : null}
+        </fieldset>
+      ) : (
+        <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "auto-priority-note")}>
+          Targeted finding checkboxes are hidden in auto-priority mode so the run receives the report-priority queue only.
+        </p>
+      )}
       <div className="form-grid">
         <label className="field">
           <span>Base ref</span>
@@ -1916,7 +2116,7 @@ export function ReportRemediationForm({
       >
         {pending ? "Queueing remediation..." : "Queue remediation"}
       </button>
-      {success ? <p className="subtle-note" data-testid={scopedTestId(testIdPrefix, "success")}>{success}</p> : null}
+      {success ? <InlineStatus testId={scopedTestId(testIdPrefix, "success")}>{success}</InlineStatus> : null}
       {error ? <p className="inline-error" data-testid={scopedTestId(testIdPrefix, "error")} role="alert">{error}</p> : null}
     </form>
   );

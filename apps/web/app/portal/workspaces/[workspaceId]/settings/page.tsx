@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { CodexAuthCard } from "../../../../../components/codex-auth-card";
 import { DataPath, DataValue } from "../../../../../components/data-visuals";
-import { PaginationLinks } from "../../../../../components/portal-pagination";
+import { buildSearchHref, PaginationLinks } from "@speclens/ui";
 import {
   BillingPortalButton,
   CheckoutButton,
@@ -12,6 +12,7 @@ import {
   GithubInstallButton,
   UpdateWorkspaceSecretForm,
 } from "../../../../../components/portal-actions";
+import { WorkspaceRouteState } from "../../../../../components/workspace-route-state";
 import {
   ApiResponseError,
   getCurrentUser,
@@ -29,7 +30,7 @@ import {
   isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
 
-function renderWorkspaceBanner(githubState: string | null) {
+function renderWorkspaceBanner(workspaceId: string, githubState: string | null) {
   if (githubState === "connected") {
     return <p className="banner banner--success" data-testid="workspace-settings-github-connected">GitHub App installation linked to this workspace.</p>;
   }
@@ -41,9 +42,12 @@ function renderWorkspaceBanner(githubState: string | null) {
   }
   if (githubState === "link-failed") {
     return (
-      <p className="banner banner--error" data-testid="workspace-settings-github-link-failed">
-        GitHub linked back to the portal, but the installation could not be attached to this workspace.
-      </p>
+      <div className="banner banner--error" data-testid="workspace-settings-github-link-failed" role="alert">
+        <p>GitHub linked back to the portal, but the installation could not be attached to this workspace.</p>
+        <Link className="button-ghost" href={`/portal/workspaces/${workspaceId}/settings#github-app-link`}>
+          Retry GitHub install
+        </Link>
+      </div>
     );
   }
   return null;
@@ -126,9 +130,9 @@ export default async function WorkspaceSettingsPage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="settings"
       >
-        {renderWorkspaceBanner(typeof query.github === "string" ? query.github : null)}
+        {renderWorkspaceBanner(workspaceId, typeof query.github === "string" ? query.github : null)}
         {renderBillingBanner(typeof query.billing === "string" ? query.billing : null)}
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Workspace settings summary">
           <article className="portal-stat" data-testid="workspace-settings-stat-entitlement">
             <span className="portal-stat__label">Entitlement</span>
             <span className="portal-stat__value">{workspaceConsole.workspace.entitlement}</span>
@@ -168,18 +172,18 @@ export default async function WorkspaceSettingsPage({
               <div className="stack-form">
                 <CheckoutButton
                   workspaceId={workspaceId}
-                  label="Upgrade workspace owner to Pro"
+                  label="Upgrade workspace to Pro"
                   testId="workspace-settings-checkout-button"
                 />
                 <BillingPortalButton workspaceId={workspaceId} />
               </div>
             ) : (
               <p className="subtle-note" data-testid="workspace-settings-billing-read-only">
-                Owner only.
+                Workspace billing is owner-managed. Ask the workspace owner to change entitlement or billing details.
               </p>
             )}
           </article>
-          <article className="portal-panel" data-testid="workspace-settings-github-panel">
+          <article className="portal-panel" data-testid="workspace-settings-github-panel" id="github-app-link">
             <PortalSectionHeader
               badgeLabel="GitHub"
               badgeClassName="tag tag--info"
@@ -193,7 +197,7 @@ export default async function WorkspaceSettingsPage({
               />
             ) : (
               <p className="subtle-note" data-testid="workspace-settings-github-read-only">
-                Owner only.
+                GitHub installation links are owner-managed. Ask the workspace owner to connect or rotate the app link.
               </p>
             )}
           </article>
@@ -256,7 +260,7 @@ export default async function WorkspaceSettingsPage({
               title="Workspace run secrets"
               description="Store reusable credentials for queued analysis runs. Values are masked after save and remain scoped to this workspace."
             />
-            <form className="stack-form form-shell" method="GET">
+            <form aria-label="Search workspace secrets" className="stack-form form-shell" method="GET" role="search">
               <div className="form-grid">
                 <label className="field field--full">
                   <span>Search secrets</span>
@@ -269,16 +273,27 @@ export default async function WorkspaceSettingsPage({
                   />
                 </label>
               </div>
-              <input name="installationId" type="hidden" value={repositoryQuery.installationId} />
-              <input name="q" type="hidden" value={repositoryQuery.q} />
-              <input name="page" type="hidden" value={String(repositoryQuery.page)} />
-              <button className="button-ghost" data-testid="workspace-settings-secrets-search-submit" type="submit">Apply secret filter</button>
+              <div className="portal-inline-actions">
+                <button className="button-ghost" data-testid="workspace-settings-secrets-search-submit" type="submit">Apply secret filter</button>
+                {secretQuery.q ? (
+                  <Link
+                    className="button-secondary"
+                    data-testid="workspace-settings-secrets-clear-filters"
+                    href={buildSearchHref(`/portal/workspaces/${workspaceId}/settings`, query, {
+                      secretPage: undefined,
+                      secretQ: undefined,
+                    })}
+                  >
+                    Clear filters
+                  </Link>
+                ) : null}
+              </div>
             </form>
             {canManageWorkspace ? (
               <CreateWorkspaceSecretForm workspaceId={workspaceId} testIdPrefix="workspace-settings-secrets" />
             ) : (
               <p className="subtle-note" data-testid="workspace-settings-secrets-read-only">
-                Owner only.
+                Workspace secrets are owner-managed. Ask the workspace owner to add or rotate secrets for authenticated runs.
               </p>
             )}
             {secrets.length === 0 ? <p className="subtle-note">No workspace secrets stored yet.</p> : null}
@@ -288,7 +303,7 @@ export default async function WorkspaceSettingsPage({
                   <article className="portal-record-card" data-testid={`workspace-settings-secret-row-${secret.id}`} key={secret.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{secret.name}</strong>
+                        <h3>{secret.name}</h3>
                         <p>{secret.valuePreview}</p>
                       </div>
                       <div className="portal-record-card__meta">
@@ -338,7 +353,7 @@ export default async function WorkspaceSettingsPage({
                   <article className="portal-record-card" data-testid={`workspace-settings-installation-${installation.id}`} key={installation.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{installation.githubAccountLogin}</strong>
+                        <h3>{installation.githubAccountLogin}</h3>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className="tag tag--success">linked</span>
@@ -371,7 +386,7 @@ export default async function WorkspaceSettingsPage({
               badgeClassName="tag tag--success"
               title="Available GitHub repositories"
             />
-            <form className="stack-form form-shell" method="GET">
+            <form aria-label="Search GitHub repositories" className="stack-form form-shell" method="GET" role="search">
               <div className="form-grid">
                 <label className="field">
                   <span>Search repositories</span>
@@ -399,9 +414,22 @@ export default async function WorkspaceSettingsPage({
                   </select>
                 </label>
               </div>
-              <input name="secretQ" type="hidden" value={secretQuery.q} />
-              <input name="secretPage" type="hidden" value={String(secretQuery.page)} />
-              <button className="button-ghost" data-testid="workspace-settings-github-search-submit" type="submit">Apply repository filter</button>
+              <div className="portal-inline-actions">
+                <button className="button-ghost" data-testid="workspace-settings-github-search-submit" type="submit">Apply repository filter</button>
+                {repositoryQuery.q || repositoryQuery.installationId ? (
+                  <Link
+                    className="button-secondary"
+                    data-testid="workspace-settings-github-clear-filters"
+                    href={buildSearchHref(`/portal/workspaces/${workspaceId}/settings`, query, {
+                      installationId: undefined,
+                      page: undefined,
+                      q: undefined,
+                    })}
+                  >
+                    Clear filters
+                  </Link>
+                ) : null}
+              </div>
             </form>
             {githubRepositories.length === 0 ? <p className="subtle-note">No installation repositories available yet.</p> : null}
             {repositoriesByInstallation.map(({ installation, repositories, privateRepositoryCount }) => (
@@ -452,24 +480,18 @@ export default async function WorkspaceSettingsPage({
           </article>
         </section>
       </PortalShell>
-      );
-    } catch (error) {
+    );
+  } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
+      const isMissing = error.status === 404;
       return (
-        <PortalShell
+        <WorkspaceRouteState
           eyebrow="Workspace settings"
-          title="Access denied"
+          isAdmin={isPortalAdminSession(session)}
+          isMissing={isMissing}
           pageTestId="workspace-settings-access-denied-page"
-          primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
-          activePrimaryNavKey="workspaces"
-        >
-          <PortalNoticePanel
-            actions={<Link className="button-secondary" href="/portal/workspaces">Back to workspaces</Link>}
-            description="You do not have access to this workspace."
-            descriptionTestId="workspace-settings-access-denied"
-            title="Access denied"
-          />
-        </PortalShell>
+          descriptionTestId="workspace-settings-access-denied"
+        />
       );
     }
     throw error;

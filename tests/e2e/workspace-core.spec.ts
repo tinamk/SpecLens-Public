@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { localTestUsers } from "../../scripts/local/test-users";
@@ -27,6 +28,12 @@ let jobUrl = "";
 let reportUrl = "";
 let memberUserEmail = "";
 
+function copyArchiveFixtureWithName(archivePath: string, filename: string): string {
+  const targetPath = path.join(path.dirname(archivePath), filename);
+  fs.copyFileSync(archivePath, targetPath);
+  return targetPath;
+}
+
 function escapeRegex(value: string): RegExp {
   return new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
@@ -36,9 +43,12 @@ test.describe.serial("workspace core flows", () => {
     const mode = resolveE2eMode();
     const archivePath = createArchiveFixture();
     const archiveName = path.basename(archivePath);
+    const companionArchivePath = copyArchiveFixtureWithName(createArchiveFixture(), `companion-${Date.now()}.tar.gz`);
+    const companionArchiveName = path.basename(companionArchivePath);
     const primarySourceLabel = mode === "local" ? archiveName : "Octocat Hello World";
     const primarySourceType = mode === "local" ? "upload-archive" : "git-public";
     const primarySourceLocations = mode === "local" ? [archiveName] : [publicGithubUrl];
+    const companionSourceLabel = companionArchiveName;
 
     memberUserEmail = memberUser.email;
 
@@ -60,6 +70,15 @@ test.describe.serial("workspace core flows", () => {
     await expect(page.getByTestId("workspace-overview-open-runs")).toBeVisible();
     await expect(page.getByTestId("workspace-overview-open-settings")).toBeVisible();
     await expect(page.getByTestId("workspace-overview-open-code")).toBeVisible();
+    await expect(page.locator('[data-testid^="portal-subnav-"]')).toHaveText([
+      "Overview",
+      "Sources",
+      "Runs",
+      "Reports",
+      "Code",
+      "Access",
+      "Workspace settings",
+    ]);
 
     await page.goto(`/portal/workspaces/${workspaceId}/sources`);
     await expect(page.getByTestId("workspace-sources-page")).toBeVisible();
@@ -70,6 +89,11 @@ test.describe.serial("workspace core flows", () => {
         type: "upload-archive",
         archivePath,
       });
+      await addSource(page, {
+        prefix: "workspace-sources",
+        type: "upload-archive",
+        archivePath: companionArchivePath,
+      });
     } else {
       await addSource(page, {
         prefix: "workspace-sources",
@@ -77,9 +101,15 @@ test.describe.serial("workspace core flows", () => {
         displayName: "Octocat Hello World",
         location: publicGithubUrl,
       });
+      await addSource(page, {
+        prefix: "workspace-sources",
+        type: "upload-archive",
+        archivePath: companionArchivePath,
+      });
     }
 
     await expect(page.getByTestId("workspace-sources-list")).toContainText(primarySourceLabel);
+    await expect(page.getByTestId("workspace-sources-list")).toContainText(companionSourceLabel);
 
     const primarySource = await resolvePersistedSource(page, {
       workspaceId,
@@ -88,6 +118,13 @@ test.describe.serial("workspace core flows", () => {
       acceptedLocations: primarySourceLocations,
     });
     assert.ok(primarySource);
+    const companionSource = await resolvePersistedSource(page, {
+      workspaceId,
+      displayName: companionSourceLabel,
+      type: "upload-archive",
+      acceptedLocations: [companionArchiveName],
+    });
+    assert.ok(companionSource);
 
     await page.goto(`/portal/workspaces/${workspaceId}/settings`);
     await expect(page.getByTestId("workspace-settings-secrets-panel")).toBeVisible();
@@ -109,7 +146,10 @@ test.describe.serial("workspace core flows", () => {
     const jobId = await queueAiTask(page, {
       prefix: "workspace-runs",
       sourceLabel: primarySourceLabel,
+      companionSourceLabel,
       taskLabel: deterministicE2eTaskLabel,
+      runtimeMode: "static",
+      codexAuthScope: "first-ready",
     });
     jobUrl = page.url();
     await expectJobPlanVisible(page, { expectedMinimumSteps: 2 });
@@ -119,6 +159,8 @@ test.describe.serial("workspace core flows", () => {
       jobId,
       expectedTaskLabel: deterministicE2eTaskLabel,
       expectedSourceLocationPattern: escapeRegex(primarySourceLocations[0]!),
+      expectedCompanionSourceLocationPattern: escapeRegex(companionArchiveName),
+      expectedRuntimeMode: "static",
       minRoleCount: 1,
       minSkillCount: 1,
       requiredToolCapabilities: ["repo-read"],
@@ -126,9 +168,27 @@ test.describe.serial("workspace core flows", () => {
       requireStandardizedHandoff: true,
       allowExecutionFailureBlockers: mode === "local",
     });
+    assert.match(
+      executionAudit.defaultEnvelope.job.codexAuthScope ?? "",
+      /^(user|workspace|global)$/,
+      "Queued workspace E2E job should persist an explicit Codex auth scope.",
+    );
     await page.getByTestId("workspace-runs-job-open-report").click();
     await expect(page).toHaveURL(new RegExp(`/portal/workspaces/${workspaceId}/reports/`));
     await expectReportSurface(page, { report: executionAudit.report, canMutate: true });
+    const scopedCodeLinks = page.locator('[data-testid^="report-open-code-finding-"]');
+    await expect(scopedCodeLinks.first()).toBeVisible();
+    const sourceIdsInCodeLinks = await scopedCodeLinks.evaluateAll(links => links
+      .map(link => {
+        const href = link.getAttribute("href");
+        return href ? new URL(href, window.location.origin).searchParams.get("sourceId") : null;
+      })
+      .filter(Boolean));
+    assert.ok(sourceIdsInCodeLinks.length > 0, "Expected report finding code links to carry sourceId query params.");
+    assert.ok(
+      sourceIdsInCodeLinks.every(sourceId => sourceId === primarySource.id || sourceId === companionSource.id),
+      "Report-to-code links must stay scoped to one of the job workspace sources.",
+    );
     await page.getByTestId("report-export-button").click();
     await expect(page.getByTestId("report-export-download-link")).toBeVisible();
     const firstFindingLink = page.locator('[data-testid^="report-open-code-finding-"]').first();
@@ -199,6 +259,14 @@ test.describe.serial("workspace core flows", () => {
 
     await memberPage.goto(reportUrl);
     await expectReportSurface(memberPage, { canMutate: false });
+
+    await memberPage.goto(`/portal/workspaces/${workspaceId}/access`);
+    await expect(memberPage.getByTestId("workspace-access-page")).toBeVisible();
+    await expect(memberPage.getByTestId("workspace-access-read-only")).toContainText("Workspace owners manage membership");
+
+    await memberPage.goto(`/portal/workspaces/${workspaceId}/settings`);
+    await expect(memberPage.getByTestId("workspace-settings-page")).toBeVisible();
+    await expect(memberPage.getByTestId("workspace-settings-billing-read-only")).toContainText("Workspace billing is owner-managed");
     await memberContext.close();
   });
 
@@ -225,6 +293,14 @@ test.describe.serial("workspace core flows", () => {
 
     await outsiderPage.goto(`/portal/workspaces/${workspaceId}/code`);
     await expect(outsiderPage.getByTestId("workspace-code-access-denied")).toBeVisible();
+
+    await outsiderPage.goto(`/portal/workspaces/${workspaceId}/access`);
+    await expect(outsiderPage.getByTestId("workspace-access-denied-page")).toBeVisible();
+    await expect(outsiderPage.getByTestId("workspace-access-denied")).toContainText("You do not have access to this workspace.");
+
+    await outsiderPage.goto(`/portal/workspaces/${workspaceId}/settings`);
+    await expect(outsiderPage.getByTestId("workspace-settings-access-denied-page")).toBeVisible();
+    await expect(outsiderPage.getByTestId("workspace-settings-access-denied")).toContainText("You do not have access to this workspace.");
     await outsiderContext.close();
   });
 });

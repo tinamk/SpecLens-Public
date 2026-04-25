@@ -200,6 +200,111 @@ test("core analyzeRepo writes hosted artifacts and keeps runs queryable", async 
   assert.equal(fs.existsSync(path.join(runDir, "report.html")), true);
 });
 
+test("core license policy loads from the analyzed repo root", async () => {
+  const rootDir = makeTempRoot("speclens-license-policy-");
+  const repoPath = createCommittedGitFixture(fixturePath, "speclens-license-policy-fixture-");
+  const policyDir = path.join(repoPath, "policies");
+  fs.mkdirSync(policyDir, { recursive: true });
+  fs.copyFileSync(
+    path.join(process.cwd(), "policies", "license-policy.json"),
+    path.join(policyDir, "license-policy.json"),
+  );
+
+  const run = await analyzeRepo({
+    workspace: { rootDir, name: "license-policy" },
+    repoPath,
+    mode: "hosted",
+    roles: ["license-policy"],
+  });
+
+  assert.ok(run.report);
+  const licenseSection = run.report?.sections.find(section => section.title === "License policy review");
+  assert.ok(licenseSection);
+  const records = (licenseSection.data as { records?: Array<{ name?: string; classification?: string }> }).records ?? [];
+  assert.equal(records.some(record => record.name === "@tagtwo/blocked-lib" && record.classification === "block"), true);
+  assert.equal(run.report?.findings.some(finding => finding.title === "Blocked licenses detected"), true);
+});
+
+test("core license policy treats nested fixtures as reference-only", async () => {
+  const rootDir = makeTempRoot("speclens-license-reference-workspace-");
+  const sourceDir = makeTempRoot("speclens-license-reference-source-");
+  fs.writeFileSync(
+    path.join(sourceDir, "package.json"),
+    JSON.stringify({ name: "active-product", private: true, license: "MIT" }, null, 2),
+    "utf8",
+  );
+  const policyDir = path.join(sourceDir, "policies");
+  fs.mkdirSync(policyDir, { recursive: true });
+  fs.copyFileSync(
+    path.join(process.cwd(), "policies", "license-policy.json"),
+    path.join(policyDir, "license-policy.json"),
+  );
+  const fixtureDir = path.join(sourceDir, "fixtures", "license-case");
+  fs.mkdirSync(fixtureDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(fixtureDir, "package.json"),
+    JSON.stringify({ name: "fixture-blocked-license", license: "SSPL-1.0" }, null, 2),
+    "utf8",
+  );
+  const repoPath = createCommittedGitFixture(sourceDir, "speclens-license-reference-repo-");
+
+  const run = await analyzeRepo({
+    workspace: { rootDir, name: "license-reference" },
+    repoPath,
+    mode: "hosted",
+    roles: ["license-policy"],
+  });
+
+  assert.ok(run.report);
+  assert.equal(run.report?.findings.some(finding => finding.title === "Blocked licenses detected"), false);
+  const licenseSection = run.report?.sections.find(section => section.title === "License policy review");
+  assert.ok(licenseSection);
+  const records = (licenseSection.data as { records?: Array<{ path?: string; classification?: string; policyScope?: string }> }).records ?? [];
+  assert.equal(
+    records.some(record =>
+      record.path === "fixtures/license-case/package.json"
+      && record.classification === "reference"
+      && record.policyScope === "reference"),
+    true,
+  );
+});
+
+test("core component inventory detects active exported TSX components", async () => {
+  const rootDir = makeTempRoot("speclens-component-inventory-workspace-");
+  const sourceDir = makeTempRoot("speclens-component-inventory-source-");
+  fs.writeFileSync(
+    path.join(sourceDir, "package.json"),
+    JSON.stringify({ name: "component-inventory-fixture", private: true }, null, 2),
+    "utf8",
+  );
+  const componentDir = path.join(sourceDir, "apps", "web", "components");
+  fs.mkdirSync(componentDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(componentDir, "portal-actions.tsx"),
+    "export function JobLogConsole() { return <section>Console</section>; }\nexport const ReportRemediationForm = () => <form />;\n",
+    "utf8",
+  );
+  const archiveDir = path.join(sourceDir, "archive", "legacy");
+  fs.mkdirSync(archiveDir, { recursive: true });
+  fs.writeFileSync(path.join(archiveDir, "LegacyPanel.tsx"), "export function LegacyPanel() { return null; }\n", "utf8");
+  const repoPath = createCommittedGitFixture(sourceDir, "speclens-component-inventory-repo-");
+
+  const run = await analyzeRepo({
+    workspace: { rootDir, name: "component-inventory" },
+    repoPath,
+    mode: "hosted",
+    roles: ["component-inventory"],
+  });
+
+  assert.ok(run.report);
+  const componentSection = run.report?.sections.find(section => section.title === "Component inventory");
+  assert.ok(componentSection);
+  const data = componentSection.data as { componentCount?: number; uiFileCount?: number; components?: Array<{ path: string }> };
+  assert.equal(data.uiFileCount, 1);
+  assert.equal(data.componentCount, 1);
+  assert.deepEqual(data.components?.map(component => component.path), ["apps/web/components/portal-actions.tsx"]);
+});
+
 test("core exposes parity presets", () => {
   const presets = listPresets();
 

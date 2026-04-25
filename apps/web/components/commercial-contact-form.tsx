@@ -1,5 +1,6 @@
 "use client";
 
+import { readApiErrorMessage } from "../lib/client-api";
 import { useState, useTransition } from "react";
 
 export default function CommercialContactForm() {
@@ -9,7 +10,7 @@ export default function CommercialContactForm() {
 
   if (status === "sent") {
     return (
-      <div className="legal-panel">
+      <div className="legal-panel" role="status" aria-live="polite">
         <span className="tag tag--success">Thanks</span>
         <h2>We got your request</h2>
         <p>We will reply to the email you provided with next steps for commercial licensing.</p>
@@ -39,12 +40,12 @@ export default function CommercialContactForm() {
               body: JSON.stringify(payload),
             });
             if (!response.ok) {
-              const text = await response.text();
-              throw new Error(text || "Commercial contact request failed.");
+              throw new Error(await readApiErrorMessage(response));
             }
             setStatus("sent");
           } catch (requestError) {
-            setError(requestError instanceof Error ? requestError.message : "Commercial contact request failed.");
+            const detail = requestError instanceof Error ? requestError.message : "Commercial contact request failed.";
+            setError(`${detail} Email hello@tinamk.no with your licensing details and we will route it manually.`);
           }
         });
       }}
@@ -64,7 +65,7 @@ export default function CommercialContactForm() {
         </label>
         <label className="field field--full">
           <span>How can we help?</span>
-          <textarea name="message" rows={4} required placeholder="Describe your licensing or self-hosting needs…" />
+          <textarea name="message" rows={4} required placeholder="Describe your licensing or commercial-purpose self-hosting needs..." />
         </label>
       </div>
       <p className="subtle-note">Useful details: deployment model, procurement constraints, timeline, and whether you need code rights or only hosted access.</p>

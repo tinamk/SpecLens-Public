@@ -3,7 +3,7 @@ const STORY_STEPS = [
     index: "01",
     title: "Attach the source",
     copy: "Point the QA run at the exact repository boundary. Public Git stays explicit, private GitHub stays workspace-bound.",
-    bullets: ["Public or private repositories", "Archive uploads for isolated reviews"],
+    bullets: ["Public Git or private GitHub repositories", "Archive uploads for isolated reviews"],
   },
   {
     index: "02",

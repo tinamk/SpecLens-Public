@@ -17,6 +17,7 @@ Define the current hosted marketing, portal, workspace, settings, admin, job, an
 ### Public routes
 
 - `/`
+- `/login`
 - `/pricing`
 - `/license`
 - `/commercial`
@@ -93,12 +94,12 @@ Define the current hosted marketing, portal, workspace, settings, admin, job, an
 
 1. User-interactable surfaces must expose stable, semantic `data-testid` values.
 2. Test IDs must be namespaced by surface area:
-   `public-*`, `workspace-index-*`, `workspace-overview-*`, `workspace-sources-*`, `workspace-runs-*`, `workspace-settings-*`, `workspace-access-*`, `report-*`, and `admin-ai-*`.
+   `public-*`, `portal-settings-*`, `workspace-index-*`, `workspace-overview-*`, `workspace-sources-*`, `workspace-runs-*`, `workspace-settings-*`, `workspace-access-*`, `report-*`, and `admin-ai-*`.
 3. Deterministic GitHub E2E must request the real install URL from SpecLens, assert its shape, simulate the callback with a real installation id, and avoid the GitHub browser UI flow.
 
 ## Acceptance Checks
 
-1. `/`, `/pricing`, `/license`, `/commercial`, `/privacy`, and `/terms` render with shared public navigation and page-level readiness markers.
+1. `/`, `/login`, `/pricing`, `/license`, `/commercial`, `/privacy`, and `/terms` render with shared public navigation and page-level readiness markers.
 2. `/portal` lands on `/portal/workspaces`.
 3. `/portal/workspaces` renders workspace creation and workspace directory state.
 4. Workspace overview links into dedicated sources, runs, reports, access, and settings routes.

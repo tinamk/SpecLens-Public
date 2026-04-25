@@ -2,8 +2,9 @@ import type { Route } from "next";
 import Link from "next/link";
 import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { QueueAnalysisForm } from "../../../../../components/portal-actions";
-import { PaginationLinks } from "../../../../../components/portal-pagination";
+import { buildSearchHref, PaginationLinks } from "@speclens/ui";
 import { DataPath } from "../../../../../components/data-visuals";
+import { WorkspaceRouteState } from "../../../../../components/workspace-route-state";
 import {
   ApiResponseError,
   getCurrentUser,
@@ -20,6 +21,7 @@ import {
   formatJobExecutionMode,
   formatJobLabel,
   getJobStatusTagClass,
+  getWorkspaceRunsEmptyState,
   isWorkspaceScopedEntityPage,
   isWorkspaceScopedJobsPage,
   isWorkspaceScopedWorkspaceConsoleContext,
@@ -70,6 +72,20 @@ export default async function WorkspaceRunsPage({
     const activeRuns = workspaceConsole.stats.activeJobs;
     const completedRuns = workspaceConsole.stats.completedJobs;
     const reportBackedRuns = workspaceConsole.stats.reportBackedJobs;
+    const sourceReadiness = workspaceConsole.sources.reduce(
+      (counts, source) => {
+        if (source.verificationStatus === "verified") counts.verified += 1;
+        else if (source.verificationStatus === "failed") counts.failed += 1;
+        else counts.pending += 1;
+        return counts;
+      },
+      { verified: 0, pending: 0, failed: 0 },
+    );
+    const hasSelectableCodexAuth = codexAuthSelection.options.some(option => option.selectable);
+    const runsEmptyState = getWorkspaceRunsEmptyState({
+      query: runQuery.q,
+      status: runQuery.status,
+    });
 
     return (
       <PortalShell
@@ -81,7 +97,7 @@ export default async function WorkspaceRunsPage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="runs"
       >
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Workspace runs summary">
           <article className="portal-stat" data-testid="workspace-runs-stat-active">
             <span className="portal-stat__label">Active</span>
             <span className="portal-stat__value">{activeRuns}</span>
@@ -95,8 +111,9 @@ export default async function WorkspaceRunsPage({
             <span className="portal-stat__value">{tasks.length}</span>
           </article>
           <article className="portal-stat" data-testid="workspace-runs-stat-secrets">
-            <span className="portal-stat__label">Secrets</span>
-            <span className="portal-stat__value">{secrets.length}</span>
+            <span className="portal-stat__label">Ready sources</span>
+            <span className="portal-stat__value">{sourceReadiness.verified}</span>
+            {sourceReadiness.failed > 0 ? <p>{sourceReadiness.failed} need repair</p> : null}
           </article>
           <article className="portal-stat" data-testid="workspace-runs-stat-reports">
             <span className="portal-stat__label">With reports</span>
@@ -104,7 +121,7 @@ export default async function WorkspaceRunsPage({
           </article>
         </section>
 
-        {codexAuthSelection.options.every(option => !option.selectable) ? (
+        {!hasSelectableCodexAuth ? (
           <PortalNoticePanel
             badgeLabel="Codex auth required"
             description="No Codex auth source is connected for this workspace yet. Add your own account-level auth, ask the owner to connect workspace auth, or use the admin-managed global fallback if enabled."
@@ -137,12 +154,30 @@ export default async function WorkspaceRunsPage({
           />
         )}
 
+        {workspaceConsole.sources.length === 0 || sourceReadiness.verified === 0 ? (
+          <PortalNoticePanel
+            badgeLabel={workspaceConsole.sources.length === 0 ? "Source required" : "Verification required"}
+            badgeClassName="tag tag--warning"
+            description={workspaceConsole.sources.length === 0
+              ? "Runs need a source snapshot. Add a repository or archive, then verify it before queueing an AI task."
+              : `${sourceReadiness.pending} pending and ${sourceReadiness.failed} failed source(s) are not queueable yet. Verify or repair one source before starting a run.`}
+            descriptionTestId="workspace-runs-source-readiness-notice"
+            title="Prepare a verified source before queueing"
+            actions={(
+              <Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/sources` as Route}>
+                Open sources
+              </Link>
+            )}
+          />
+        ) : null}
+
         <section className="portal-grid">
           <article className="portal-panel xl:col-span-2" data-testid="workspace-runs-queue-panel">
             <PortalSectionHeader
               badgeLabel="Queue"
               badgeClassName="tag tag--info"
               title="Queue AI task"
+              description="Pick a verified source, a task, runtime mode, and auth scope. Disabled options show exactly what still needs setup."
             />
             <QueueAnalysisForm
               workspaceId={workspaceId}
@@ -150,6 +185,7 @@ export default async function WorkspaceRunsPage({
               codexAuthSelection={codexAuthSelection}
               secrets={secrets}
               canUseSecrets={canManageWorkspace}
+              canManageAiTasks={isAdmin}
               sources={workspaceConsole.sources.map(source => ({
                 id: source.id,
                 displayName: source.displayName,
@@ -186,7 +222,7 @@ export default async function WorkspaceRunsPage({
                 eyebrow="Secrets"
                 href={`/portal/workspaces/${workspaceId}/settings`}
                 testId="workspace-runs-open-settings"
-                title="Settings"
+                title="Workspace settings"
                 tone="warning"
               />
               {isPortalAdminSession(session) ? (
@@ -208,7 +244,7 @@ export default async function WorkspaceRunsPage({
             badgeClassName="tag tag--info"
             title="Recent runs"
           />
-          <form className="stack-form form-shell" method="GET">
+          <form aria-label="Search runs" className="stack-form form-shell" method="GET" role="search">
             <div className="form-grid">
               <label className="field">
                 <span>Search runs</span>
@@ -233,16 +269,36 @@ export default async function WorkspaceRunsPage({
                 </select>
               </label>
             </div>
-            <button className="button-ghost" data-testid="workspace-runs-search-submit" type="submit">Apply run filter</button>
+            <div className="portal-inline-actions">
+              <button className="button-ghost" data-testid="workspace-runs-search-submit" type="submit">Apply run filter</button>
+              {runQuery.q || runQuery.status ? (
+                <Link
+                  className="button-secondary"
+                  data-testid="workspace-runs-clear-filters"
+                  href={buildSearchHref(`/portal/workspaces/${workspaceId}/runs`, query, {
+                    page: undefined,
+                    q: undefined,
+                    status: undefined,
+                  })}
+                >
+                  Clear filters
+                </Link>
+              ) : null}
+            </div>
           </form>
-          {jobs.length === 0 ? <p className="subtle-note">No jobs matched this filter yet.</p> : null}
+          {jobs.length === 0 ? (
+            <div className="subtle-note" data-testid="workspace-runs-empty-state">
+              <p><strong>{runsEmptyState.title}</strong></p>
+              <p>{runsEmptyState.detail}</p>
+            </div>
+          ) : null}
           {jobs.length > 0 ? (
             <div className="portal-record-grid">
               {jobs.map(job => (
                 <article className="portal-record-card" data-testid={`workspace-runs-row-${job.job.id}`} key={job.job.id}>
                   <div className="portal-record-card__header">
                     <div className="portal-record-card__title">
-                      <strong>{formatJobLabel(job.job, tasks)}</strong>
+                      <h3>{formatJobLabel(job.job, tasks)}</h3>
                       <p><DataPath value={job.job.sourceLocation} /></p>
                     </div>
                     <div className="portal-record-card__meta">
@@ -264,7 +320,7 @@ export default async function WorkspaceRunsPage({
                       data-testid={`workspace-runs-open-job-${job.job.id}`}
                       href={`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route}
                     >
-                      Open job
+                      Open run
                     </Link>
                     {job.report ? (
                       <Link
@@ -288,24 +344,18 @@ export default async function WorkspaceRunsPage({
           />
         </section>
       </PortalShell>
-      );
-    } catch (error) {
+    );
+  } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
+      const isMissing = error.status === 404;
       return (
-        <PortalShell
+        <WorkspaceRouteState
           eyebrow="Workspace runs"
-          title="Access denied"
+          isAdmin={isPortalAdminSession(session)}
+          isMissing={isMissing}
           pageTestId="workspace-runs-access-denied-page"
-          primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
-          activePrimaryNavKey="workspaces"
-        >
-          <PortalNoticePanel
-            actions={<Link className="button-secondary" href={"/portal/workspaces" as Route}>Back to workspaces</Link>}
-            description="You do not have access to this workspace."
-            descriptionTestId="workspace-runs-access-denied"
-            title="Access denied"
-          />
-        </PortalShell>
+          descriptionTestId="workspace-runs-access-denied"
+        />
       );
     }
     throw error;

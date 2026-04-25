@@ -51,6 +51,6 @@ Notes:
 - The local dev stack intentionally avoids fixed Docker container names so separate checkouts can run side by side without name collisions.
 - The Compose stack uses MinIO as a self-hosted S3-compatible backend by default. To use an external S3-compatible provider, update the `OBJECT_STORAGE_*` variables in `.env` (bucket, endpoint, region, access keys).
 - To mirror uploads/artifacts to a second provider in parallel, set `OBJECT_STORAGE_MIRROR_*`. Downloads race both providers and take the first success. Optionally require the mirror with `OBJECT_STORAGE_MIRROR_REQUIRED=true`.
-- The hosted API now persists jobs in PostgreSQL, publishes them through `pg-boss`, and the runner claims them from the queue.
+- The hosted API now persists jobs in PostgreSQL and publishes queued work through `pg-boss`.
 - The API seeds stable local E2E users on startup so the browser suite can cover owner/member/outsider ACL behavior without a billing prerequisite.
-- The runner service is built from the sandbox image and mounts the host Docker socket so it can launch one-shot analysis containers locally.
+- The runner and AI worker launch one-shot job containers through the shared `job-dind` daemon via `DOCKER_HOST=tcp://job-dind:2375`; they must not mount `/var/run/docker.sock`.

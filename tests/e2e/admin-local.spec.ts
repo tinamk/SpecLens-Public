@@ -19,6 +19,7 @@ import { addSource } from "./helpers/sources";
 import { createWorkspace } from "./helpers/workspaces";
 
 const adminUser = resolveE2eUser("ADMIN", localTestUsers[3]);
+const nonAdminUser = resolveE2eUser("OWNER", localTestUsers[0]);
 const publicGithubUrl = process.env.E2E_GITHUB_PUBLIC_URL ?? "https://github.com/octocat/Hello-World.git";
 
 function escapeRegex(value: string): RegExp {
@@ -26,6 +27,27 @@ function escapeRegex(value: string): RegExp {
 }
 
 test.describe.serial("admin AI local", () => {
+  test("non-admin users see the admin denial boundary", async ({ page }) => {
+    test.skip(resolveE2eMode() !== "local", "Run this spec only against the local/dev stack.");
+
+    await loginThroughKeycloak(page, nonAdminUser, {
+      path: "/portal/admin/ai/auth",
+      expectedUrl: /\/portal\/admin\/ai\/auth/,
+    });
+
+    for (const path of [
+      "/portal/admin/ai/auth",
+      "/portal/admin/ai/skills",
+      "/portal/admin/ai/roles",
+      "/portal/admin/ai/agents",
+    ]) {
+      await page.goto(path);
+      await expect(page.getByTestId("admin-ai-access-denied-page")).toBeVisible();
+      await expect(page.getByTestId("admin-ai-access-denied")).toContainText(/administrator/i);
+    }
+    await expect(page.getByTestId("admin-ai-auth-panel")).toHaveCount(0);
+  });
+
   test("admin can manage auth/skills/roles/agents and run an agent job", async ({ page }) => {
     test.skip(resolveE2eMode() !== "local", "Run this spec only against the local/dev stack.");
 

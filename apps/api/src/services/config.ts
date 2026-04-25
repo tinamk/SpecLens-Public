@@ -93,8 +93,21 @@ function readMirrorRequired(rawValue: string | undefined, mirrorConfigured: bool
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
+  const normalized = value?.trim() ?? "";
+  if (!/^\d+$/.test(normalized)) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(normalized, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readOptionalPositiveInteger(value: string | undefined): number | null {
+  const normalized = value?.trim() ?? "";
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 export function loadApiConfig(): ApiConfig {
@@ -115,7 +128,7 @@ export function loadApiConfig(): ApiConfig {
       }
     : null;
   return {
-    port: Number(process.env.PORT ?? 4000),
+    port: readPositiveInteger(process.env.PORT, 4000),
     appUrl,
     apiUrl,
     corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS
@@ -154,16 +167,10 @@ export function loadApiConfig(): ApiConfig {
     objectStorageMirrorRequired: readMirrorRequired(process.env.OBJECT_STORAGE_MIRROR_REQUIRED, objectStorageMirror !== null),
     auditLogEnabled: process.env.AUDIT_LOG_ENABLED === "true",
     csrfSecret: process.env.CSRF_SECRET ?? null,
-    workspaceRetentionDays: Number.isFinite(Number(process.env.WORKSPACE_RETENTION_DAYS ?? ""))
-      ? Number(process.env.WORKSPACE_RETENTION_DAYS)
-      : null,
+    workspaceRetentionDays: readOptionalPositiveInteger(process.env.WORKSPACE_RETENTION_DAYS),
     rateLimitEnabled: process.env.RATE_LIMIT_ENABLED === "true",
-    rateLimitMax: Number.isFinite(Number(process.env.RATE_LIMIT_MAX ?? ""))
-      ? Number(process.env.RATE_LIMIT_MAX)
-      : 120,
-    rateLimitWindowMs: Number.isFinite(Number(process.env.RATE_LIMIT_WINDOW_MS ?? ""))
-      ? Number(process.env.RATE_LIMIT_WINDOW_MS)
-      : 60_000,
+    rateLimitMax: readPositiveInteger(process.env.RATE_LIMIT_MAX, 120),
+    rateLimitWindowMs: readPositiveInteger(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
     rateLimitAllowList: process.env.RATE_LIMIT_ALLOW_LIST
       ? process.env.RATE_LIMIT_ALLOW_LIST.split(",").map(value => value.trim()).filter(Boolean)
       : [],

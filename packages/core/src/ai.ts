@@ -17,6 +17,7 @@ export interface GenerateWithProvidersOptions {
   task: string;
   prompt: string;
   providers?: AiProviderDescriptor[];
+  codexAuthPath?: string | null;
   maxTokens?: number;
   timeoutMs?: number;
   budgetUsd?: number;
@@ -60,6 +61,17 @@ function hasCodexAuth(env: NodeJS.ProcessEnv = process.env): boolean {
   }
 }
 
+function resolveCodexExecutionEnv(options: GenerateWithProvidersOptions): NodeJS.ProcessEnv {
+  if (!options.codexAuthPath) {
+    return process.env;
+  }
+  return {
+    ...process.env,
+    CODEX_AUTH_PATH: options.codexAuthPath,
+    CODEX_HOME: path.dirname(options.codexAuthPath),
+  };
+}
+
 async function runCodexCli(provider: AiProviderDescriptor, options: GenerateWithProvidersOptions): Promise<ProviderExecution> {
   const tempDir = createHomeTempDirSync("speclens-codex-");
   const outputPath = path.join(tempDir, "last-message.txt");
@@ -84,7 +96,7 @@ async function runCodexCli(provider: AiProviderDescriptor, options: GenerateWith
     await new Promise<void>((resolve, reject) => {
       const child = spawn(process.env.CODEX_BIN ?? "codex", args, {
         cwd: process.cwd(),
-        env: { ...process.env },
+        env: { ...resolveCodexExecutionEnv(options) },
         stdio: ["ignore", "pipe", "pipe"],
       });
       const stdoutChunks: string[] = [];
@@ -176,7 +188,8 @@ export function createAiBudgetTracker(budgetUsd?: number | null): AiBudgetTracke
 }
 
 const defaultExecutor: ProviderExecutor = async (provider, options) => {
-  if (provider.kind === "openai-codex" && hasCodexAuth()) {
+  const codexEnv = resolveCodexExecutionEnv(options);
+  if (provider.kind === "openai-codex" && hasCodexAuth(codexEnv)) {
     return await runCodexCli(provider, options);
   }
 

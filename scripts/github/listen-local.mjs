@@ -1,6 +1,16 @@
 import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { readConfigValue } from "../_env.mjs";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const smeeClientBin = path.join(
+  repoRoot,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "smee-client.cmd" : "smee-client",
+);
 
 function resolveWebhookProxyUrl() {
   const explicit = readConfigValue("GITHUB_LOCAL_WEBHOOK_PROXY_URL", "");
@@ -65,12 +75,13 @@ async function registerGatewayTarget(webhookProxyUrl) {
 
 const webhookProxyUrl = resolveWebhookProxyUrl();
 const targetUrl = resolveTargetUrl();
-const probe = spawnSync("npx", ["--yes", "smee-client", "--help"], {
+const probe = spawnSync(smeeClientBin, ["--help"], {
   stdio: "ignore",
 });
 
 if (probe.status !== 0) {
-  console.error("npx is required to run the local GitHub webhook forwarder.");
+  console.error("smee-client is required to run the local GitHub webhook forwarder.");
+  console.error("Run `npm install` from the repository root so the declared dev dependency is available.");
   process.exit(1);
 }
 
@@ -87,9 +98,7 @@ const refreshTimer = setInterval(() => {
   });
 }, refreshIntervalMs);
 
-const child = spawn("npx", [
-  "--yes",
-  "smee-client",
+const child = spawn(smeeClientBin, [
   "--url",
   webhookProxyUrl,
   "--target",

@@ -1,4 +1,24 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
+
+export function BrandLockup({
+  href = "/",
+  label = "SpecLens",
+  className = "site-header__brand",
+  testId,
+}: {
+  href?: string;
+  label?: ReactNode;
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <Link className={className} data-testid={testId} href={href}>
+      <span className="logo-mark" aria-hidden="true">SL</span>
+      <span className="brand-name">{label}</span>
+    </Link>
+  );
+}
 
 export function MarketingShell({
   children,
@@ -7,7 +27,12 @@ export function MarketingShell({
   children: ReactNode;
   testId?: string;
 }) {
-  return <div className="marketing-shell" data-testid={testId}>{children}</div>;
+  return (
+    <div className="marketing-shell" data-testid={testId}>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      {children}
+    </div>
+  );
 }
 
 export function MarketingPageHero({
@@ -37,11 +62,11 @@ export function MarketingPageHero({
         <p className="hero-lede">{description}</p>
         {actions ? <div className="hero__actions">{actions}</div> : null}
       </div>
-      <div className="page-hero__aside">
+      <aside className="page-hero__aside" aria-label="Page context">
         <p className="page-hero__stat-label">{asideLabel}</p>
         <p className="page-hero__stat-value">{asideValue}</p>
         {asideDescription ? <p>{asideDescription}</p> : null}
-      </div>
+      </aside>
     </section>
   );
 }

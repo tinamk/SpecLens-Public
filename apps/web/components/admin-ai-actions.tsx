@@ -2,30 +2,9 @@
 
 import type { AiAgent, AiRole, AiSkill, AiToolCapability, CodexAuthStatus, Source, Workspace } from "@speclens/contracts";
 import { PortalMetaList, PortalSectionHeader } from "@speclens/ui";
+import { requestJson } from "../lib/client-api";
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-
-function getApiBaseUrl(): string {
-  return "/api/proxy";
-}
-
-async function requestJson<T>(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", pathname: string, payload?: unknown): Promise<T> {
-  const init: RequestInit = { method };
-  if (payload !== undefined) {
-    init.headers = {
-      "content-type": "application/json",
-    };
-    init.body = JSON.stringify(payload);
-  }
-  const response = await fetch(`${getApiBaseUrl()}${pathname}`, init);
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Request failed: ${response.status}`);
-  }
-
-  return await response.json() as T;
-}
 
 function readOptionalNumber(value: FormDataEntryValue | null): number | undefined {
   if (value === null) return undefined;
@@ -366,7 +345,7 @@ export function AdminAiPanel({
                     <button className="button-ghost" type="button" onClick={handleCopyCode} disabled={!auth.userCode}>
                       Copy code
                     </button>
-                    {copyNotice ? <span className="subtle-note">{copyNotice}</span> : null}
+                    {copyNotice ? <span className="subtle-note" role="status" aria-live="polite">{copyNotice}</span> : null}
                   </div>
                 </div>
                 <div className="auth-links">
@@ -403,7 +382,7 @@ export function AdminAiPanel({
             {auth.status === "error" && auth.lastError ? (
               <div className="auth-callout auth-callout--error">
                 <p className="auth-callout__title">Authentication failed</p>
-                <p className="inline-error">{auth.lastError}</p>
+                <p className="inline-error" role="alert">{auth.lastError}</p>
               </div>
             ) : null}
 
@@ -777,6 +756,9 @@ export function AdminAiPanel({
                   data-testid={`admin-ai-skill-delete-${skill.id}`}
                   disabled={pending}
                   onClick={() => {
+                    if (!window.confirm(`Delete skill "${skill.name}"? This cannot be undone.`)) {
+                      return;
+                    }
                     setSkillError(null);
                     startTransition(async () => {
                       try {
@@ -1008,6 +990,9 @@ export function AdminAiPanel({
                   data-testid={`admin-ai-role-delete-${role.id}`}
                   disabled={pending}
                   onClick={() => {
+                    if (!window.confirm(`Delete role "${role.name}"? This cannot be undone.`)) {
+                      return;
+                    }
                     setRoleError(null);
                     startTransition(async () => {
                       try {
@@ -1166,6 +1151,9 @@ export function AdminAiPanel({
                   data-testid={`admin-ai-agent-delete-${agent.id}`}
                   disabled={pending}
                   onClick={() => {
+                    if (!window.confirm(`Delete agent "${agent.name}"? This cannot be undone.`)) {
+                      return;
+                    }
                     setAgentError(null);
                     startTransition(async () => {
                       try {

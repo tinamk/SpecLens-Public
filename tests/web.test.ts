@@ -14,6 +14,7 @@ test("web auth login route sets a local portal session cookie and preserves retu
   const originalEnv = { ...process.env };
   clearKeycloakEnv();
   ensureTestAuthSecrets();
+  process.env.API_AUTH_MODE = "local-dev";
   const route = await import("../apps/web/app/api/auth/login/route");
   const response = await route.GET(new Request("http://localhost:3000/api/auth/login?returnTo=/portal/workspaces/demo"));
 
@@ -32,6 +33,7 @@ test("web auth local-dev helpers fall back to deterministic local signing secret
   delete process.env.APP_URL;
   delete process.env.INTERNAL_API_URL;
   delete process.env.API_URL;
+  process.env.API_AUTH_MODE = "local-dev";
 
   const auth = await import("../apps/web/lib/auth");
   const sessionValue = auth.buildLocalDevSession();
@@ -72,11 +74,30 @@ test("web auth login route rejects external returnTo targets", async () => {
   const originalEnv = { ...process.env };
   clearKeycloakEnv();
   ensureTestAuthSecrets();
+  process.env.API_AUTH_MODE = "local-dev";
   const route = await import("../apps/web/app/api/auth/login/route");
   const response = await route.GET(new Request("http://localhost:3000/api/auth/login?returnTo=https://attacker.example/phish"));
 
   assert.equal(response.status, 307);
   assert.equal(response.headers.get("location"), "http://localhost:3000/portal/workspaces");
+
+  process.env = originalEnv;
+});
+
+test("web auth login route does not mint local-dev cookies when API auth mode is Keycloak", async () => {
+  const originalEnv = { ...process.env };
+  clearKeycloakEnv();
+  ensureTestAuthSecrets();
+  process.env.API_AUTH_MODE = "keycloak";
+  const route = await import("../apps/web/app/api/auth/login/route");
+  const response = await route.GET(new Request("http://localhost:3000/api/auth/login?returnTo=/portal/workspaces/demo"));
+
+  assert.equal(response.status, 307);
+  assert.equal(
+    response.headers.get("location"),
+    "http://localhost:3000/login?auth=auth-config-required&returnTo=%2Fportal%2Fworkspaces%2Fdemo%3Fauth%3Dauth-config-required",
+  );
+  assert.equal((response.headers.get("set-cookie") ?? "").includes("speclens_portal_session="), false);
 
   process.env = originalEnv;
 });
@@ -124,6 +145,7 @@ test("web auth callback route rejects external returnTo targets in local dev mod
   const originalEnv = { ...process.env };
   clearKeycloakEnv();
   ensureTestAuthSecrets();
+  process.env.API_AUTH_MODE = "local-dev";
   const route = await import("../apps/web/app/api/auth/callback/route");
   const response = await route.GET(new Request("http://localhost:3000/api/auth/callback?returnTo=https://attacker.example/phish"));
 
@@ -133,10 +155,30 @@ test("web auth callback route rejects external returnTo targets in local dev mod
   process.env = originalEnv;
 });
 
+test("web auth callback route preserves visible failure reason for invalid Keycloak state", async () => {
+  const originalEnv = { ...process.env };
+  clearKeycloakEnv();
+  ensureTestAuthSecrets();
+  process.env.KEYCLOAK_ISSUER_URL = "http://localhost:8081/realms/speclens";
+  process.env.KEYCLOAK_CLIENT_ID = "speclens-web";
+
+  const route = await import("../apps/web/app/api/auth/callback/route");
+  const response = await route.GET(new Request("http://localhost:3000/api/auth/callback?returnTo=/portal/settings"));
+
+  assert.equal(response.status, 307);
+  assert.equal(
+    response.headers.get("location"),
+    "http://localhost:3000/login?auth=callback-invalid&returnTo=%2Fportal%2Fsettings%3Fauth%3Dcallback-invalid",
+  );
+
+  process.env = originalEnv;
+});
+
 test("web auth logout route clears the local portal session cookie", async () => {
   const originalEnv = { ...process.env };
   clearKeycloakEnv();
   ensureTestAuthSecrets();
+  process.env.API_AUTH_MODE = "local-dev";
   const route = await import("../apps/web/app/api/auth/logout/route");
   const response = await route.GET(new Request("http://localhost:3000/api/auth/logout"));
 
@@ -325,7 +367,7 @@ test("workspace reports empty-state helper explains filtered searches separately
   const module = await import("../apps/web/lib/portal");
   assert.deepEqual(module.getWorkspaceReportsEmptyState("security"), {
     title: "No reports matched this filter.",
-    detail: "Try a different title, source, or status search for “security”, or open the runs view to inspect jobs that have not produced report output yet.",
+    detail: "Try a different title, source, or run status search for “security”, or open the runs view to inspect runs that have not produced report output yet.",
   });
 });
 
@@ -333,7 +375,7 @@ test("workspace reports empty-state helper guides first-time report review", asy
   const module = await import("../apps/web/lib/portal");
   assert.deepEqual(module.getWorkspaceReportsEmptyState(""), {
     title: "No reports available yet.",
-    detail: "Completed runs with durable report output will appear here. Open the runs view to inspect in-progress jobs, logs, and artifacts while you wait.",
+    detail: "Completed runs with durable report output will appear here. Open the runs view to inspect in-progress runs, logs, and artifacts while you wait.",
   });
 });
 

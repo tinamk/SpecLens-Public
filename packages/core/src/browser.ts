@@ -39,6 +39,7 @@ interface BrowserAnalysisContext {
   workspace: WorkspaceHandle;
   secrets: BrowserSecretInput[];
   allowHostExecution?: boolean;
+  codexAuthPath?: string | null;
   aiDefaults?: AiRuntimeDefaults;
   aiBudget?: AiBudgetTracker;
 }
@@ -111,6 +112,40 @@ function createFinding(
     suggestion,
     evidence,
   });
+}
+
+function formatBrowserFindingTarget(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const target = `${parsed.pathname}${parsed.search}` || "/";
+    return target.length > 1 ? target.replace(/\/+$/u, "") : target;
+  } catch {
+    return rawUrl;
+  }
+}
+
+function isIgnorableBrowserRequestFailure(failure: string): boolean {
+  return /\/_next\/static\/webpack\/[^ ]*\.hot-update\.(?:js|json)(?:\?|$|\s)/iu.test(failure)
+    || /\.hot-update\.(?:js|json)(?:\?|$|\s)/iu.test(failure)
+    || /\bGET\s+https?:\/\/[^/\s]+\/\?_rsc=[^\s]+/iu.test(failure)
+    || /\bGET\s+\/\?_rsc=[^\s]+/iu.test(failure);
+}
+
+function isIgnorableBrowserConsoleError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("hydrated but some attributes")
+    && normalized.includes("caret-color")
+    && normalized.includes("transparent")
+  ) {
+    return true;
+  }
+  return normalized.includes("apiresponseerror: api unavailable while requesting /api/")
+    && normalized.includes("about://react/server/webpack-internal");
+}
+
+function browserFindingEvidence(url: string, screenshot: string | null): string[] {
+  return screenshot ? [url, screenshot] : [url];
 }
 
 function createSection(
@@ -787,45 +822,47 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
         screenshot,
         discoveredLinks,
       });
+      const pageLabel = formatBrowserFindingTarget(normalizedUrl);
+      const evidence = browserFindingEvidence(normalizedUrl, screenshot);
 
       if ((status ?? 200) >= 400) {
         findings.push(createFinding(
           "browser-self-check",
           "high",
-          "HTTP failure detected during crawl",
+          `HTTP failure on ${pageLabel}`,
           `${normalizedUrl} responded with status ${status}.`,
           "Fix the failing route before relying on browser parity coverage.",
-          screenshot ? [screenshot] : [normalizedUrl],
+          evidence,
         ));
       }
       if (!title.trim()) {
         findings.push(createFinding(
           "browser-self-check",
           "low",
-          "Visited page is missing a title",
+          `Missing title on ${pageLabel}`,
           `${normalizedUrl} rendered without a document title.`,
           "Add a meaningful title so browser analysis and end users can identify the page context.",
-          screenshot ? [screenshot] : [normalizedUrl],
+          evidence,
         ));
       }
       if (!hasMain) {
         findings.push(createFinding(
           "browser-self-check",
           "low",
-          "Visited page is missing a main landmark",
+          `Missing main landmark on ${pageLabel}`,
           `${normalizedUrl} rendered without a <main> landmark.`,
           "Expose a primary main landmark to stabilize structure-aware browser checks.",
-          screenshot ? [screenshot] : [normalizedUrl],
+          evidence,
         ));
       }
       if (!h1?.trim()) {
         findings.push(createFinding(
           "browser-self-check",
           "low",
-          "Visited page is missing a primary heading",
+          `Missing primary heading on ${pageLabel}`,
           `${normalizedUrl} rendered without an h1 heading.`,
           "Add a primary heading so the page has an observable top-level label.",
-          screenshot ? [screenshot] : [normalizedUrl],
+          evidence,
         ));
       }
 
@@ -833,30 +870,36 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
         findings.push(createFinding(
           "browser-self-check",
           "high",
-          "Uncaught page error detected",
+          `Uncaught page error on ${pageLabel}`,
           errorMessage,
           "Fix the runtime exception so the page can render deterministically.",
-          screenshot ? [screenshot] : [normalizedUrl],
+          evidence,
         ));
       }
       for (const errorMessage of consoleErrors) {
+        if (isIgnorableBrowserConsoleError(errorMessage)) {
+          continue;
+        }
         findings.push(createFinding(
           "browser-self-check",
           "medium",
-          "Console error detected",
+          `Console error on ${pageLabel}`,
           errorMessage,
           "Resolve console errors so browser runs stay clean and predictable.",
-          screenshot ? [screenshot] : [normalizedUrl],
+          evidence,
         ));
       }
       for (const failure of requestFailures) {
+        if (isIgnorableBrowserRequestFailure(failure)) {
+          continue;
+        }
         findings.push(createFinding(
           "browser-self-check",
           "medium",
-          "Request failure detected",
+          `Request failure on ${pageLabel}`,
           failure,
           "Inspect network requests or application routing for broken assets and API calls.",
-          screenshot ? [screenshot] : [normalizedUrl],
+          evidence,
         ));
       }
 
@@ -883,6 +926,7 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
       ? await generateWithOrderedProviders((() => {
           const options: GenerateWithProvidersOptions = {
             task: "visual-inspection",
+            ...(context.codexAuthPath !== undefined ? { codexAuthPath: context.codexAuthPath } : {}),
             prompt: [
               `Repository: ${context.inventory.repoName}`,
               `Pages inspected: ${pages.length}`,
@@ -917,6 +961,7 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
       ? await generateWithOrderedProviders((() => {
           const options: GenerateWithProvidersOptions = {
             task: "interaction-test",
+            ...(context.codexAuthPath !== undefined ? { codexAuthPath: context.codexAuthPath } : {}),
             prompt: [
               `Repository: ${context.inventory.repoName}`,
               `Interaction attempts: ${interactions.length}`,

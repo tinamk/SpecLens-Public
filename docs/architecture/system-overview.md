@@ -63,7 +63,7 @@ flowchart LR
 |---|---|
 | `apps/web` | Marketing pages, portal, auth handoff, admin UI, report rendering |
 | `apps/api` | Product API, job creation, billing/webhook surfaces, auth/session enforcement, admin AI controls |
-| `apps/runner` | Isolated deterministic sandbox support for internal execution helpers |
+| `apps/runner` | Retained runner-plane sandbox support and compatibility validation outside the normal hosted AI submission path |
 | `apps/ai-worker` | Unified hosted audit/remediation controller that runs repo work inside one-shot agent sandboxes |
 | `packages/core` | Shared analysis logic, browser/runtime helpers, and archived parity reference behavior |
 | `packages/db` | Prisma schema, repositories, queue helpers, token persistence |
@@ -73,7 +73,7 @@ flowchart LR
 
 - `web` is presentation and session-aware orchestration, not the system of record.
 - `api` owns business operations, persistence coordination, queue dispatch, and external integrations.
-- `runner` and `ai-worker` are sibling execution planes, not parent/child services.
+- `runner` and `ai-worker` are sibling execution planes, not parent/child services; normal hosted audit/remediation jobs resolve to `unified-agent` and are owned by `ai-worker`.
 - PostgreSQL stores both product state and the `pg-boss` durable queue state.
 - reports are persisted and rendered after execution; they are not assembled only in-memory.
 

@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ThemeSwitcher } from "@speclens/ui";
+import { BrandLockup, ThemeSwitcher } from "@speclens/ui";
 import { usePathname } from "next/navigation";
 
 const PUBLIC_NAV_ITEMS = [
   { href: "/pricing", label: "Pricing", testId: "public-nav-pricing" },
-  { href: "/license", label: "License model", testId: "public-nav-license" },
+  { href: "/license", label: "Dual licensing", testId: "public-nav-license" },
   { href: "/commercial", label: "Commercial licensing", testId: "public-nav-commercial" },
   { href: "/terms", label: "Terms", testId: "public-nav-terms" },
   { href: "/privacy", label: "Privacy", testId: "public-nav-privacy" },
@@ -27,12 +27,7 @@ export function SiteHeader() {
       data-testid="public-site-header"
     >
       <div className="site-header__bar">
-        <Link className="site-header__brand" data-testid="public-nav-home" href="/">
-          <span className="logo-mark" aria-hidden="true">SL</span>
-          <span>
-            <span className="brand-name">SpecLens</span>
-          </span>
-        </Link>
+        <BrandLockup testId="public-nav-home" />
 
         <nav className="site-header__nav" aria-label="Primary">
           {PUBLIC_NAV_ITEMS.map(item => (
@@ -49,9 +44,10 @@ export function SiteHeader() {
 
         <div className="site-header__actions">
           <ThemeSwitcher compact />
-          <Link className="button-ghost" data-testid="public-cta-login" href="/api/auth/login">Log in</Link>
+          <Link className="button-ghost" data-testid="public-cta-login" href="/login">Open hosted portal</Link>
           <Link className="button" data-testid="public-cta-start-pro" href="/pricing">See hosted plans</Link>
           <button
+            aria-controls="public-mobile-nav"
             aria-expanded={open}
             aria-label={open ? "Close menu" : "Open menu"}
             className="site-header__menu-toggle"
@@ -71,21 +67,21 @@ export function SiteHeader() {
         </div>
       </div>
 
-      <div aria-hidden={!open} className="site-header__drawer" role="menu">
+      <nav aria-label="Mobile primary" className="site-header__drawer" hidden={!open} id="public-mobile-nav">
         {PUBLIC_NAV_ITEMS.map(item => (
           <Link
             aria-current={pathname === item.href ? "page" : undefined}
+            data-testid={`${item.testId}-mobile`}
             href={item.href}
             key={item.href}
-            role="menuitem"
           >
             {item.label}
           </Link>
         ))}
         <span className="site-header__drawer-divider" />
-        <Link className="button-ghost" href="/api/auth/login" role="menuitem">Log in</Link>
-        <Link className="button" href="/pricing" role="menuitem">See hosted plans</Link>
-      </div>
+        <Link className="button-ghost" data-testid="public-cta-login-mobile" href="/login">Open hosted portal</Link>
+        <Link className="button" data-testid="public-cta-start-pro-mobile" href="/pricing">See hosted plans</Link>
+      </nav>
     </header>
   );
 }

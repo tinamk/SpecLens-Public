@@ -1,8 +1,9 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { PortalSectionHeader, PortalShell } from "@speclens/ui";
 import { DataPath } from "../../../../../components/data-visuals";
-import { PaginationLinks } from "../../../../../components/portal-pagination";
+import { buildSearchHref, PaginationLinks } from "@speclens/ui";
+import { WorkspaceRouteState } from "../../../../../components/workspace-route-state";
 import { ApiResponseError, getPortalAnalysisTasks, getWorkspaceConsole, getWorkspaceJobsPage } from "../../../../../lib/api";
 import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from "../../../../../lib/auth";
 import {
@@ -65,7 +66,7 @@ export default async function WorkspaceReportsPage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="reports"
       >
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Workspace reports summary">
           <article className="portal-stat" data-testid="workspace-reports-stat-total">
             <span className="portal-stat__label">Reports</span>
             <span className="portal-stat__value">{totalReports}</span>
@@ -87,8 +88,9 @@ export default async function WorkspaceReportsPage({
         <section className="portal-panel" data-testid="workspace-reports-list">
           <PortalSectionHeader
             title="Reports"
+            description="Each report is the durable review artifact for a completed run. Open the report for release gate, findings, evidence, and remediation handoff; open the run for logs and sandbox artifacts."
           />
-          <form className="stack-form form-shell" method="GET">
+          <form aria-label="Search reports" className="stack-form form-shell" method="GET" role="search">
             <div className="form-grid">
               <label className="field field--full">
                 <span>Search reports</span>
@@ -97,16 +99,35 @@ export default async function WorkspaceReportsPage({
                   data-testid="workspace-reports-search-input"
                   defaultValue={reportQuery.q}
                   name="q"
-                  placeholder="Filter by report title, source, or job status…"
+                  placeholder="Filter by report title, source, or run status…"
                 />
               </label>
             </div>
-            <button className="button-ghost" data-testid="workspace-reports-search-submit" type="submit">Apply report filter</button>
+            <div className="portal-inline-actions">
+              <button className="button-ghost" data-testid="workspace-reports-search-submit" type="submit">Apply report filter</button>
+              {reportQuery.q ? (
+                <Link
+                  className="button-secondary"
+                  data-testid="workspace-reports-clear-filters"
+                  href={buildSearchHref(`/portal/workspaces/${workspaceId}/reports`, query, {
+                    page: undefined,
+                    q: undefined,
+                  })}
+                >
+                  Clear filters
+                </Link>
+              ) : null}
+            </div>
           </form>
           {jobsWithReports.length === 0 ? (
             <div className="subtle-note" data-testid="workspace-reports-empty-state">
               <p><strong>{emptyState.title}</strong></p>
               <p>{emptyState.detail}</p>
+              <p>
+                <Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/runs` as Route}>
+                  Open runs
+                </Link>
+              </p>
             </div>
           ) : null}
           {jobsWithReports.length > 0 ? (
@@ -118,11 +139,12 @@ export default async function WorkspaceReportsPage({
                   <article className="portal-record-card" data-testid={`workspace-reports-row-${job.report?.id ?? job.job.id}`} key={job.job.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{job.report?.title ?? "Generated report"}</strong>
+                        <h3>{job.report?.title ?? "Generated report"}</h3>
                         <p><DataPath value={job.job.sourceLocation} /></p>
                       </div>
                       <div className="portal-record-card__meta">
                         <span className={getJobStatusTagClass(job.job.status)}>{job.job.status}</span>
+                        {job.report?.status ? <span className="tag tag--info">report {job.report.status}</span> : null}
                         <span className="tag tag--neutral">{formatJobLabel(job.job, tasks)}</span>
                       </div>
                     </div>
@@ -146,7 +168,7 @@ export default async function WorkspaceReportsPage({
                         data-testid={`workspace-reports-open-job-${job.job.id}`}
                         href={jobHref ?? (`/portal/workspaces/${workspaceId}/runs/${job.job.id}` as Route)}
                       >
-                        Open job
+                        Open run
                       </Link>
                     </div>
                   </article>
@@ -165,21 +187,17 @@ export default async function WorkspaceReportsPage({
     );
   } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
+      const isMissing = error.status === 404;
       return (
-        <PortalShell
+        <WorkspaceRouteState
+          backHref={isMissing ? "/portal/workspaces" as Route : `/portal/workspaces/${workspaceId}` as Route}
+          backLabel={isMissing ? "Back to workspaces" : "Back to workspace"}
           eyebrow="Workspace reports"
-          title="Access denied"
+          isAdmin={isPortalAdminSession(session)}
+          isMissing={isMissing}
           pageTestId="workspace-reports-access-denied-page"
-          primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
-          activePrimaryNavKey="workspaces"
-        >
-          <PortalNoticePanel
-            actions={<Link className="button-secondary" href={`/portal/workspaces/${workspaceId}` as Route}>Back to workspace</Link>}
-            description="You do not have access to this workspace."
-            descriptionTestId="workspace-reports-access-denied"
-            title="Access denied"
-          />
-        </PortalShell>
+          descriptionTestId="workspace-reports-access-denied"
+        />
       );
     }
     throw error;

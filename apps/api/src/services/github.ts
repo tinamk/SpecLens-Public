@@ -491,11 +491,19 @@ export function parseGithubWebhookPayload(request: {
     throw statusError(401, "Invalid GitHub webhook signature.");
   }
 
-  const payload = request.rawBody
-    ? JSON.parse(request.rawBody.toString("utf8")) as Record<string, unknown>
-    : typeof request.body === "string"
-      ? JSON.parse(request.body) as Record<string, unknown>
-      : request.body as Record<string, unknown>;
+  let payload: Record<string, unknown>;
+  try {
+    payload = request.rawBody
+      ? JSON.parse(request.rawBody.toString("utf8")) as Record<string, unknown>
+      : typeof request.body === "string"
+        ? JSON.parse(request.body) as Record<string, unknown>
+        : request.body as Record<string, unknown>;
+  } catch {
+    throw statusError(400, "Malformed GitHub webhook JSON payload.");
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw statusError(400, "GitHub webhook payload must be a JSON object.");
+  }
   if (eventName === "ping") {
     return {
       kind: "ignored",

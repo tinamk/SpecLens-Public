@@ -25,6 +25,7 @@ Current milestone context:
 
 - `apps/web/`: Next.js marketing site, portal, pricing, legal pages, and report views
 - `apps/api/`: Fastify API control plane and integration/webhook surface
+- `apps/ai-worker/`: hosted AI job controller, one-shot sandbox orchestration, agent role execution core, and report/artifact finalization
 - `apps/runner/`: queued Docker-runner plane
 - `packages/core/`: strict-TypeScript analysis engine
 - `packages/contracts/`: shared Zod schemas and product DTOs

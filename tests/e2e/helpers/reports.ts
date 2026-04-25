@@ -12,6 +12,12 @@ export async function expectReportSurface(
 ): Promise<void> {
   await expect(page.getByTestId("workspace-report-page")).toBeVisible();
   await expect(page.getByTestId("report-hero")).toBeVisible();
+  await expect(page.getByTestId("report-decision-cockpit")).toBeVisible();
+  await expect(page.getByTestId("report-action-queue")).toBeVisible();
+  await expect(page.getByTestId("report-agent-workflow")).toBeVisible();
+  await expect(page.getByTestId("report-role-health")).toBeVisible();
+  await expect(page.getByTestId("report-triage-board")).toBeVisible();
+  await expect(page.getByTestId("report-artifact-trust")).toBeVisible();
   await expect(page.getByTestId("report-artifacts-panel")).toBeVisible();
   await expect(page.getByTestId("report-remediation-panel")).toBeVisible();
   if (options.canMutate ?? true) {
@@ -33,12 +39,12 @@ export async function expectReportSurface(
   await expect(page.getByTestId("report-summary-low")).toContainText(String(report.summary.low));
 
   await expect(page.locator('[data-testid^="report-section-"]')).toHaveCount(report.sections.length);
-  await expect(page.locator('[data-testid^="report-finding-"]')).toHaveCount(report.findings.length);
-  await expect(page.locator('[data-testid^="report-artifact-"]')).toHaveCount(report.artifacts.length);
+  await expect(page.locator('.report-finding-card[data-testid^="report-finding-"]')).toHaveCount(report.findings.length);
   for (const [index, artifact] of report.artifacts.entries()) {
     await expect(page.getByTestId(`report-artifact-${index}`)).toContainText(artifact.key);
-    await expect(page.getByTestId(`report-download-artifact-${index}`)).toBeVisible();
+    await expect(page.getByTestId(`report-download-artifact-${index}`)).toHaveAttribute("href", /\/artifacts\/\d+$/);
   }
+  await expect(page.getByTestId(`report-artifact-${report.artifacts.length}`)).toHaveCount(0);
 }
 
 export async function queueRemediationFromReport(page: Page): Promise<string> {

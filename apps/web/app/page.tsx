@@ -13,7 +13,7 @@ export default function HomePage() {
   return (
     <MarketingShell testId="public-home-page">
       <SiteHeader />
-      <main data-testid="public-home-main">
+      <main data-testid="public-home-main" id="main-content" tabIndex={-1}>
         <section className="hero" data-testid="public-home-hero">
           <div className="hero-grid hero-grid--single">
             <div className="hero-copy">
@@ -23,8 +23,8 @@ export default function HomePage() {
                 Attach the source, execute the pack, review the release gate — with evidence tied to the exact commit under review.
               </p>
               <div className="hero__actions">
-                <Link className="button" data-testid="public-home-start-hosted" href="/api/auth/login">Try hosted SaaS</Link>
-                <Link className="button-ghost" data-testid="public-home-view-pricing" href="/pricing">See hosted pricing</Link>
+                <Link className="button" data-testid="public-home-start-hosted" href="/login">Open hosted portal</Link>
+                <Link className="button-ghost" data-testid="public-home-view-pricing" href="/pricing">See hosted plans</Link>
               </div>
             </div>
           </div>
@@ -42,19 +42,19 @@ export default function HomePage() {
             <MarketingRoutePanel
               badgeLabel="Hosted SaaS"
               badgeClassName="tag tag--success"
-              description="Free covers public GitHub repos. Pro adds private repositories, Git repo uploads, and shared workspace access inside SpecLens Cloud."
+              description="Free covers approved public Git hosts. Pro adds private GitHub repositories, Git archive uploads, and shared workspace access in hosted SpecLens."
               title="Choose hosted SaaS for the managed product."
               actions={
                 <>
-                  <Link className="button" data-testid="public-home-start-hosted-secondary" href="/api/auth/login">Start hosted</Link>
-                  <Link className="button-ghost" href="/pricing">Compare plans</Link>
+                  <Link className="button" data-testid="public-home-start-hosted-secondary" href="/login">Open hosted portal</Link>
+                  <Link className="button-ghost" data-testid="public-home-compare-plans" href="/pricing">See hosted plans</Link>
                 </>
               }
             />
             <MarketingRoutePanel
               badgeLabel="Commercial licensing"
               badgeClassName="tag tag--warning"
-              description="Contact us if you need self-hosting, codebase rights, procurement review, or a licensing path beyond the managed service."
+              description="Contact us if you need commercial-purpose self-hosting, codebase rights, procurement review, or a licensing path beyond the managed service."
               title="Choose commercial licensing for company rights."
               tone="commercial"
               actions={
@@ -62,7 +62,7 @@ export default function HomePage() {
                   <Link className="button" data-testid="public-home-contact-commercial" href="/commercial">
                     Talk commercial licensing
                   </Link>
-                  <Link className="button-ghost" href="/license">License details</Link>
+                  <Link className="button-ghost" data-testid="public-home-license-details" href="/license">License details</Link>
                 </>
               }
             />

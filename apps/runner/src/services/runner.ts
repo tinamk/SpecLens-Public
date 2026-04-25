@@ -822,14 +822,30 @@ export async function startEmbeddedRunnerWorker(): Promise<void> {
     return;
   }
   embeddedWorkerStarted = true;
-  await initializeDatabase();
-  await workRunnerJobs(async (payload, queueMessageId) => {
-    await executeQueuedJob(payload.jobId, queueMessageId);
-  });
+  try {
+    const config = loadRunnerConfig();
+    await initializeDatabase();
+    await workRunnerJobs(async (payload, queueMessageId) => {
+      await executeQueuedJob(payload.jobId, queueMessageId);
+    }, {
+      batchSize: config.maxConcurrency,
+    });
+  } catch (error) {
+    embeddedWorkerStarted = false;
+    throw error;
+  }
 }
 
 export function stopEmbeddedRunnerWorker(): void {
   embeddedWorkerStarted = false;
+}
+
+function getHealthRequestPath(requestUrl: string | undefined): string {
+  try {
+    return new URL(requestUrl ?? "/", "http://localhost").pathname;
+  } catch {
+    return "/";
+  }
 }
 
 export async function startRunnerLoop(): Promise<void> {
@@ -844,35 +860,57 @@ export async function startRunnerLoop(): Promise<void> {
 
   const server = http.createServer((request, response) => {
     void (async () => {
-      const url = request.url ?? "/";
-      if (url.startsWith("/metrics")) {
-        response.writeHead(200, { "content-type": getMetricsContentType() });
-        response.end(await getMetricsSnapshot());
-        return;
-      }
-      if (url.startsWith("/ready")) {
-        try {
-          await checkDatabaseHealth();
-          await checkQueueHealth();
-          const storage = await checkObjectStorageHealth(storageConfig());
-          response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify({ ok: true, storage }));
-        } catch (error) {
-          response.writeHead(503, { "content-type": "application/json" });
+      try {
+        const pathname = getHealthRequestPath(request.url);
+        if (pathname === "/metrics") {
+          response.writeHead(200, { "content-type": getMetricsContentType() });
+          response.end(await getMetricsSnapshot());
+          return;
+        }
+        if (pathname === "/ready") {
+          try {
+            await checkDatabaseHealth();
+            await checkQueueHealth();
+            const storage = await checkObjectStorageHealth(storageConfig());
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(JSON.stringify({ ok: true, storage }));
+          } catch (error) {
+            console.warn(JSON.stringify({
+              level: "warn",
+              scope: "runner.ready",
+              error: error instanceof Error ? error.message : "Readiness check failed.",
+            }));
+            response.writeHead(503, { "content-type": "application/json" });
+            response.end(JSON.stringify({
+              ok: false,
+              error: "Readiness check failed.",
+            }));
+          }
+          return;
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          ok: true,
+          role: "runner",
+          maxConcurrency: config.maxConcurrency,
+          runnerId: config.runnerId,
+        }));
+      } catch (error) {
+        console.warn(JSON.stringify({
+          level: "warn",
+          scope: "runner.health",
+          error: error instanceof Error ? error.message : "Health endpoint request failed.",
+        }));
+        if (!response.writableEnded) {
+          if (!response.headersSent) {
+            response.writeHead(500, { "content-type": "application/json" });
+          }
           response.end(JSON.stringify({
             ok: false,
-            error: error instanceof Error ? error.message : "Readiness check failed.",
+            error: "Health endpoint request failed.",
           }));
         }
-        return;
       }
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({
-        ok: true,
-        role: "runner",
-        maxConcurrency: config.maxConcurrency,
-        runnerId: config.runnerId,
-      }));
     })();
   });
   server.listen(config.healthPort, "0.0.0.0", () => {

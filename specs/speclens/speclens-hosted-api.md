@@ -2,7 +2,7 @@
 
 ## Goal
 
-Define the hosted API control plane surface for Iteration 4.
+Define the hosted API control plane surface for the active hosted product in Iteration 5.
 
 ## Scope (IN)
 

@@ -24,12 +24,16 @@ function isTrustedLocalUrl(value: string | null | undefined, fallback: string): 
   }
 }
 
-function isSafeLocalDevAuthContext(): boolean {
-  if (process.env.SPECLENS_ALLOW_UNSAFE_LOCAL_DEV_AUTH === "true") {
+function isSafeLocalDevAuthContext(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.SPECLENS_ALLOW_UNSAFE_LOCAL_DEV_AUTH === "true") {
     return true;
   }
-  return isTrustedLocalUrl(process.env.APP_URL ?? null, "http://localhost:3000")
-    && isTrustedLocalUrl(process.env.INTERNAL_API_URL ?? process.env.API_URL ?? null, "http://localhost:4000");
+  return isTrustedLocalUrl(env.APP_URL ?? null, "http://localhost:3000")
+    && isTrustedLocalUrl(env.INTERNAL_API_URL ?? env.API_URL ?? null, "http://localhost:4000");
+}
+
+export function canUseLocalDevPortalSession(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.API_AUTH_MODE === "local-dev" && isSafeLocalDevAuthContext(env);
 }
 
 function buildLocalDevFallbackSecret(kind: "session" | "csrf", env: NodeJS.ProcessEnv = process.env): string {
@@ -76,10 +80,10 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 export function buildLocalDevSession(): string {
-  if (!isSafeLocalDevAuthContext()) {
+  if (!canUseLocalDevPortalSession()) {
     throw new Error(
-      "Refusing to mint a local-dev portal session outside a local/private app+API context. "
-      + "Set SPECLENS_ALLOW_UNSAFE_LOCAL_DEV_AUTH=true to override intentionally.",
+      "Refusing to mint a local-dev portal session unless API_AUTH_MODE=local-dev and app/API origins are local or private. "
+      + "Set API_AUTH_MODE=local-dev for local cookie auth, or configure Keycloak for hosted auth.",
     );
   }
   return encodePortalSessionToken({

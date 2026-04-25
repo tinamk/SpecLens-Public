@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   buildKeycloakSession,
   buildLocalDevSession,
+  canUseLocalDevPortalSession,
   buildCsrfToken,
   csrfCookieName,
   exchangeCodeForToken,
@@ -13,6 +14,21 @@ import {
   stateCookieName,
 } from "../../../../lib/auth";
 import { resolvePublicRequestOrigin } from "../../../../lib/request-origin";
+
+function appendAuthFailureReason(returnTo: string): string {
+  const [path = "/portal/workspaces", query = ""] = returnTo.split("?", 2);
+  const params = new URLSearchParams(query);
+  params.set("auth", "callback-invalid");
+  const nextQuery = params.toString();
+  return nextQuery ? `${path}?${nextQuery}` : path;
+}
+
+function buildPublicCallbackFailureUrl(appBaseUrl: string, returnTo: string): URL {
+  const failureUrl = new URL("/login", appBaseUrl);
+  failureUrl.searchParams.set("auth", "callback-invalid");
+  failureUrl.searchParams.set("returnTo", appendAuthFailureReason(returnTo));
+  return failureUrl;
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -35,6 +51,9 @@ export async function GET(request: Request) {
   const returnTo = resolveSafeReturnTo(requestedReturnTo, appBaseUrl);
 
   if (!config.enabled) {
+    if (!canUseLocalDevPortalSession()) {
+      return NextResponse.redirect(buildPublicCallbackFailureUrl(appBaseUrl, returnTo));
+    }
     const response = NextResponse.redirect(new URL(returnTo, appBaseUrl));
     const sessionValue = buildLocalDevSession();
     response.cookies.set(sessionCookieName(), sessionValue, {
@@ -61,13 +80,16 @@ export async function GET(request: Request) {
     ?.split("=")[1];
 
   if (!code || !state || !storedState || storedState !== state) {
-    return NextResponse.redirect(new URL(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`, appBaseUrl));
+    return NextResponse.redirect(buildPublicCallbackFailureUrl(appBaseUrl, returnTo));
   }
 
   const callbackUrl = new URL("/api/auth/callback", appBaseUrl);
   callbackUrl.searchParams.set("returnTo", returnTo);
   const token = await exchangeCodeForToken(code, callbackUrl.toString());
   const response = NextResponse.redirect(new URL(returnTo, appBaseUrl));
+  if (!token.idToken && !canUseLocalDevPortalSession()) {
+    return NextResponse.redirect(buildPublicCallbackFailureUrl(appBaseUrl, returnTo));
+  }
   const sessionValue = token.idToken ? buildKeycloakSession(token.idToken) : buildLocalDevSession();
   response.cookies.set(sessionCookieName(), sessionValue, {
     httpOnly: true,

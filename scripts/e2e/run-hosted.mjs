@@ -65,6 +65,28 @@ function runCommandCapture(command, args, options = {}) {
   });
 }
 
+let composeCommandPromise = null;
+
+async function resolveComposeCommand(env) {
+  if (!composeCommandPromise) {
+    composeCommandPromise = (async () => {
+      try {
+        await runCommandCapture("docker", ["compose", "version"], { env });
+        return { command: "docker", argsPrefix: ["compose"] };
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Docker Compose v2 was not found.";
+        throw new Error(`Docker Compose v2 is required for hosted E2E; docker-compose v1 cannot parse the compose file. ${detail}`);
+      }
+    })();
+  }
+  return await composeCommandPromise;
+}
+
+async function runCompose(args, options = {}) {
+  const compose = await resolveComposeCommand(options.env ?? process.env);
+  return await runCommand(compose.command, [...compose.argsPrefix, ...args], options);
+}
+
 async function waitForHttp(url, timeoutMs = 180000) {
   const startedAt = Date.now();
   for (;;) {
@@ -146,12 +168,12 @@ async function main() {
       const hasRunnerImage = await imageExists("speclens/analysis-runner:local", composeEnv);
       const hasAiWorkerImage = await imageExists("speclens/ai-worker:local", composeEnv);
       const composeUpArgs = forceBuild || !hasRunnerImage || !hasAiWorkerImage
-        ? ["compose", "up", "-d", "--build"]
-        : ["compose", "up", "-d"];
+        ? ["up", "-d", "--build"]
+        : ["up", "-d"];
       if (resetStack) {
-        await runCommand("docker", ["compose", "down", "-v", "--remove-orphans"], { env: composeEnv }).catch(() => undefined);
+        await runCompose(["down", "-v", "--remove-orphans"], { env: composeEnv }).catch(() => undefined);
       }
-      await runCommand("docker", composeUpArgs, { env: composeEnv });
+      await runCompose(composeUpArgs, { env: composeEnv });
       await waitForHttp(`${keycloakUrl}/realms/speclens/.well-known/openid-configuration`);
       await runCommand("npm", ["run", "seed:keycloak-users"], {
         env: {
@@ -178,7 +200,7 @@ async function main() {
     testsPassed = true;
   } finally {
     if (!skipCompose && testsPassed && shutdownStack) {
-      await runCommand("docker", ["compose", "down", "--remove-orphans"], { env: composeEnv }).catch(() => undefined);
+      await runCompose(["down", "--remove-orphans"], { env: composeEnv }).catch(() => undefined);
     }
   }
 }

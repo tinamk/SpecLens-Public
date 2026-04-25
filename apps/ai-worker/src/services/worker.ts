@@ -29,6 +29,7 @@ import {
 import {
   appendAnalysisJobLogs,
   checkDatabaseHealth,
+  checkObjectStorageHealth,
   checkQueueHealth,
   claimAgentJob,
   downloadObjectToFile,
@@ -82,6 +83,7 @@ import {
   type AnalysisLogEvent,
   type AnalysisReport,
   type ChangesetSummary,
+  type EvidenceReference,
   type JobExecutionMetadata,
   type JobEnvelope,
   type RoleDefinition,
@@ -1325,7 +1327,7 @@ function normalizeSectionStatus(value: unknown): "ready" | "planned" | "skipped"
   if (value === "not_applicable" || value === "n/a") {
     return "skipped";
   }
-  return "ready";
+  return "planned";
 }
 
 function normalizeFindingSeverity(value: unknown): "high" | "medium" | "low" {
@@ -1981,7 +1983,7 @@ function normalizeStandardizedHandoff(
   };
 }
 
-function normalizeRoleOutput(raw: unknown): RoleOutput {
+function normalizeRoleOutput(raw: unknown, roleId?: string): RoleOutput {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return roleOutputSchema.parse(raw);
   }
@@ -2050,7 +2052,7 @@ function normalizeRoleOutput(raw: unknown): RoleOutput {
           ?? "Investigate the issue and document a concrete remediation plan.";
         return {
           ...findingRecord,
-          category: normalizeFindingCategory(findingRecord.category),
+          category: normalizeFindingCategory(findingRecord.category, roleId),
           title: fallbackTitle,
           severity: normalizeFindingSeverity(
             findingRecord.severity
@@ -2073,12 +2075,12 @@ function normalizeRoleOutput(raw: unknown): RoleOutput {
   });
 }
 
-function readRoleOutput(outputPath: string): RoleOutput {
+function readRoleOutput(outputPath: string, roleId?: string): RoleOutput {
   if (!fs.existsSync(outputPath)) {
     throw new Error("Codex did not emit an output file.");
   }
   const raw = fs.readFileSync(outputPath, "utf8");
-  return normalizeRoleOutput(parseJsonFromOutput(raw));
+  return normalizeRoleOutput(parseJsonFromOutput(raw), roleId);
 }
 
 function compactPromptValue(value: unknown, depth = 0): unknown {
@@ -2242,6 +2244,7 @@ function buildRolePrompt(options: {
   const priorOutputsBlock = formatPriorRoleOutputsForPrompt(options.priorOutputs);
   const learnablesBlock = formatLearnablesForPrompt(options.learnables);
   const roleOutputContractBlock = formatRoleOutputContractForPrompt(options.roleId);
+  const roleGuardrails = formatRoleExecutionGuardrailsForPrompt(options.roleId);
 
   return [
     `You are the \"${options.roleName}\" role (id: ${options.roleId}) in the ${options.agentName} agent run.`,
@@ -2270,6 +2273,7 @@ function buildRolePrompt(options: {
     learnablesBlock,
     "Role output contract:",
     roleOutputContractBlock,
+    roleGuardrails ? ["Role-specific execution guardrails:", roleGuardrails].join("\n") : null,
     "Task:",
     options.rolePrompt,
     "Constraints:",
@@ -2284,6 +2288,68 @@ function buildRolePrompt(options: {
     "Output shape reminder:",
     "{\n  \"summary\": \"...\",\n  \"sections\": [...],\n  \"findings\": [...]\n}",
   ].filter(Boolean).join("\n\n");
+}
+
+function formatRoleExecutionGuardrailsForPrompt(roleId: string): string | null {
+  if (roleId === "runtime-scout") {
+    return [
+      "- Hosted agent jobs intentionally run inside a one-shot sandbox without host Docker socket access.",
+      "- Do not create a finding solely because Docker Compose, host Docker, or controller-side DinD preflight is unavailable inside the job sandbox.",
+      "- Prefer direct repo install/start/health evidence, browser executor evidence, Playwright preflight evidence, and controller sandbox evidence for hosted runtime confidence.",
+      "- Record Compose/DinD absence as a scoped limitation only when it blocks the direct hosted runtime evidence path.",
+    ].join("\n");
+  }
+  if (roleId === "auth-cartographer") {
+    return [
+      "- Uploaded job snapshots normally exclude concrete `.env` files; do not create a finding solely because `.env` is absent.",
+      "- Treat missing auth secrets as a finding only when required env names are undocumented, public recovery fails open, secrets are mishandled, or a configured deployment path breaks.",
+      "- When auth material is absent but routes fail closed with explicit recovery, describe it as an execution limitation rather than a product defect.",
+    ].join("\n");
+  }
+  if (roleId === "playwright-operator") {
+    return [
+      "- Do not run `npx playwright`, `playwright test`, or equivalent direct probes before dependencies are installed.",
+      "- Prefer repository package scripts over transient tool downloads.",
+      "- If execution is needed, run the locked install command first (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`, etc.).",
+      "- Treat worker-added `Playwright preflight` evidence as stronger than earlier exploratory command failures.",
+      "- Uploaded job snapshots normally exclude concrete `.env` files; do not duplicate generic missing-env findings when the worker already records authenticated coverage as a scoped limitation.",
+    ].join("\n");
+  }
+  if (roleId === "release-gate-scorer") {
+    return [
+      "- Use artifact-auditor handoff fields (`generatedArtifacts`, `sourcePaths`, `presentGeneratedKinds`, `missingGeneratedKinds`) as canonical evidence for already-executed sandbox artifacts.",
+      "- Do not inspect project-root `.speclens-workspace`, `test-results`, or `playwright-report` paths as proof of hosted artifact absence.",
+      "- Hosted browser/runtime artifacts are written under the job output root and mirrored by the controller after sandbox completion.",
+      "- Fail on artifact evidence only when artifact-auditor reports missing required generated kinds or when prior execution evidence explicitly contradicts artifact-auditor output.",
+      "- Missing concrete `.env` in an uploaded snapshot should lower authenticated-browser confidence at most once; do not escalate it to a release blocker when public recovery fails closed and unauthenticated/browser/Playwright evidence succeeded.",
+    ].join("\n");
+  }
+  if (roleId === "navigation-qa-planner") {
+    return [
+      "- Keep `navigationTargets`, `journeys`, and `assertions` bounded to the highest-risk entries; do not dump the full route map.",
+      "- Use concise strings and small objects only. Avoid prose paragraphs inside arrays.",
+      "- If a target has similar variants, group it once and describe the variant in the assertion text.",
+      "- Preferred limits: at most 12 navigation targets, 8 journeys, and 12 assertions.",
+      "- Uploaded job snapshots normally exclude concrete `.env` files; keep auth-gated journey gaps scoped and avoid duplicating generic missing-env findings from auth/runtime roles.",
+    ].join("\n");
+  }
+  if (roleId === "ux-friction-reviewer" || roleId === "cross-surface-consistency-reviewer") {
+    return [
+      "- Uploaded job snapshots normally exclude concrete `.env` files; do not create repeated generic missing-env findings.",
+      "- If authenticated browser paths cannot run, report the specific user-facing UX risk or state that the limitation is already covered by execution evidence.",
+      "- Prefer concrete route copy, recovery, empty-state, and artifact-backed findings over broad environment caveats.",
+    ].join("\n");
+  }
+  if (roleId === "remediation-planner" || roleId === "e2e-remediation-planner") {
+    return [
+      "- Emit implementation-ready remediation packs, not a long narrative report.",
+      "- Preferred limits: at most 5 packs, 5 actions per pack, and 4 validation commands total.",
+      "- Do not include patch hunks, markdown tables, or raw artifact payloads inside JSON fields.",
+      "- Treat stale validation blockers as non-blocking if later sandbox evidence contradicts them.",
+      "- Treat repeated missing-env/authenticated-coverage findings as one scoped remediation dependency, not one pack per role.",
+    ].join("\n");
+  }
+  return null;
 }
 
 function dedupeLearnables(learnables: LearnableSeed[]): LearnableSeed[] {
@@ -2789,6 +2855,82 @@ function buildArtifactAnalysis(
   });
 }
 
+function reportExecutionAttemptSucceeded(report: AnalysisReport, attemptId: string): boolean {
+  return report.summary.executionCoverage.attempted.some(attempt =>
+    attempt.id === attemptId && attempt.status === "succeeded");
+}
+
+function reportBrowserQaAuthenticated(report: AnalysisReport): boolean {
+  return report.sections.some(section =>
+    section.title === "Browser QA execution"
+    && section.status === "ready"
+    && section.data.authenticated === true);
+}
+
+function hasGeneratedBrowserArtifactEvidence(artifactAnalysis: z.infer<typeof artifactAnalysisSchema>): boolean {
+  const browserArtifactKinds = new Set([
+    "playwright-report",
+    "screenshot",
+    "storage-state",
+    "test-results",
+    "trace",
+  ]);
+  if (artifactAnalysis.presentKinds.some(kind => browserArtifactKinds.has(kind))) {
+    return true;
+  }
+  return artifactAnalysis.notableArtifacts.some(artifact =>
+    browserArtifactKinds.has(artifact.kind)
+    || artifact.key.includes("/generated/browser/")
+    || artifact.key.includes("/playwright-report/")
+    || artifact.key.includes("/test-results/"));
+}
+
+function isSupersededBrowserCoverageGap(
+  gapSummary: string,
+  report: AnalysisReport,
+  artifactAnalysis: z.infer<typeof artifactAnalysisSchema>,
+): boolean {
+  const normalized = gapSummary.toLowerCase();
+  const repositoryPlaywrightSucceeded = reportExecutionAttemptSucceeded(report, "repo-playwright");
+  const browserQaSucceeded = reportExecutionAttemptSucceeded(report, "browser-qa");
+  const browserQaAuthenticated = reportBrowserQaAuthenticated(report);
+  const browserArtifactEvidence = hasGeneratedBrowserArtifactEvidence(artifactAnalysis);
+
+  if (normalized.includes("auth") || normalized.includes("protected route") || normalized.includes("portal")) {
+    return browserQaAuthenticated;
+  }
+
+  if (
+    repositoryPlaywrightSucceeded
+    && (
+      normalized.includes("no playwright execution")
+      || normalized.includes("no playwright suite executed")
+      || normalized.includes("no repository-native playwright")
+      || normalized.includes("no `npm run e2e")
+      || normalized.includes("playwright execution was performed")
+      || normalized.includes("based on repo contracts and existing artifacts only")
+      || (browserArtifactEvidence && normalized.includes("no newly generated browser artifacts"))
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    browserQaSucceeded
+    && (
+      normalized.includes("no browser execution")
+      || normalized.includes("no browser automation")
+      || normalized.includes("browser execution evidence")
+      || normalized.includes("based on repo contracts and existing artifacts only")
+      || (browserArtifactEvidence && normalized.includes("no newly generated browser artifacts"))
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function buildCapabilityGaps(
   handoff: StandardizedHandoff | null,
   report: AnalysisReport,
@@ -2819,6 +2961,9 @@ function buildCapabilityGaps(
   }
 
   for (const gap of handoff?.playwright.coverageGaps ?? []) {
+    if (isSupersededBrowserCoverageGap(gap, report, artifactAnalysis)) {
+      continue;
+    }
     pushGap({
       scope: "browser",
       severity: "medium",
@@ -2924,9 +3069,14 @@ function buildQualityScorecard(
   const findings = report.findings;
   const sections = report.sections;
   const evidenceBackedFindings = findings.filter(finding => finding.evidence.length > 0 || finding.evidenceRefs.length > 0).length;
+  const pathLinkedFindings = findings.filter(finding => finding.paths.length > 0).length;
+  const evidenceRefFindings = findings.filter(finding => finding.evidenceRefs.length > 0).length;
+  const traceabilityScore = findings.length === 0
+    ? 100
+    : clampPercent(((pathLinkedFindings + evidenceRefFindings) / (findings.length * 2)) * 100);
   const evidenceScore = findings.length === 0
     ? 100
-    : clampPercent((evidenceBackedFindings / findings.length) * 100);
+    : clampPercent((((evidenceBackedFindings / findings.length) * 70) + (traceabilityScore * 0.3)));
   const attempted = report.summary.executionCoverage.attempted;
   const succeededAttempts = attempted.filter(item => item.status === "succeeded").length;
   const executionScore = attempted.length === 0
@@ -2941,7 +3091,19 @@ function buildQualityScorecard(
     report.sections.some(section => section.title === "Role contract audit"),
     report.summary.releaseGateDecision !== null,
   ].filter(Boolean).length;
-  const transparencyScore = clampPercent((transparencySignals / 5) * 100);
+  const categoryCounts = buildCategoryCounts(findings);
+  const dominantCategory = Object.entries(categoryCounts)
+    .sort((left, right) => right[1] - left[1])[0] ?? null;
+  const categoryCollapse = findings.length >= 8 && dominantCategory !== null && dominantCategory[1] / findings.length >= 0.8;
+  const duplicateTitleGroups = Object.entries(findings.reduce<Record<string, number>>((accumulator, finding) => {
+    const key = finding.title.trim().toLowerCase();
+    if (key) {
+      accumulator[key] = (accumulator[key] ?? 0) + 1;
+    }
+    return accumulator;
+  }, {})).filter(([, count]) => count >= 3);
+  const transparencyPenalty = (categoryCollapse ? 15 : 0) + (duplicateTitleGroups.length > 0 ? 12 : 0);
+  const transparencyScore = clampPercent(((transparencySignals / 5) * 100) - transparencyPenalty);
   const capabilityPenalty = capabilityGaps.reduce((total, gap) => total + (gap.severity === "high" ? 35 : gap.severity === "medium" ? 18 : 8), 0);
   const capabilityScore = clampPercent(100 - capabilityPenalty);
 
@@ -2952,8 +3114,11 @@ function buildQualityScorecard(
       score: evidenceScore,
       rationale: findings.length === 0
         ? "No findings required evidence calibration for this run."
-        : `${evidenceBackedFindings} of ${findings.length} finding(s) carried direct evidence.`,
-      evidence: findings.slice(0, 5).flatMap(finding => finding.evidence.slice(0, 1)),
+        : `${evidenceBackedFindings} of ${findings.length} finding(s) carried direct evidence; ${pathLinkedFindings} had file/path anchors and ${evidenceRefFindings} had structured evidence refs.`,
+      evidence: findings.slice(0, 5).flatMap(finding => [
+        ...finding.paths.slice(0, 1),
+        ...finding.evidence.slice(0, 1),
+      ]).slice(0, 8),
     },
     {
       id: "execution" as const,
@@ -2973,8 +3138,14 @@ function buildQualityScorecard(
       id: "transparency" as const,
       label: "Transparency",
       score: transparencyScore,
-      rationale: `${transparencySignals} of 5 transparency signals were present in the report.`,
-      evidence: sections.slice(0, 6).map(section => section.title),
+      rationale: categoryCollapse || duplicateTitleGroups.length > 0
+        ? `${transparencySignals} of 5 transparency signals were present, with report-shape penalties for collapsed categories or duplicate generic findings.`
+        : `${transparencySignals} of 5 transparency signals were present in the report.`,
+      evidence: [
+        ...sections.slice(0, 4).map(section => section.title),
+        ...(categoryCollapse && dominantCategory ? [`${dominantCategory[1]} of ${findings.length} findings categorized as ${dominantCategory[0]}.`] : []),
+        ...duplicateTitleGroups.slice(0, 2).map(([title, count]) => `${count} findings share title "${title}".`),
+      ],
     },
     {
       id: "capability" as const,
@@ -3036,6 +3207,12 @@ function buildQualityScorecard(
   const overallScore = clampPercent(dimensions.reduce((total, item) => total + item.score, 0) / dimensions.length);
   const warnings = [
     ...(artifactAnalysis.missingKinds.length > 0 ? [`Missing artifact kinds: ${artifactAnalysis.missingKinds.join(", ")}.`] : []),
+    ...(findings.length > 0 && pathLinkedFindings === 0 ? ["Report traceability gap: no findings include file or route path anchors."] : []),
+    ...(findings.length > 0 && evidenceRefFindings === 0 ? ["Report evidence gap: no findings include structured evidence references."] : []),
+    ...(categoryCollapse && dominantCategory ? [`Report categorization collapsed: ${dominantCategory[1]} of ${findings.length} findings are categorized as ${dominantCategory[0]}.`] : []),
+    ...duplicateTitleGroups
+      .slice(0, 3)
+      .map(([title, count]) => `Report deduplication gap: ${count} findings share the generic title "${title}".`),
     ...evaluateRoleContracts(report.roles, sections)
       .filter(contract => contract.status !== "ready")
       .slice(0, 8)
@@ -3570,7 +3747,7 @@ function buildPlaywrightExecCommand(packageManager: PackageManager): string {
   if (packageManager === "bun") {
     return "bunx playwright test --list";
   }
-  return "npx playwright test --list";
+  return "npm exec -- playwright test --list";
 }
 
 function scriptPreferenceScore(scriptName: string): number {
@@ -3776,6 +3953,76 @@ function normalizeBrowserUrl(rawUrl: string): string {
   return parsed.toString();
 }
 
+function formatBrowserFindingTarget(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const pathLabel = `${parsed.pathname}${parsed.search}`;
+    return pathLabel.trim() || parsed.origin;
+  } catch {
+    return rawUrl;
+  }
+}
+
+function isIgnorableBrowserRequestFailure(failure: string): boolean {
+  return /\/_next\/static\/webpack\/[^ ]*\.hot-update\.(?:js|json)(?:\?|$|\s)/iu.test(failure)
+    || /\.hot-update\.(?:js|json)(?:\?|$|\s)/iu.test(failure)
+    || /\bGET\s+https?:\/\/[^/\s]+\/\?_rsc=[^\s]+/iu.test(failure)
+    || /\bGET\s+\/\?_rsc=[^\s]+/iu.test(failure);
+}
+
+function isIgnorableBrowserConsoleError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("hydrated but some attributes")
+    && normalized.includes("caret-color")
+    && normalized.includes("transparent")
+  ) {
+    return true;
+  }
+  return normalized.includes("apiresponseerror: api unavailable while requesting /api/")
+    && normalized.includes("about://react/server/webpack-internal");
+}
+
+function isRetryableBrowserNavigationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return [
+    "err_connection_refused",
+    "err_connection_reset",
+    "err_connection_closed",
+    "econnrefused",
+    "econnreset",
+    "connection refused",
+    "connection reset",
+    "target closed",
+    "timeout",
+    "timed out",
+  ].some(fragment => message.includes(fragment));
+}
+
+async function gotoBrowserPageWithRetry(
+  page: any,
+  url: string,
+  options: { attempts?: number; timeoutMs?: number; waitUntil?: "domcontentloaded" | "load" | "networkidle" } = {},
+): Promise<any> {
+  const attempts = Math.max(1, Math.floor(options.attempts ?? 3));
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await page.goto(url, {
+        waitUntil: options.waitUntil ?? "domcontentloaded",
+        timeout: options.timeoutMs ?? 15000,
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isRetryableBrowserNavigationError(error)) {
+        throw error;
+      }
+      await page.waitForTimeout(500 * attempt).catch(() => undefined);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Failed to navigate to ${url}.`);
+}
+
 function chooseCredentialSecret(secrets: JobExecutionRecord["secrets"]): { username: string; password: string } | null {
   const record = secrets.find(secret => secret.kind === "credential-pair");
   if (!record) {
@@ -3875,7 +4122,7 @@ function extractFindingPaths(evidence: string[], explicitPaths: string[] = []): 
     }
   }
   const pathPattern = new RegExp(
-    String.raw`(?:^|\s|["'(<{\[])((?:primary|companion)\/)?(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+`,
+    "(?:^|\\s|[\"'`(<{\\[])(((?:primary|companion)\\/)?(?:[A-Za-z0-9._-]+\\/)*[A-Za-z0-9._-]+\\.[A-Za-z0-9._-]+)",
     "g",
   );
   for (const item of evidence) {
@@ -3887,6 +4134,102 @@ function extractFindingPaths(evidence: string[], explicitPaths: string[] = []): 
     }
   }
   return [...values];
+}
+
+function inferEvidenceReferenceKind(value: string): EvidenceReference["kind"] {
+  const normalized = value.trim().toLowerCase();
+  if (/^(get|post|put|patch|delete|head|options)\s+https?:\/\//u.test(normalized)) {
+    return "network";
+  }
+  if (/^https?:\/\//u.test(normalized)) {
+    return "live-url";
+  }
+  if (/\.(png|jpe?g|webp|gif)$/u.test(normalized)) {
+    return "screenshot";
+  }
+  if (/trace.*\.zip$/u.test(normalized) || /browser-trace\.zip$/u.test(normalized)) {
+    return "trace";
+  }
+  if (/playwright-report|test-results|\.spec\.[cm]?[jt]sx?$/u.test(normalized)) {
+    return "test-report";
+  }
+  if (/runtime\.log|validation-log|\.log$/u.test(normalized)) {
+    return "runtime-log";
+  }
+  if (/(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|docker-compose\.ya?ml)$/u.test(normalized)) {
+    return "manifest";
+  }
+  if (normalized.startsWith("/") && !normalized.includes(".")) {
+    return "route";
+  }
+  if (/console|pageerror|hydration|exception/u.test(normalized)) {
+    return "console";
+  }
+  return "repo-file";
+}
+
+function buildFindingEvidenceRefs(evidence: string[], paths: string[]): EvidenceReference[] {
+  const refs: EvidenceReference[] = [];
+  const seen = new Set<string>();
+  const push = (ref: EvidenceReference): void => {
+    const key = `${ref.kind}:${ref.value}:${ref.sourcePath ?? ""}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    refs.push(ref);
+  };
+
+  for (const pathValue of paths) {
+    const normalizedPath = normalizeFindingPath(pathValue);
+    if (!normalizedPath) {
+      continue;
+    }
+    push({
+      kind: inferEvidenceReferenceKind(normalizedPath),
+      value: normalizedPath,
+      detail: null,
+      sourcePath: normalizedPath,
+    });
+  }
+
+  for (const item of evidence) {
+    const value = item.trim();
+    if (!value) {
+      continue;
+    }
+    const derivedPaths = extractFindingPaths([value]);
+    if (derivedPaths.length > 0) {
+      for (const derivedPath of derivedPaths) {
+        push({
+          kind: inferEvidenceReferenceKind(derivedPath),
+          value: derivedPath,
+          detail: value === derivedPath ? null : truncateText(value, 240),
+          sourcePath: derivedPath,
+        });
+      }
+      continue;
+    }
+    if (/^(get|post|put|patch|delete|head|options)\s+https?:\/\//iu.test(value) || /^https?:\/\//iu.test(value)) {
+      push({
+        kind: inferEvidenceReferenceKind(value),
+        value,
+        detail: null,
+        sourcePath: null,
+      });
+      continue;
+    }
+    if (/console|pageerror|hydration|exception/iu.test(value)) {
+      push({
+        kind: "console",
+        value: truncateText(value, 160),
+        detail: truncateText(value, 240),
+        sourcePath: null,
+      });
+    }
+  }
+
+  return refs.slice(0, 12);
 }
 
 function inferFindingSourceIds(options: {
@@ -4340,7 +4683,11 @@ async function runBrowserInteractions(options: {
 
       if (action === "link" && normalizeBrowserUrl(options.page.url()) !== normalizeBrowserUrl(options.pageUrl)) {
         await options.page.goBack({ waitUntil: "domcontentloaded", timeout: 8000 }).catch(() =>
-          options.page.goto(options.pageUrl, { waitUntil: "domcontentloaded", timeout: 8000 }));
+          gotoBrowserPageWithRetry(options.page, options.pageUrl, {
+            attempts: 2,
+            timeoutMs: 8000,
+            waitUntil: "domcontentloaded",
+          }));
       }
     } catch (error) {
       interactions.push({
@@ -4352,7 +4699,11 @@ async function runBrowserInteractions(options: {
         success: false,
         error: error instanceof Error ? error.message : "Unknown browser interaction failure.",
       });
-      await options.page.goto(options.pageUrl, { waitUntil: "domcontentloaded", timeout: 12000 }).catch(() => undefined);
+      await gotoBrowserPageWithRetry(options.page, options.pageUrl, {
+        attempts: 2,
+        timeoutMs: 12000,
+        waitUntil: "domcontentloaded",
+      }).catch(() => undefined);
     }
   }
 
@@ -4423,11 +4774,25 @@ function buildProtectedRoutePrefixes(routes: string[]): string[] {
 }
 
 function normalizeBrowserQaCandidate(candidate: string, baseUrl: string): string | null {
+  if (!isAtomicBrowserQaCandidate(candidate)) {
+    return null;
+  }
   const normalized = normalizeAbsoluteUrl(candidate, baseUrl);
   if (!normalized) {
     return null;
   }
   return normalizeBrowserUrl(normalized);
+}
+
+function isAtomicBrowserQaCandidate(candidate: string): boolean {
+  const value = candidate.trim();
+  if (!value) {
+    return false;
+  }
+  if (/\s/u.test(value) || value.includes(",") || /\band\b/iu.test(value)) {
+    return false;
+  }
+  return true;
 }
 
 function getBrowserQaSkipReason(
@@ -4485,7 +4850,11 @@ async function attemptCredentialLogin(options: {
       continue;
     }
     try {
-      await options.page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+      await gotoBrowserPageWithRetry(options.page, loginUrl, {
+        attempts: 3,
+        timeoutMs: 15000,
+        waitUntil: "domcontentloaded",
+      });
       const passwordInput = options.page.locator('input[type="password"]').first();
       if (!await passwordInput.isVisible().catch(() => false)) {
         continue;
@@ -4822,7 +5191,11 @@ async function executeStandardizedHandoff(options: {
 
       let status: number | null = null;
       try {
-        const response = await page.goto(normalizedUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+        const response = await gotoBrowserPageWithRetry(page, normalizedUrl, {
+          attempts: 3,
+          timeoutMs: 15000,
+          waitUntil: "domcontentloaded",
+        });
         status = response?.status() ?? null;
         await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => page.waitForTimeout(750));
       } catch (error) {
@@ -4941,9 +5314,13 @@ async function executeStandardizedHandoff(options: {
         ));
       }
       for (const errorMessage of consoleErrors) {
+        if (isIgnorableBrowserConsoleError(errorMessage)) {
+          continue;
+        }
+        const pageLabel = formatBrowserFindingTarget(normalizedUrl);
         findings.push(createRoleFinding(
           "medium",
-          "Console error detected",
+          `Console error on ${pageLabel}`,
           errorMessage,
           "Resolve console errors so browser runs stay clean and predictable.",
           screenshot ? [screenshot] : [normalizedUrl],
@@ -4954,9 +5331,13 @@ async function executeStandardizedHandoff(options: {
         ));
       }
       for (const failure of requestFailures) {
+        if (isIgnorableBrowserRequestFailure(failure)) {
+          continue;
+        }
+        const pageLabel = formatBrowserFindingTarget(normalizedUrl);
         findings.push(createRoleFinding(
           "medium",
-          "Request failure detected",
+          `Request failure on ${pageLabel}`,
           failure,
           "Inspect broken assets, API calls, and application routing for this page.",
           screenshot ? [screenshot] : [normalizedUrl],
@@ -5236,10 +5617,11 @@ async function augmentWithPlaywrightPreflight(options: {
 
   if (run.exitCode === 0) {
     await appendLog(options.jobId, options.logs, "playwright", "Playwright preflight completed successfully.", "info");
+    const output = dropStalePlaywrightPreflightFindings(options.output);
     return {
-      ...options.output,
+      ...output,
       sections: [
-        ...options.output.sections,
+        ...output.sections,
         {
           title: "Playwright preflight",
           status: "ready",
@@ -5304,6 +5686,25 @@ async function augmentWithPlaywrightPreflight(options: {
           remediationPackIds: [],
         },
     ],
+  };
+}
+
+function dropStalePlaywrightPreflightFindings(output: RoleOutput): RoleOutput {
+  return {
+    ...output,
+    findings: output.findings.filter(finding => {
+      const text = `${finding.title} ${finding.message}`.toLowerCase();
+      if (text.includes("dependencies are not installed") || text.includes("dependency install")) {
+        return false;
+      }
+      if (text.includes("docker compose v2") || text.includes("docker-compose v1") || text.includes("compose-backed local e2e path")) {
+        return false;
+      }
+      if (text.includes("playwright execution is not ready")) {
+        return false;
+      }
+      return true;
+    }),
   };
 }
 
@@ -5772,20 +6173,24 @@ function pickSectionDataFromRoleIds(
 }
 
 function collectSyntheticFindings(priorOutputs: PriorRoleOutput[]): AnalysisReport["findings"] {
-  return priorOutputs.flatMap(output => output.output.findings.map(finding => ({
-    id: finding.id ?? createId("finding"),
-    roleId: output.roleId,
-    category: normalizeFindingCategory(finding.category, output.roleId),
-    severity: finding.severity,
-    title: finding.title,
-    message: finding.message,
-    suggestion: finding.suggestion,
-    evidence: finding.evidence,
-    evidenceRefs: [],
-    sourceIds: finding.sourceIds ?? [],
-    paths: finding.paths ?? [],
-    remediationPackIds: [],
-  })));
+  const collected = priorOutputs.flatMap(output => output.output.findings.map(finding => {
+    const paths = extractFindingPaths(finding.evidence ?? [], finding.paths ?? []);
+    return {
+      id: finding.id ?? createId("finding"),
+      roleId: output.roleId,
+      category: normalizeFindingCategory(finding.category, output.roleId),
+      severity: finding.severity,
+      title: finding.title,
+      message: finding.message,
+      suggestion: finding.suggestion,
+      evidence: finding.evidence,
+      evidenceRefs: buildFindingEvidenceRefs(finding.evidence ?? [], paths),
+      sourceIds: finding.sourceIds ?? [],
+      paths,
+      remediationPackIds: [],
+    };
+  }));
+  return dedupeReportFindings(collected);
 }
 
 function combineUniqueStrings(...valueSets: unknown[]): string[] {
@@ -6454,6 +6859,7 @@ async function executeNativeRole(options: {
   companionSource?: JobExecutionRecord["source"] | null | undefined;
   secrets: JobExecutionRecord["secrets"];
   runtimeMode: JobExecutionRecord["job"]["runtimeMode"];
+  authPath: string | null;
 }): Promise<NativeExecutionResult> {
   const nativeExecutorId = options.role.nativeExecutorId as NativeExecutorId | null;
   if (!nativeExecutorId) {
@@ -6535,6 +6941,7 @@ async function executeNativeRole(options: {
           roles: ["browser-self-check", "interaction-test"],
           secrets: options.secrets,
           allowHostExecution: true,
+          codexAuthPath: options.authPath,
         });
         return {
           output: toRoleOutputFromLegacyResult(result),
@@ -6548,6 +6955,7 @@ async function executeNativeRole(options: {
           roles: ["visual-inspection"],
           secrets: options.secrets,
           allowHostExecution: true,
+          codexAuthPath: options.authPath,
         });
         return {
           output: toRoleOutputFromLegacyResult(result),
@@ -6682,6 +7090,7 @@ async function executeRole(options: {
         companionSource: options.companionSource,
         secrets: options.secrets,
         runtimeMode: options.runtimeMode,
+        authPath: options.authPath,
       });
       nativeOutput = nativeResult.output;
       for (const nativeLog of nativeResult.logs) {
@@ -6865,7 +7274,16 @@ async function executeRole(options: {
       codexBin: config.codexBin,
       codexModel: config.codexModel,
       repoPath: options.repoPath,
-      prompt,
+      prompt: attempt === 1
+        ? prompt
+        : [
+            prompt,
+            "Retry correction:",
+            "- The previous response was not valid role-output JSON.",
+            "- Return exactly one JSON object with keys `summary`, `sections`, and `findings`.",
+            "- Do not include markdown, comments, trailing commas, unescaped newlines in strings, or text before/after the JSON object.",
+            "- Keep arrays compact and bounded so the response remains parseable.",
+          ].join("\n\n"),
       outputPath,
       timeoutMs: config.codexTimeoutMs,
       sandboxMode,
@@ -6879,7 +7297,7 @@ async function executeRole(options: {
     if (!run.timedOut && run.exitCode === 0) {
       await syncCodexAuth(options.authPath, options.execution);
       try {
-        baseOutput = readRoleOutput(outputPath);
+        baseOutput = readRoleOutput(outputPath, options.role.id);
         outputReadError = null;
         break;
       } catch (error) {
@@ -7244,14 +7662,15 @@ function appendRoleOutputToReport(options: {
   }
 
   for (const finding of options.output.findings) {
+    const normalizedPaths = extractFindingPaths(finding.evidence ?? [], finding.paths ?? []);
     const normalizedSourceIds = inferFindingSourceIds({
       explicitSourceIds: finding.sourceIds ?? [],
       evidence: finding.evidence ?? [],
-      paths: finding.paths ?? [],
+      paths: normalizedPaths,
       primarySourceId: options.execution.job.sourceId,
       companionSourceId: options.execution.job.companionSourceId,
     });
-    const normalizedPaths = extractFindingPaths(finding.evidence ?? [], finding.paths ?? []);
+    const evidenceRefs = buildFindingEvidenceRefs(finding.evidence ?? [], normalizedPaths);
     options.findings.push({
       id: finding.id ?? createId("finding"),
       roleId: options.role.id,
@@ -7261,12 +7680,92 @@ function appendRoleOutputToReport(options: {
       message: finding.message,
       suggestion: finding.suggestion,
       evidence: finding.evidence ?? [],
-      evidenceRefs: [],
+      evidenceRefs,
       sourceIds: normalizedSourceIds,
       paths: normalizedPaths,
       remediationPackIds: finding.remediationPackIds ?? [],
     });
   }
+}
+
+function normalizeFindingDedupeText(value: string): string {
+  return value
+    .replace(/^%o\s+%s\s+/iu, "")
+    .replace(/\?[0-9]+(?=[:\s])/gu, "?n")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function getBrowserFindingAnchor(finding: AnalysisReport["findings"][number]): string {
+  const directPath = finding.paths[0] ?? "";
+  if (directPath) {
+    return directPath;
+  }
+  return finding.evidence.find(item => {
+    const normalized = item.toLowerCase();
+    return normalized.startsWith("http://")
+      || normalized.startsWith("https://")
+      || /\.(png|jpe?g|webp|gif)$/u.test(normalized);
+  }) ?? "";
+}
+
+function getFindingDedupeKey(finding: AnalysisReport["findings"][number]): string {
+  const title = normalizeFindingDedupeText(finding.title);
+  if (/^(console error|request failure|page error) on /u.test(title)) {
+    return [
+      "browser",
+      title,
+      normalizeFindingDedupeText(getBrowserFindingAnchor(finding)),
+    ].join("::");
+  }
+  return [
+    title,
+    normalizeFindingDedupeText(finding.message),
+    normalizeFindingDedupeText(finding.suggestion),
+    normalizeFindingDedupeText(finding.paths[0] ?? ""),
+  ].join("::");
+}
+
+function mergeFindingStringList(left: string[], right: string[]): string[] {
+  return [...new Set([...left, ...right].map(value => value.trim()).filter(Boolean))];
+}
+
+function mergeDuplicateFinding(
+  existing: AnalysisReport["findings"][number],
+  duplicate: AnalysisReport["findings"][number],
+): AnalysisReport["findings"][number] {
+  const severityScore = { high: 3, medium: 2, low: 1 } as const;
+  const evidenceRefs = [...existing.evidenceRefs];
+  const evidenceRefKeys = new Set(evidenceRefs.map(ref => JSON.stringify(ref)));
+  for (const ref of duplicate.evidenceRefs) {
+    const key = JSON.stringify(ref);
+    if (!evidenceRefKeys.has(key)) {
+      evidenceRefKeys.add(key);
+      evidenceRefs.push(ref);
+    }
+  }
+  return {
+    ...existing,
+    severity: severityScore[duplicate.severity] > severityScore[existing.severity]
+      ? duplicate.severity
+      : existing.severity,
+    evidence: mergeFindingStringList(existing.evidence, duplicate.evidence),
+    evidenceRefs,
+    sourceIds: mergeFindingStringList(existing.sourceIds, duplicate.sourceIds),
+    paths: mergeFindingStringList(existing.paths, duplicate.paths),
+    remediationPackIds: mergeFindingStringList(existing.remediationPackIds, duplicate.remediationPackIds),
+  };
+}
+
+function dedupeReportFindings(findings: AnalysisReport["findings"]): AnalysisReport["findings"] {
+  const findingsByKey = new Map<string, AnalysisReport["findings"][number]>();
+  for (const finding of findings) {
+    const key = getFindingDedupeKey(finding);
+    const existing = findingsByKey.get(key);
+    findingsByKey.set(key, existing ? mergeDuplicateFinding(existing, finding) : finding);
+  }
+  return [...findingsByKey.values()];
 }
 
 function dependencyOutputsForRole(options: {
@@ -7570,6 +8069,7 @@ async function executeAuditJobCore(
       });
     }
 
+    const dedupedFindings = dedupeReportFindings(findings);
     const report = enrichReportForUniversalAudit(analysisReportSchema.parse({
       id: `report-${jobId}`,
       workspaceId: execution.workspace.id,
@@ -7579,13 +8079,13 @@ async function executeAuditJobCore(
       runtimeMode: execution.job.runtimeMode,
       title: resolveRepoTitle(execution, repoPath),
       summary: {
-        totalFindings: findings.length,
-        high: findings.filter(item => item.severity === "high").length,
-        medium: findings.filter(item => item.severity === "medium").length,
-        low: findings.filter(item => item.severity === "low").length,
+        totalFindings: dedupedFindings.length,
+        high: dedupedFindings.filter(item => item.severity === "high").length,
+        medium: dedupedFindings.filter(item => item.severity === "medium").length,
+        low: dedupedFindings.filter(item => item.severity === "low").length,
         executionSteps: collectAnalysisExecutionSteps(logs),
       },
-      findings,
+      findings: dedupedFindings,
       sections,
       artifacts: [],
       createdAt: new Date().toISOString(),
@@ -8173,6 +8673,79 @@ async function runRemediationJob(
 
 const sandboxLogPrefix = "SPECLENS_LOG ";
 
+function createSandboxStreamLogSink(
+  jobId: string,
+  onPersisted: (log: AnalysisLogEvent) => void,
+): {
+  push: (log: AnalysisLogEvent) => void;
+  flush: () => Promise<void>;
+} {
+  const pendingLogs: AnalysisLogEvent[] = [];
+  let flushTimer: NodeJS.Timeout | null = null;
+  let flushLoop: Promise<void> | null = null;
+
+  const drainPendingLogs = async () => {
+    if (flushLoop) {
+      await flushLoop;
+      return;
+    }
+    flushLoop = (async () => {
+      while (pendingLogs.length > 0) {
+        const batch = pendingLogs.splice(0, 100);
+        try {
+          await appendAnalysisJobLogs(jobId, batch);
+          for (const log of batch) {
+            onPersisted(log);
+          }
+        } catch {
+          pendingLogs.unshift(...batch);
+          break;
+        }
+      }
+    })();
+    try {
+      await flushLoop;
+    } finally {
+      flushLoop = null;
+      if (pendingLogs.length > 0) {
+        scheduleFlush();
+      }
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer) {
+      return;
+    }
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      void drainPendingLogs();
+    }, 250);
+  };
+
+  return {
+    push(log) {
+      pendingLogs.push(log);
+      if (pendingLogs.length >= 25) {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
+        void drainPendingLogs();
+        return;
+      }
+      scheduleFlush();
+    },
+    async flush() {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      await drainPendingLogs();
+    },
+  };
+}
+
 function pipeSandboxStream(
   stream: NodeJS.ReadableStream,
   filePath: string,
@@ -8516,8 +9089,23 @@ async function executeHostedAgentJobInSandbox(
     status: "running",
     startedAt: sandboxWaitStartedAt,
   }));
+  await appendExecutionStepLog(jobId, controllerLogs, buildExecutionStep({
+    id: "sandbox:launch",
+    order: 1,
+    title: "Launch hosted job sandbox",
+    stepType: "stage",
+    agentId: execution.job.agentId,
+    agentName: "Hosted agent controller",
+    status: "succeeded",
+    detail: "Docker sandbox process started.",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+  }));
 
   try {
+    const sandboxStreamLogSink = createSandboxStreamLogSink(jobId, log => {
+      streamedLogIds.add(log.id);
+    });
     const sandboxResult = await runHostedAgentSandbox({
       execution: executionForSandbox,
       requestPath,
@@ -8529,8 +9117,7 @@ async function executeHostedAgentJobInSandbox(
         if (line.startsWith(sandboxLogPrefix)) {
           try {
             const log = analysisLogEventSchema.parse(JSON.parse(line.slice(sandboxLogPrefix.length)));
-            streamedLogIds.add(log.id);
-            void appendAnalysisJobLogs(jobId, [log]).catch(() => undefined);
+            sandboxStreamLogSink.push(log);
             return;
           } catch {
             // fall through to raw stdout logging
@@ -8542,6 +9129,7 @@ async function executeHostedAgentJobInSandbox(
         void appendLog(jobId, controllerLogs, "sandbox-stderr", truncateLogMessage(line), "warn", undefined, "verbose");
       },
     });
+    await sandboxStreamLogSink.flush();
 
     const rawLogArtifacts = await uploadSandboxRawLogs(jobId, stdoutPath, stderrPath);
     const waitStatus = sandboxResult.cancelled || sandboxResult.timedOut || sandboxResult.exitCode !== 0
@@ -8850,6 +9438,27 @@ export function buildArtifactAnalysisForTest(
   return buildArtifactAnalysis(handoff, artifacts);
 }
 
+export function extractFindingPathsForTest(evidence: string[], explicitPaths: string[] = []): string[] {
+  return extractFindingPaths(evidence, explicitPaths);
+}
+
+export function buildFindingEvidenceRefsForTest(evidence: string[], explicitPaths: string[] = []): EvidenceReference[] {
+  const paths = extractFindingPaths(evidence, explicitPaths);
+  return buildFindingEvidenceRefs(evidence, paths);
+}
+
+export function normalizeRoleOutputForTest(raw: unknown, roleId?: string): RoleOutput {
+  return normalizeRoleOutput(raw, roleId);
+}
+
+function getHealthRequestPath(requestUrl: string | undefined): string {
+  try {
+    return new URL(requestUrl ?? "/", "http://localhost").pathname;
+  } catch {
+    return "/";
+  }
+}
+
 export async function startAgentLoop(): Promise<void> {
   const config = loadAiWorkerConfig();
   console.log(JSON.stringify({
@@ -8863,29 +9472,52 @@ export async function startAgentLoop(): Promise<void> {
 
   const server = http.createServer((request, response) => {
     void (async () => {
-      const url = request.url ?? "/";
-      if (url.startsWith("/metrics")) {
-        response.writeHead(200, { "content-type": getMetricsContentType() });
-        response.end(await getMetricsSnapshot());
-        return;
-      }
-      if (url.startsWith("/ready")) {
-        try {
-          await checkDatabaseHealth();
-          await checkQueueHealth();
-          response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify({ ok: true }));
-        } catch (error) {
-          response.writeHead(503, { "content-type": "application/json" });
+      try {
+        const pathname = getHealthRequestPath(request.url);
+        if (pathname === "/metrics") {
+          response.writeHead(200, { "content-type": getMetricsContentType() });
+          response.end(await getMetricsSnapshot());
+          return;
+        }
+        if (pathname === "/ready") {
+          try {
+            await checkDatabaseHealth();
+            await checkQueueHealth();
+            const storage = await checkObjectStorageHealth(storageConfig());
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(JSON.stringify({ ok: true, storage }));
+          } catch (error) {
+            console.warn(JSON.stringify({
+              level: "warn",
+              scope: "ai-worker.ready",
+              error: error instanceof Error ? error.message : "Readiness check failed.",
+            }));
+            response.writeHead(503, { "content-type": "application/json" });
+            response.end(JSON.stringify({
+              ok: false,
+              error: "Readiness check failed.",
+            }));
+          }
+          return;
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true, role: "ai-worker", workerId: config.workerId }));
+      } catch (error) {
+        console.warn(JSON.stringify({
+          level: "warn",
+          scope: "ai-worker.health",
+          error: error instanceof Error ? error.message : "Health endpoint request failed.",
+        }));
+        if (!response.writableEnded) {
+          if (!response.headersSent) {
+            response.writeHead(500, { "content-type": "application/json" });
+          }
           response.end(JSON.stringify({
             ok: false,
-            error: error instanceof Error ? error.message : "Readiness check failed.",
+            error: "Health endpoint request failed.",
           }));
         }
-        return;
       }
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ ok: true, role: "ai-worker", workerId: config.workerId }));
     })();
   });
 
@@ -8893,7 +9525,7 @@ export async function startAgentLoop(): Promise<void> {
     console.log(`[ai-worker] health endpoint listening on http://0.0.0.0:${config.healthPort}`);
   });
 
-  await workAgentJobs(handleAgentJob);
+  await workAgentJobs(handleAgentJob, { batchSize: config.maxConcurrency });
 }
 
 export async function startEmbeddedAgentWorker(): Promise<void> {
@@ -8901,8 +9533,14 @@ export async function startEmbeddedAgentWorker(): Promise<void> {
     return;
   }
   embeddedWorkerStarted = true;
-  await initializeDatabase();
-  await workAgentJobs(handleAgentJob);
+  try {
+    const config = loadAiWorkerConfig();
+    await initializeDatabase();
+    await workAgentJobs(handleAgentJob, { batchSize: config.maxConcurrency });
+  } catch (error) {
+    embeddedWorkerStarted = false;
+    throw error;
+  }
 }
 
 export function stopEmbeddedAgentWorker(): void {
@@ -8911,7 +9549,10 @@ export function stopEmbeddedAgentWorker(): void {
 
 export default {
   buildArtifactAnalysisForTest,
+  buildFindingEvidenceRefsForTest,
   detectPlaywrightPreflightForTest,
+  extractFindingPathsForTest,
+  normalizeRoleOutputForTest,
   runAgentJobForTest,
   startAgentLoop,
   startEmbeddedAgentWorker,

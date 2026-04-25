@@ -41,6 +41,52 @@ function runCommand(command, args, options = {}) {
   });
 }
 
+function runCommandCapture(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+      ...options,
+    });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", chunk => stdout.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    child.stderr.on("data", chunk => stderr.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    child.once("error", reject);
+    child.once("exit", code => {
+      const stdoutText = Buffer.concat(stdout).toString("utf8");
+      const stderrText = Buffer.concat(stderr).toString("utf8");
+      if (code === 0) {
+        resolve({ stdout: stdoutText, stderr: stderrText });
+        return;
+      }
+      reject(new Error(stderrText.trim() || stdoutText.trim() || `${command} ${args.join(" ")} exited with code ${code ?? "unknown"}`));
+    });
+  });
+}
+
+let composeCommandPromise = null;
+
+async function resolveComposeCommand(env) {
+  if (!composeCommandPromise) {
+    composeCommandPromise = (async () => {
+      try {
+        await runCommandCapture("docker", ["compose", "version"], { env });
+        return { command: "docker", argsPrefix: ["compose"] };
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Docker Compose v2 was not found.";
+        throw new Error(`Docker Compose v2 is required for this stack; docker-compose v1 cannot parse the compose file. ${detail}`);
+      }
+    })();
+  }
+  return await composeCommandPromise;
+}
+
+async function runCompose(args, options = {}) {
+  const compose = await resolveComposeCommand(options.env ?? process.env);
+  return await runCommand(compose.command, [...compose.argsPrefix, ...args], options);
+}
+
 async function waitForHttp(url, timeoutMs = 180000) {
   const startedAt = Date.now();
   for (;;) {
@@ -115,7 +161,7 @@ const buildStack = process.env.STACK_VALIDATE_BUILD !== "0";
 const githubLocalConfigured = Boolean(process.env.E2E_GITHUB_INSTALLATION_ID?.trim());
 
 try {
-  await runCommand("docker", buildStack ? ["compose", "up", "-d", "--build"] : ["compose", "up", "-d"], {
+  await runCompose(buildStack ? ["up", "-d", "--build"] : ["up", "-d"], {
     env: composeEnv,
   });
   await waitForHttp(`${keycloakIssuerUrl}/.well-known/openid-configuration`);
@@ -162,6 +208,7 @@ try {
     "tests/e2e/auth.spec.ts",
     "tests/e2e/workspace-core.spec.ts",
     "tests/e2e/workspace-settings.spec.ts",
+    "tests/e2e/_portal-visual-check.spec.ts",
     "tests/e2e/remediation-local.spec.ts",
     "tests/e2e/admin-local.spec.ts",
     ...(githubLocalConfigured ? ["tests/e2e/github-local.spec.ts"] : []),
@@ -187,7 +234,7 @@ try {
   });
 } finally {
   if (shutdownStack) {
-    await runCommand("docker", ["compose", "down", "--remove-orphans"], {
+    await runCompose(["down", "--remove-orphans"], {
       env: composeEnv,
     }).catch(() => undefined);
   }

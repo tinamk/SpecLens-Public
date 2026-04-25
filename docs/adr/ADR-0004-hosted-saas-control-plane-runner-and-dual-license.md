@@ -23,7 +23,7 @@ SpecLens will adopt:
 - S3-compatible object storage for persistent artifacts
 - Keycloak for identity
 - Stripe for self-serve Pro billing
-- GitHub App integration for private repositories
+- GitHub App integration for private GitHub repositories
 - a dual-license model:
   - source-available non-commercial license for the codebase
   - separate commercial license path for companies

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalNoticePanel, PortalSectionHeader, PortalShell } from "@speclens/ui";
-import { PaginationLinks } from "../../../../../components/portal-pagination";
+import { PortalLinkCard, PortalLinkGrid, PortalMetaList, PortalSectionHeader, PortalShell } from "@speclens/ui";
+import { buildSearchHref, PaginationLinks } from "@speclens/ui";
+import { WorkspaceRouteState } from "../../../../../components/workspace-route-state";
 import {
   AddWorkspaceMemberForm,
   RemoveWorkspaceMemberButton,
@@ -15,6 +16,7 @@ import { buildPortalReturnTo, requirePortalSession, isPortalAdminSession } from 
 import {
   buildPortalPrimaryNav,
   buildWorkspaceNav,
+  getWorkspaceMembersEmptyState,
   isWorkspaceScopedEntityPage,
   isWorkspaceScopedWorkspaceConsoleContext,
 } from "../../../../../lib/portal";
@@ -48,6 +50,7 @@ export default async function WorkspaceAccessPage({
     }
     const ownerMember = workspaceConsole.members.find(member => member.userId === workspaceConsole.workspace.ownerUserId) ?? null;
     const collaboratorCount = Math.max(workspaceConsole.members.length - 1, 0);
+    const membersEmptyState = getWorkspaceMembersEmptyState(memberQuery.q);
 
     return (
       <PortalShell
@@ -59,7 +62,7 @@ export default async function WorkspaceAccessPage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="access"
       >
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Workspace access summary">
           <article className="portal-stat" data-testid="workspace-access-stat-members">
             <span className="portal-stat__label">Members</span>
             <span className="portal-stat__value">{workspaceConsole.members.length}</span>
@@ -89,10 +92,10 @@ export default async function WorkspaceAccessPage({
               <AddWorkspaceMemberForm workspaceId={workspaceId} />
             ) : (
               <p className="subtle-note" data-testid="workspace-access-read-only">
-                Owner only.
+                Workspace owners manage membership. Contact the owner shown in the access summary for role changes.
               </p>
             )}
-            <form className="stack-form form-shell" method="GET">
+            <form aria-label="Search workspace members" className="stack-form form-shell" method="GET" role="search">
               <div className="form-grid">
                 <label className="field field--full">
                   <span>Search members</span>
@@ -105,16 +108,35 @@ export default async function WorkspaceAccessPage({
                   />
                 </label>
               </div>
-              <button className="button-ghost" data-testid="workspace-access-search-submit" type="submit">Apply member filter</button>
+              <div className="portal-inline-actions">
+                <button className="button-ghost" data-testid="workspace-access-search-submit" type="submit">Apply member filter</button>
+                {memberQuery.q ? (
+                  <Link
+                    className="button-secondary"
+                    data-testid="workspace-access-clear-filters"
+                    href={buildSearchHref(`/portal/workspaces/${workspaceId}/access`, query, {
+                      page: undefined,
+                      q: undefined,
+                    })}
+                  >
+                    Clear filters
+                  </Link>
+                ) : null}
+              </div>
             </form>
-            {members.length === 0 ? <p className="subtle-note">No members matched this filter yet.</p> : null}
+            {members.length === 0 ? (
+              <div className="subtle-note" data-testid="workspace-access-empty-state">
+                <p><strong>{membersEmptyState.title}</strong></p>
+                <p>{membersEmptyState.detail}</p>
+              </div>
+            ) : null}
             {members.length > 0 ? (
               <div className="portal-record-grid">
                 {members.map(member => (
                   <article className="portal-record-card" data-testid={`workspace-access-row-${member.userId}`} key={member.id}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{member.displayName}</strong>
+                        <h3>{member.displayName}</h3>
                         <p>{member.email}</p>
                       </div>
                       <div className="portal-record-card__meta">
@@ -182,21 +204,15 @@ export default async function WorkspaceAccessPage({
     );
   } catch (error) {
     if (error instanceof ApiResponseError && (error.status === 403 || error.status === 404)) {
+      const isMissing = error.status === 404;
       return (
-        <PortalShell
+        <WorkspaceRouteState
           eyebrow="Workspace access"
-          title="Access denied"
+          isAdmin={isPortalAdminSession(session)}
+          isMissing={isMissing}
           pageTestId="workspace-access-denied-page"
-          primaryNav={buildPortalPrimaryNav(isPortalAdminSession(session))}
-          activePrimaryNavKey="workspaces"
-        >
-          <PortalNoticePanel
-            actions={<Link className="button-secondary" href="/portal/workspaces">Back to workspaces</Link>}
-            description="You do not have access to this workspace."
-            descriptionTestId="workspace-access-denied"
-            title="Access denied"
-          />
-        </PortalShell>
+          descriptionTestId="workspace-access-denied"
+        />
       );
     }
     throw error;

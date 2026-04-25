@@ -22,6 +22,7 @@ flowchart TD
   Output[RoleOutput JSON]
   Execute[Runtime + Browser execution]
   Artifacts[Trace + screenshots + logs]
+  Result[Sandbox result bundle]
   Report[AnalysisReport roles/findings/sections]
   Learnables[SourceLearnable]
 
@@ -40,8 +41,10 @@ flowchart TD
   Output --> Sandbox
   Sandbox --> Execute
   Execute --> Artifacts
-  Sandbox --> Report
-  Report --> Worker
+  Artifacts --> Result
+  Sandbox --> Result
+  Result --> Worker
+  Worker --> Report
   Worker --> Learnables
 ```
 

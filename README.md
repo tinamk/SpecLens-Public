@@ -14,7 +14,7 @@ The current product includes:
 - S3-compatible object storage for artifact storage, defaulting to local MinIO with optional external providers (Spaces/S3-compatible)
 - Keycloak for identity
 - Stripe for self-serve Pro billing
-- GitHub App integration for private repositories
+- GitHub App integration for private GitHub repositories
 - ordered AI provider selection, including OpenAI and OpenAI Codex
 - parity-oriented presets and capability packs for archived SpecLens analysis families
 - queued hosted job execution with lifecycle status and log retrieval
@@ -42,7 +42,7 @@ The current product includes:
 ### Hosted SaaS plans
 
 - Free:
-  - public GitHub repositories only
+  - approved public Git repositories from GitHub, GitLab, Bitbucket, or Codeberg
   - shared workspaces
   - hosted reports and live analysis logs
 - Pro:
@@ -57,7 +57,7 @@ The current product includes:
 SpecLens is dual licensed:
 
 - the repository code is source-available under a non-commercial license
-- companies that need commercial rights or self-hosting rights must contact us for a separate commercial license
+- companies that need commercial codebase rights, commercial-purpose self-hosting, or commercial redistribution must contact us for a separate commercial license
 
 Important distinction:
 
@@ -66,8 +66,8 @@ Important distinction:
 
 See:
 
-- [LICENSE](/home/tina/SpecLens/LICENSE)
-- [LICENSE-COMMERCIAL.md](/home/tina/SpecLens/LICENSE-COMMERCIAL.md)
+- [LICENSE](LICENSE)
+- [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md)
 - `apps/web/app/license/page.tsx`
 - `apps/web/app/commercial/page.tsx`
 
@@ -78,6 +78,7 @@ apps/
   web/     -> Next.js landing page, pricing, portal, legal pages, report views
   api/     -> Fastify control plane and webhook/API surface
   runner/  -> runner process for queued Docker sandbox jobs
+  ai-worker/ -> hosted AI job controller and one-shot agent sandbox orchestration
 
 packages/
   core/      -> shared repository analysis engine
@@ -208,7 +209,7 @@ curl https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash
 Open a new shell so the Docker group change takes effect, then install repo-specific dependencies:
 
 ```bash
-npm install
+npm ci
 ansible-galaxy collection install -r deploy/digitalocean/ansible/requirements.yml
 ```
 
@@ -221,7 +222,7 @@ npx playwright install chromium
 ## Local development
 
 ```bash
-npm install
+npm ci
 npm run validate:local
 npm run dev:web
 npm run dev:api

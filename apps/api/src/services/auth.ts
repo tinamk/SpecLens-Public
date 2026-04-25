@@ -49,7 +49,7 @@ async function verifyKeycloakToken(token: string): Promise<{
 }> {
   const config = loadApiConfig();
   if (!config.keycloakIssuerUrl || !config.keycloakInternalIssuerUrl) {
-    throw new Error("Keycloak is not configured for bearer-token validation.");
+    throw statusError(503, "Keycloak bearer-token validation is not configured.");
   }
 
   const allowedIssuers = config.keycloakIssuerUrl
@@ -74,7 +74,7 @@ async function verifyKeycloakToken(token: string): Promise<{
 
   const sub = typeof payload.sub === "string" ? payload.sub : null;
   if (!sub) {
-    throw new Error("Keycloak token is missing a subject.");
+    throw statusError(401, "Keycloak token is missing a subject.");
   }
 
   const email = typeof payload.email === "string" && payload.email.length > 0

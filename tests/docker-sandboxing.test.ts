@@ -18,6 +18,7 @@ test("local compose routes runner and ai-worker through shared nested Docker", (
   assert.match(compose, /AI_WORKER_ROLE_MAX_CONCURRENCY: \$\{AI_WORKER_ROLE_MAX_CONCURRENCY:-4\}/);
   assert.match(compose, /AI_WORKER_SANDBOX_IMAGE: speclens\/ai-agent-sandbox:local/);
   assert.match(compose, /AI_WORKER_SANDBOX_NETWORK: host/);
+  assert.match(compose, /env_file:\n\s+- path: \.env\n\s+required: false/);
   assert.doesNotMatch(compose, /\/var\/run\/docker\.sock/);
 });
 
@@ -29,6 +30,7 @@ test("single-node deploy compose does not mount the host Docker socket", () => {
   assert.match(compose, /DOCKER_HOST: tcp:\/\/job-dind:2375/);
   assert.match(compose, /AI_WORKER_ROLE_MAX_CONCURRENCY: \$\{AI_WORKER_ROLE_MAX_CONCURRENCY:-4\}/);
   assert.match(compose, /AI_WORKER_SANDBOX_OBJECT_STORAGE_ENDPOINT: http:\/\/minio:9000/);
+  assert.match(compose, /env_file:\n\s+- path: \.env\n\s+required: false/);
   assert.doesNotMatch(compose, /\/var\/run\/docker\.sock/);
 });
 
@@ -69,6 +71,38 @@ test("hosted agent controller only permits direct execution in explicit test har
   assert.match(handle, /executeHostedAgentJobInSandbox\(execution, queueMessageId\)/);
   assert.doesNotMatch(handle, /runAgentJob\(/);
   assert.doesNotMatch(handle, /runRemediationJob\(/);
+});
+
+test("runner and ai-worker queue consumers wire configured concurrency to batch size", () => {
+  const queue = read("packages/db/src/queue.ts");
+  const runner = read("apps/runner/src/services/runner.ts");
+  const worker = read("apps/ai-worker/src/services/worker.ts");
+
+  assert.match(queue, /export async function workRunnerJobs[\s\S]*options: \{ batchSize\?: number \} = \{\}/);
+  assert.match(queue, /export async function workAgentJobs[\s\S]*options: \{ batchSize\?: number \} = \{\}/);
+  assert.match(runner, /workRunnerJobs[\s\S]*batchSize: config\.maxConcurrency/);
+  assert.match(worker, /workAgentJobs[\s\S]*batchSize: config\.maxConcurrency/);
+});
+
+test("active hosted dispatch publishes only unified-agent jobs to the agent queue", () => {
+  const queue = read("packages/db/src/queue.ts");
+  const dispatchStart = queue.indexOf("async function publishDispatchedJob");
+  const dispatchEnd = queue.indexOf("export async function dispatchRunnerJob", dispatchStart);
+  assert.notEqual(dispatchStart, -1);
+  assert.notEqual(dispatchEnd, -1);
+  const dispatchBody = queue.slice(dispatchStart, dispatchEnd);
+  assert.match(dispatchBody, /executionPath !== "unified-agent"/);
+  assert.match(dispatchBody, /publishAgentJob\(\{ jobId \}\)/);
+  assert.doesNotMatch(dispatchBody, /publishRunnerJob\(\{ jobId \}\)/);
+});
+
+test("hosted browser QA retries transient navigation startup failures", () => {
+  const worker = read("apps/ai-worker/src/services/worker.ts");
+  assert.match(worker, /function isRetryableBrowserNavigationError/);
+  assert.match(worker, /err_connection_refused/);
+  assert.match(worker, /econnrefused/);
+  assert.match(worker, /gotoBrowserPageWithRetry\(page, normalizedUrl/);
+  assert.match(worker, /attempts: 3/);
 });
 
 test("self-improvement loop verifies hosted sandbox readiness and evidence", () => {

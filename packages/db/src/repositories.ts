@@ -85,7 +85,7 @@ import { deleteObject, type ObjectStorageConfig } from "./object-storage";
 
 let prismaClient: PrismaClient | null = null;
 
-const logOrderBy = { createdAt: "asc" as const };
+const logOrderBy = [{ createdAt: "asc" as const }, { id: "asc" as const }];
 const artifactOrderBy = { createdAt: "asc" as const };
 const jobSummaryInclude = {
   report: {
@@ -491,6 +491,55 @@ type LegacyPersistedState = {
   githubInstallations: Array<[string, GithubInstallation[]]>;
   checkoutSessions: Array<[string, CheckoutSessionRecord]>;
 };
+
+const legacyPersistedStateKeys = [
+  "users",
+  "workspaces",
+  "memberships",
+  "secrets",
+  "secretValues",
+  "sources",
+  "jobs",
+  "subscriptions",
+  "githubInstallations",
+  "checkoutSessions",
+] as const;
+
+function isLegacyPersistedState(value: unknown): value is LegacyPersistedState {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return legacyPersistedStateKeys.every(key => Array.isArray(record[key]));
+}
+
+function readLegacyPersistedState(snapshotPath: string): LegacyPersistedState | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+  } catch (error) {
+    console.warn(JSON.stringify({
+      level: "warn",
+      scope: "db.legacy-snapshot",
+      event: "legacy-snapshot-parse-failed",
+      path: snapshotPath,
+      error: error instanceof Error ? error.message : "Invalid legacy snapshot JSON.",
+    }));
+    return null;
+  }
+
+  if (!isLegacyPersistedState(raw)) {
+    console.warn(JSON.stringify({
+      level: "warn",
+      scope: "db.legacy-snapshot",
+      event: "legacy-snapshot-shape-invalid",
+      path: snapshotPath,
+      error: "Legacy snapshot does not contain the expected top-level arrays.",
+    }));
+    return null;
+  }
+  return raw;
+}
 
 export type ResolvedWorkspaceSecret = {
   id: string;
@@ -1605,7 +1654,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "skill-severity-calibration",
       name: "Severity calibration",
       description: "Keep severity assignments consistent across audit bundles.",
-      instructions: "Reserve high severity for release blockers, security failures, broken runtime paths, or user-visible breakage.",
+      instructions: "Reserve high severity for release blockers, security failures, broken runtime paths, or user-visible breakage. Do not mark an intentional configuration gate high when the product fails closed with a clear recovery state or controlled 503; classify that as a setup prerequisite or capability gap unless the documented default deployment cannot work.",
       toolCapabilities: ["repo-read"],
       order: 1,
     },
@@ -1650,7 +1699,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "skill-runtime-discovery",
       name: "Runtime discovery",
       description: "Determine install, build, start, and verification commands.",
-      instructions: "Inspect manifests, lockfiles, docs, CI, Docker, compose, and scripts to derive the highest-confidence runtime path.",
+      instructions: "Inspect manifests, lockfiles, docs, CI, Docker, compose, and scripts to derive the highest-confidence runtime path. In hosted job sandboxes, absence of Docker/Compose inside the job container is expected; compose validation belongs to controller/preflight evidence, while app/runtime/browser work should use repo-native commands inside the sandbox.",
       toolCapabilities: ["repo-read", "shell-exec", "package-install", "dev-server", "test-exec"],
       order: 6,
     },
@@ -1686,7 +1735,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "skill-auth-discovery",
       name: "Auth discovery",
       description: "Map frontend and API authentication flows.",
-      instructions: "Identify login routes, callback routes, protected paths, provider hints, and auth blockers without guessing.",
+      instructions: "Identify login routes, callback routes, protected paths, provider hints, and auth blockers without guessing. Treat missing required auth/OAuth env as a setup prerequisite when the API returns controlled errors or the web UI shows recovery guidance; make it high only when users lose recovery or a documented configured deployment is broken.",
       toolCapabilities: ["repo-read", "shell-exec", "http-fetch", "auth-state"],
       order: 10,
     },
@@ -1704,7 +1753,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "skill-license-policy-reasoning",
       name: "License policy reasoning",
       description: "Review root and package licenses for policy mismatches.",
-      instructions: "Inspect root license files, package manifests, notices, and legal copy for conflicts or omissions.",
+      instructions: "Inspect root license files, active package manifests, notices, and legal copy for conflicts or omissions. Treat fixtures, tests, generated artifacts, and archived reference code as reference-only unless they are packaged into the active product.",
       toolCapabilities: ["repo-read"],
       order: 12,
     },
@@ -1803,7 +1852,7 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "skill-playwright-operator",
       name: "Playwright operator",
       description: "Turn repo evidence into a safe Playwright execution path.",
-      instructions: "Keep package managers, working directories, commands, auth strategy, and artifact expectations explicit.",
+      instructions: "Keep package managers, working directories, commands, auth strategy, and artifact expectations explicit. Never probe Playwright with transient `npx playwright` before locked dependencies are installed; prefer repository scripts and record dependency setup first.",
       toolCapabilities: ["repo-read", "shell-exec", "browser-automation", "artifact-write", "package-install", "dev-server", "test-exec", "auth-state"],
       order: 23,
     },
@@ -1909,7 +1958,11 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "runtime-scout",
       name: "Runtime scout",
       description: "Derive exact install, build, start, and verification contracts.",
-      prompt: "Determine the highest-confidence runtime contract for this repo. Emit commands, package managers, working directories, targets, ports, env files, base URLs, and blockers in a section titled \"Runtime scout\".",
+      prompt: [
+        "Determine the highest-confidence runtime contract for this repo. Emit commands, package managers, working directories, targets, ports, env files, base URLs, and blockers in a section titled \"Runtime scout\".",
+        "Hosted job policy: do not require Docker Compose or a Docker socket inside the per-job sandbox. Compose/DinD readiness is controller/preflight evidence; inside the sandbox, prefer repo-native install/start/verify commands and the worker-provided browser/Playwright evidence.",
+        "Only classify missing Compose inside the job sandbox as high when the repo has no direct app/runtime path and no controller/preflight evidence proves the hosted stack was already prepared.",
+      ].join("\n"),
       order: 1,
       skillKeys: ["evidence-discipline", "runtime-discovery", "application-operator", "env-secret-discovery"],
       dependencyKeys: ["source-topology-scout"],
@@ -1919,7 +1972,10 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "auth-cartographer",
       name: "Auth cartographer",
       description: "Map auth flows, protected routes, roles, and required secrets.",
-      prompt: "Map frontend and API authentication, protected routes, login callbacks, required secret refs, local shortcuts, and blockers. Emit a section titled \"Auth map\" with structured auth data.",
+      prompt: [
+        "Map frontend and API authentication, protected routes, login callbacks, required secret refs, local shortcuts, and blockers. Emit a section titled \"Auth map\" with structured auth data.",
+        "Severity calibration: missing Keycloak/Codex OAuth env is a setup prerequisite when the web UI provides a public recovery page or the API returns a controlled 503. Treat it as high only if configured environments are broken, users can loop without recovery, or secrets are mishandled.",
+      ].join("\n"),
       order: 2,
       skillKeys: ["evidence-discipline", "auth-discovery", "env-secret-discovery"],
       dependencyKeys: ["runtime-scout"],
@@ -1941,9 +1997,9 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       description: "Review licenses, notices, and legal mismatches.",
       executorKind: "hybrid",
       nativeExecutorId: "native-license-policy",
-      prompt: "Inspect root and package licenses, notices, and legal copy. Emit a section titled \"License review\" and findings for policy conflicts or missing legal data.",
+      prompt: "Inspect root and active package licenses, notices, and legal copy. Emit a section titled \"License review\" and findings for policy conflicts or missing legal data. Do not make fixtures, tests, generated artifacts, or archived reference code release-blocking unless the repo packages them into the active product.",
       order: 4,
-      skillKeys: ["evidence-discipline", "license-policy-reasoning", "docs-contract-consistency"],
+      skillKeys: ["evidence-discipline", "severity-calibration", "license-policy-reasoning", "docs-contract-consistency"],
       dependencyKeys: ["source-topology-scout"],
     },
     {
@@ -2025,7 +2081,10 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "navigation-qa-planner",
       name: "Navigation QA planner",
       description: "Map routes, auth boundaries, and risk-ranked journeys.",
-      prompt: "Derive route inventory, auth boundaries, dominant journeys, browser assertions, and artifact expectations. Emit a section titled \"Navigation QA plan\".",
+      prompt: [
+        "Derive route inventory, auth boundaries, dominant journeys, browser assertions, and artifact expectations. Emit a section titled \"Navigation QA plan\".",
+        "Hosted job policy: direct browser/runtime evidence produced inside the job sandbox is valid navigation evidence. Do not require Compose-backed stack startup inside the sandbox; use controller/preflight sandbox evidence for compose/DinD readiness and classify missing in-sandbox Compose as a capability gap unless no browser/runtime evidence exists.",
+      ].join("\n"),
       order: 12,
       skillKeys: ["evidence-discipline", "site-navigation-qa", "auth-discovery", "live-surface-resolution"],
       dependencyKeys: ["runtime-scout", "auth-cartographer", "live-surface-resolver"],
@@ -2047,7 +2106,11 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "playwright-operator",
       name: "Playwright operator",
       description: "Prepare repo-native Playwright execution details.",
-      prompt: "Inspect Playwright coverage and emit the most concrete package manager, working directory, command, auth strategy, and artifact expectations you can support in a section titled \"Playwright operator plan\".",
+      prompt: [
+        "Inspect Playwright coverage and emit the most concrete package manager, working directory, command, auth strategy, and artifact expectations you can support in a section titled \"Playwright operator plan\".",
+        "Execution rule: do not run `npx playwright`, `playwright test`, or equivalent direct probes before confirming dependencies are installed or before running the repository's locked install command (`npm ci`, `pnpm install --frozen-lockfile`, etc.). Prefer package.json scripts over transient tool downloads.",
+        "If the worker-provided preflight section reports a successful command, treat that as stronger evidence than an earlier exploratory command failure.",
+      ].join("\n"),
       order: 14,
       skillKeys: ["evidence-discipline", "playwright-operator", "application-operator", "auth-discovery"],
       dependencyKeys: ["runtime-scout", "auth-cartographer", "navigation-qa-planner"],
@@ -2079,7 +2142,10 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       id: "cross-surface-consistency-reviewer",
       name: "Cross-surface consistency reviewer",
       description: "Align repo, docs, live surfaces, and browser evidence.",
-      prompt: "Compare the repository, docs, legal/pricing/auth/admin surfaces, and browser plan for consistency. Emit a section titled \"Cross-surface consistency\".",
+      prompt: [
+        "Compare the repository, docs, legal/pricing/auth/admin surfaces, and browser plan for consistency. Emit a section titled \"Cross-surface consistency\".",
+        "Use sandbox browser/runtime artifacts and controller preflight evidence as valid hosted-job evidence. Do not fail consistency solely because Docker Compose is unavailable inside the job sandbox.",
+      ].join("\n"),
       order: 17,
       skillKeys: ["evidence-discipline", "docs-contract-consistency", "duplication-detection"],
       dependencyKeys: ["license-governor", "copy-consistency-auditor", "navigation-qa-planner"],
@@ -2140,7 +2206,11 @@ async function ensureDefaultAiAgentCatalog(): Promise<void> {
       prompt: [
         "Emit the final bundle-specific pass, warn, or fail recommendation with confidence, blockers, and rationale in a section titled \"Release gate recommendation\".",
         "Calibrate artifact timing: controller-finalized report exports are produced after all roles complete, so do not fail the gate solely because `report.json`, `report.md`, `report.html`, the generated spec pack, or the final run manifest are not visible inside the role workspace yet.",
-        "Only treat artifact absence as a blocker when browser/runtime artifacts expected from already-executed roles are missing, structurally invalid, or contradicted by available evidence.",
+        "Use the artifact-auditor handoff (`generatedArtifacts`, `sourcePaths`, `presentGeneratedKinds`, and `missingGeneratedKinds`) as the canonical evidence for already-executed sandbox artifacts.",
+        "Do not probe project-root paths such as `.speclens-workspace`, `test-results`, or `playwright-report` as a substitute for artifact-auditor evidence; hosted artifacts are written under the job output root and mirrored by the controller.",
+        "Only treat artifact absence as a blocker when artifact-auditor reports missing required generated artifact kinds, browser/runtime artifacts are structurally invalid, or prior execution evidence explicitly contradicts artifact-auditor output.",
+        "Do not fail the gate solely because Docker Compose is unavailable inside the per-job sandbox. For hosted jobs, compose/DinD readiness is controller/preflight evidence; in-sandbox direct runtime, browser executor, and Playwright preflight evidence are the release-gate inputs.",
+        "Do not fail the gate for intentional auth/Codex setup prerequisites when the UI/API fails closed with clear recovery or controlled 503 responses; classify those as deployment readiness warnings unless configured production evidence is broken.",
       ].join("\n"),
       order: 22,
       skillKeys: ["evidence-discipline", "severity-calibration", "artifact-validation"],
@@ -2449,7 +2519,10 @@ async function importLegacySnapshotIfNeeded(): Promise<void> {
     return;
   }
 
-  const payload = JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as LegacyPersistedState;
+  const payload = readLegacyPersistedState(snapshotPath);
+  if (!payload) {
+    return;
+  }
   const secretValues = new Map(payload.secretValues.map(([workspaceId, values]) => [
     workspaceId,
     new Map(values.map(([secretId, value]) => [secretId, decryptSecretValue(value)])),
@@ -4125,8 +4198,15 @@ export async function markAnalysisJobDispatchFailure(
           "warn",
         );
 
-    await tx.analysisJob.update({
-      where: { id: jobId },
+    const updated = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: "pending",
+        dispatchAttempts: current.dispatchAttempts,
+        ...(current.dispatchLeaseOwner
+          ? { dispatchLeaseOwner: current.dispatchLeaseOwner }
+          : { dispatchLeaseOwner: null }),
+      },
       data: reachedLimit
         ? {
             status: "failed",
@@ -4144,6 +4224,9 @@ export async function markAnalysisJobDispatchFailure(
             dispatchLeaseExpiresAt: null,
           },
     });
+    if (updated.count === 0) {
+      return;
+    }
     await tx.analysisJobLog.create({
       data: {
         id: log.id,
@@ -4204,18 +4287,28 @@ export async function listJobLogsAfterWithVisibility(
   visibility: AnalysisLogEvent["visibility"] | "all",
 ): Promise<AnalysisLogEvent[]> {
   const prisma = getPrismaClient();
-  let afterCreatedAt: Date | null = null;
+  let afterCursor: { id: string; createdAt: Date } | null = null;
   if (afterId) {
-    const existing = await prisma.analysisJobLog.findUnique({ where: { id: afterId } });
+    const existing = await prisma.analysisJobLog.findFirst({
+      where: { id: afterId, jobId },
+      select: { id: true, createdAt: true },
+    });
     if (existing) {
-      afterCreatedAt = existing.createdAt;
+      afterCursor = existing;
     }
   }
   const logs = await prisma.analysisJobLog.findMany({
     where: {
       jobId,
       ...(visibility === "all" ? {} : { visibility }),
-      ...(afterCreatedAt ? { createdAt: { gt: afterCreatedAt } } : {}),
+      ...(afterCursor
+        ? {
+            OR: [
+              { createdAt: { gt: afterCursor.createdAt } },
+              { createdAt: afterCursor.createdAt, id: { gt: afterCursor.id } },
+            ],
+          }
+        : {}),
     },
     orderBy: logOrderBy,
   });
@@ -4333,9 +4426,13 @@ export async function requestJobCancellationForUser(
 
   if (job.status === "pending" || job.status === "queued") {
     const log = createLog(jobId, "queue", "Job was cancelled before runner claim.", "warn", options.requestId);
-    await prisma.$transaction([
-      prisma.analysisJob.update({
-        where: { id: jobId },
+    let cancelledBeforeClaim = false;
+    await prisma.$transaction(async tx => {
+      const updated = await tx.analysisJob.updateMany({
+        where: {
+          id: jobId,
+          status: { in: ["pending", "queued"] },
+        },
         data: {
           status: "cancelled",
           cancelRequestedAt: new Date(),
@@ -4346,8 +4443,12 @@ export async function requestJobCancellationForUser(
           dispatchLeaseOwner: null,
           dispatchLeaseExpiresAt: null,
         },
-      }),
-      prisma.analysisJobLog.create({
+      });
+      if (updated.count === 0) {
+        return;
+      }
+      cancelledBeforeClaim = true;
+      await tx.analysisJobLog.create({
         data: {
           id: log.id,
           jobId: log.jobId,
@@ -4358,25 +4459,34 @@ export async function requestJobCancellationForUser(
           requestId: log.requestId ?? null,
           createdAt: new Date(log.createdAt),
         },
-      }),
-    ]);
-    return {
-      job: await getJobEnvelopeById(jobId),
-      queueMessageId: job.queueMessageId,
-      shouldCancelQueueMessage: Boolean(job.queueMessageId),
-      executionPath,
-    };
+      });
+    });
+    if (cancelledBeforeClaim) {
+      return {
+        job: await getJobEnvelopeById(jobId),
+        queueMessageId: job.queueMessageId,
+        shouldCancelQueueMessage: Boolean(job.queueMessageId),
+        executionPath,
+      };
+    }
   }
 
   const log = createLog(jobId, "queue", "Cancellation requested for a running job.", "warn", options.requestId);
-  await prisma.$transaction([
-    prisma.analysisJob.update({
-      where: { id: jobId },
+  await prisma.$transaction(async tx => {
+    const updated = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: "running",
+        cancelRequestedAt: null,
+      },
       data: {
         cancelRequestedAt: new Date(),
       },
-    }),
-    prisma.analysisJobLog.create({
+    });
+    if (updated.count === 0) {
+      return;
+    }
+    await tx.analysisJobLog.create({
       data: {
         id: log.id,
         jobId: log.jobId,
@@ -4387,8 +4497,8 @@ export async function requestJobCancellationForUser(
         requestId: log.requestId ?? null,
         createdAt: new Date(log.createdAt),
       },
-    }),
-  ]);
+    });
+  });
   return {
     job: await getJobEnvelopeById(jobId),
     queueMessageId: null,
@@ -4434,45 +4544,44 @@ export async function retryAnalysisJobForUser(jobId: string, userId: string): Pr
 export async function claimAnalysisJob(jobId: string, runnerId: string, queueMessageId?: string): Promise<JobExecutionRecord | null> {
   const prisma = getPrismaClient();
   const claimResult = await prisma.$transaction(async tx => {
-    const current = await tx.analysisJob.findUnique({
-      where: { id: jobId },
+    const cancelLog = createLog(jobId, "queue", "Job was cancelled before runner claim.", "warn");
+    const cancelled = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: { in: ["pending", "queued"] },
+        cancelRequestedAt: { not: null },
+      },
+      data: {
+        status: "cancelled",
+        finishedAt: new Date(),
+        failureReason: "Cancelled before runner claim.",
+        dispatchLastError: null,
+        dispatchNextAttemptAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+      },
     });
-    if (!current) {
-      return { claimed: false as const, cancelled: false as const };
-    }
-    if (current.status !== "pending" && current.status !== "queued") {
-      return { claimed: false as const, cancelled: false as const };
-    }
-    if (current.cancelRequestedAt) {
-      const log = createLog(jobId, "queue", "Job was cancelled before runner claim.", "warn");
-      await tx.analysisJob.update({
-        where: { id: jobId },
-        data: {
-          status: "cancelled",
-          finishedAt: new Date(),
-          failureReason: "Cancelled before runner claim.",
-          dispatchLastError: null,
-          dispatchNextAttemptAt: null,
-          dispatchLeaseOwner: null,
-          dispatchLeaseExpiresAt: null,
-        },
-      });
+    if (cancelled.count > 0) {
       await tx.analysisJobLog.create({
         data: {
-          id: log.id,
-          jobId: log.jobId,
-          level: log.level,
-          scope: log.scope,
-          message: log.message,
-          visibility: log.visibility,
-          requestId: log.requestId ?? null,
-          createdAt: new Date(log.createdAt),
+          id: cancelLog.id,
+          jobId: cancelLog.jobId,
+          level: cancelLog.level,
+          scope: cancelLog.scope,
+          message: cancelLog.message,
+          visibility: cancelLog.visibility,
+          requestId: cancelLog.requestId ?? null,
+          createdAt: new Date(cancelLog.createdAt),
         },
       });
       return { claimed: false as const, cancelled: true as const };
     }
-    await tx.analysisJob.update({
-      where: { id: jobId },
+    const claimed = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: { in: ["pending", "queued"] },
+        cancelRequestedAt: null,
+      },
       data: {
         status: "running",
         claimedRunnerId: runnerId,
@@ -4481,9 +4590,12 @@ export async function claimAnalysisJob(jobId: string, runnerId: string, queueMes
         dispatchNextAttemptAt: null,
         dispatchLeaseOwner: null,
         dispatchLeaseExpiresAt: null,
-        ...(current.queueMessageId ?? queueMessageId ? { queueMessageId: current.queueMessageId ?? queueMessageId ?? null } : {}),
+        ...(queueMessageId ? { queueMessageId } : {}),
       },
     });
+    if (claimed.count === 0) {
+      return { claimed: false as const, cancelled: false as const };
+    }
     const log = createLog(jobId, "queue", `Runner ${runnerId} claimed dispatched job and started analysis.`);
     await tx.analysisJobLog.create({
       data: {
@@ -4510,61 +4622,22 @@ export async function claimAnalysisJob(jobId: string, runnerId: string, queueMes
     const prisma = getPrismaClient();
     const message = error instanceof Error ? error.message : "Failed to prepare claimed job execution context.";
     const log = createLog(jobId, "runner", message, "error");
-    await prisma.$transaction([
-      prisma.analysisJob.update({
-        where: { id: jobId },
+    await prisma.$transaction(async tx => {
+      const updated = await tx.analysisJob.updateMany({
+        where: {
+          id: jobId,
+          status: "running",
+          claimedRunnerId: runnerId,
+        },
         data: {
           status: "failed",
           failureReason: message,
           finishedAt: new Date(),
         },
-      }),
-      prisma.analysisJobLog.create({
-        data: {
-          id: log.id,
-          jobId: log.jobId,
-          level: log.level,
-          scope: log.scope,
-          message: log.message,
-          visibility: log.visibility,
-          requestId: log.requestId ?? null,
-          createdAt: new Date(log.createdAt),
-        },
-      }),
-    ]);
-    return null;
-  }
-}
-
-export async function claimAgentJob(jobId: string, agentId: string, queueMessageId?: string): Promise<JobExecutionRecord | null> {
-  const prisma = getPrismaClient();
-  const claimResult = await prisma.$transaction(async tx => {
-    const current = await tx.analysisJob.findUnique({
-      where: { id: jobId },
-    });
-    if (!current) {
-      return { claimed: false as const, cancelled: false as const };
-    }
-    if (!current.agentId) {
-      return { claimed: false as const, cancelled: false as const };
-    }
-    if (current.status !== "pending" && current.status !== "queued") {
-      return { claimed: false as const, cancelled: false as const };
-    }
-    if (current.cancelRequestedAt) {
-      const log = createLog(jobId, "queue", "Job was cancelled before agent claim.", "warn");
-      await tx.analysisJob.update({
-        where: { id: jobId },
-        data: {
-          status: "cancelled",
-          finishedAt: new Date(),
-          failureReason: "Cancelled before agent claim.",
-          dispatchLastError: null,
-          dispatchNextAttemptAt: null,
-          dispatchLeaseOwner: null,
-          dispatchLeaseExpiresAt: null,
-        },
       });
+      if (updated.count === 0) {
+        return;
+      }
       await tx.analysisJobLog.create({
         data: {
           id: log.id,
@@ -4577,10 +4650,54 @@ export async function claimAgentJob(jobId: string, agentId: string, queueMessage
           createdAt: new Date(log.createdAt),
         },
       });
+    });
+    return null;
+  }
+}
+
+export async function claimAgentJob(jobId: string, agentId: string, queueMessageId?: string): Promise<JobExecutionRecord | null> {
+  const prisma = getPrismaClient();
+  const claimResult = await prisma.$transaction(async tx => {
+    const cancelLog = createLog(jobId, "queue", "Job was cancelled before agent claim.", "warn");
+    const cancelled = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: { in: ["pending", "queued"] },
+        agentId: { not: null },
+        cancelRequestedAt: { not: null },
+      },
+      data: {
+        status: "cancelled",
+        finishedAt: new Date(),
+        failureReason: "Cancelled before agent claim.",
+        dispatchLastError: null,
+        dispatchNextAttemptAt: null,
+        dispatchLeaseOwner: null,
+        dispatchLeaseExpiresAt: null,
+      },
+    });
+    if (cancelled.count > 0) {
+      await tx.analysisJobLog.create({
+        data: {
+          id: cancelLog.id,
+          jobId: cancelLog.jobId,
+          level: cancelLog.level,
+          scope: cancelLog.scope,
+          message: cancelLog.message,
+          visibility: cancelLog.visibility,
+          requestId: cancelLog.requestId ?? null,
+          createdAt: new Date(cancelLog.createdAt),
+        },
+      });
       return { claimed: false as const, cancelled: true as const };
     }
-    await tx.analysisJob.update({
-      where: { id: jobId },
+    const claimed = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: { in: ["pending", "queued"] },
+        agentId: { not: null },
+        cancelRequestedAt: null,
+      },
       data: {
         status: "running",
         claimedRunnerId: agentId,
@@ -4589,9 +4706,12 @@ export async function claimAgentJob(jobId: string, agentId: string, queueMessage
         dispatchNextAttemptAt: null,
         dispatchLeaseOwner: null,
         dispatchLeaseExpiresAt: null,
-        ...(current.queueMessageId ?? queueMessageId ? { queueMessageId: current.queueMessageId ?? queueMessageId ?? null } : {}),
+        ...(queueMessageId ? { queueMessageId } : {}),
       },
     });
+    if (claimed.count === 0) {
+      return { claimed: false as const, cancelled: false as const };
+    }
     const log = createLog(jobId, "queue", `Agent ${agentId} claimed dispatched job and started analysis.`);
     await tx.analysisJobLog.create({
       data: {
@@ -4618,16 +4738,23 @@ export async function claimAgentJob(jobId: string, agentId: string, queueMessage
     const prisma = getPrismaClient();
     const message = error instanceof Error ? error.message : "Failed to prepare claimed job execution context.";
     const log = createLog(jobId, "agent", message, "error");
-    await prisma.$transaction([
-      prisma.analysisJob.update({
-        where: { id: jobId },
+    await prisma.$transaction(async tx => {
+      const updated = await tx.analysisJob.updateMany({
+        where: {
+          id: jobId,
+          status: "running",
+          claimedRunnerId: agentId,
+        },
         data: {
           status: "failed",
           failureReason: message,
           finishedAt: new Date(),
         },
-      }),
-      prisma.analysisJobLog.create({
+      });
+      if (updated.count === 0) {
+        return;
+      }
+      await tx.analysisJobLog.create({
         data: {
           id: log.id,
           jobId: log.jobId,
@@ -4638,8 +4765,8 @@ export async function claimAgentJob(jobId: string, agentId: string, queueMessage
           requestId: log.requestId ?? null,
           createdAt: new Date(log.createdAt),
         },
-      }),
-    ]);
+      });
+    });
     return null;
   }
 }
@@ -4707,9 +4834,14 @@ export async function finalizeAnalysisJobSuccess(
   const report = envelope.report;
   const artifacts = [...(report?.artifacts ?? []), ...extraArtifacts];
   const roleIds = envelope.job.roles;
+  let finalized = false;
   await prisma.$transaction(async tx => {
-    await tx.analysisJob.update({
-      where: { id: jobId },
+    const updated = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: "running",
+        cancelRequestedAt: null,
+      },
       data: {
         reportId: report?.id ?? null,
         status: "succeeded",
@@ -4726,6 +4858,10 @@ export async function finalizeAnalysisJobSuccess(
           : {}),
       },
     });
+    if (updated.count === 0) {
+      return;
+    }
+    finalized = true;
 
     if (report) {
       await tx.analysisReport.upsert({
@@ -4777,7 +4913,9 @@ export async function finalizeAnalysisJobSuccess(
     }
   });
 
-  await createManyLogs(envelope.logs);
+  if (finalized) {
+    await createManyLogs(envelope.logs);
+  }
   return await getJobEnvelopeById(jobId);
 }
 
@@ -4792,15 +4930,23 @@ export async function finalizeAnalysisJobFailure(
 ): Promise<JobEnvelope> {
   const prisma = getPrismaClient();
   const status = options.status ?? "failed";
+  let finalized = false;
   await prisma.$transaction(async tx => {
-    await tx.analysisJob.update({
-      where: { id: jobId },
+    const updated = await tx.analysisJob.updateMany({
+      where: {
+        id: jobId,
+        status: { in: ["pending", "queued", "running"] },
+      },
       data: {
         status,
         failureReason: options.failureReason,
         finishedAt: new Date(),
       },
     });
+    if (updated.count === 0) {
+      return;
+    }
+    finalized = true;
     if (options.artifacts && options.artifacts.length > 0) {
       await tx.artifactReference.createMany({
         data: options.artifacts.map(artifact => ({
@@ -4819,7 +4965,9 @@ export async function finalizeAnalysisJobFailure(
       });
     }
   });
-  await createManyLogs(options.logs ?? []);
+  if (finalized) {
+    await createManyLogs(options.logs ?? []);
+  }
   return await getJobEnvelopeById(jobId);
 }
 

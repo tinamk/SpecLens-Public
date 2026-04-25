@@ -86,9 +86,13 @@ export async function cancelAgentJob(messageId: string): Promise<void> {
 async function publishDispatchedJob(jobId: string, dispatcherId: string): Promise<void> {
   try {
     const executionPath = await getAnalysisJobExecutionPath(jobId);
-    const messageId = executionPath === "unified-agent"
-      ? await publishAgentJob({ jobId })
-      : await publishRunnerJob({ jobId });
+    if (executionPath !== "unified-agent") {
+      throw new Error(`Unsupported hosted job execution path for ${jobId}: ${executionPath ?? "unknown"}.`);
+    }
+    // Active hosted jobs are always unified-agent jobs. The runner queue remains
+    // available for runner-plane compatibility, but normal hosted submissions do
+    // not branch into it.
+    const messageId = await publishAgentJob({ jobId });
     await setAnalysisJobQueueMessage(jobId, { jobId, messageId }, dispatcherId);
   } catch (error) {
     await markAnalysisJobDispatchFailure(jobId, {
@@ -126,9 +130,14 @@ export function startQueueDispatchLoop(): void {
     if (dispatchLoopPromise) {
       return;
     }
-    dispatchLoopPromise = drainPendingDispatches().finally(() => {
-      dispatchLoopPromise = null;
-    });
+    dispatchLoopPromise = drainPendingDispatches()
+      .catch(error => {
+        const message = error instanceof Error ? error.message : "Unknown queue dispatch failure.";
+        console.warn(`[queue-dispatch] dispatch tick failed: ${message}`);
+      })
+      .finally(() => {
+        dispatchLoopPromise = null;
+      });
   };
   tick();
   dispatchLoopTimer = setInterval(tick, getDispatchIntervalMs());
@@ -136,26 +145,30 @@ export function startQueueDispatchLoop(): void {
 
 export async function workRunnerJobs(
   handler: (payload: RunnerJobPayload, queueMessageId: string) => Promise<void>,
+  options: { batchSize?: number } = {},
 ): Promise<PgBoss> {
   const boss = await getQueueBoss();
-  await boss.work(getRunnerQueueName(), { batchSize: 1 }, async jobs => {
-    for (const job of jobs) {
+  const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
+  await boss.work(getRunnerQueueName(), { batchSize }, async jobs => {
+    await Promise.all(jobs.map(async job => {
       const payload = runnerJobPayloadSchema.parse(job.data);
       await handler(payload, String(job.id));
-    }
+    }));
   });
   return boss;
 }
 
 export async function workAgentJobs(
   handler: (payload: AgentJobPayload, queueMessageId: string) => Promise<void>,
+  options: { batchSize?: number } = {},
 ): Promise<PgBoss> {
   const boss = await getQueueBoss();
-  await boss.work(getAgentQueueName(), { batchSize: 1 }, async jobs => {
-    for (const job of jobs) {
+  const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
+  await boss.work(getAgentQueueName(), { batchSize }, async jobs => {
+    await Promise.all(jobs.map(async job => {
       const payload = agentJobPayloadSchema.parse(job.data);
       await handler(payload, String(job.id));
-    }
+    }));
   });
   return boss;
 }

@@ -76,9 +76,9 @@ export function getReleaseGateTagClass(status?: string | null): string {
 }
 
 export function formatSourceType(type: string): string {
-  if (type === "git-public") return "public git repo";
-  if (type === "github-private") return "private GitHub repo";
-  if (type === "upload-archive") return "git repo archive upload";
+  if (type === "git-public") return "public Git repository";
+  if (type === "github-private") return "private GitHub repository";
+  if (type === "upload-archive") return "Git archive upload";
   return type;
 }
 
@@ -116,12 +116,68 @@ export function getWorkspaceReportsEmptyState(query: string): { title: string; d
   if (normalizedQuery) {
     return {
       title: "No reports matched this filter.",
-      detail: `Try a different title, source, or status search for “${normalizedQuery}”, or open the runs view to inspect jobs that have not produced report output yet.`,
+      detail: `Try a different title, source, or run status search for “${normalizedQuery}”, or open the runs view to inspect runs that have not produced report output yet.`,
     };
   }
   return {
     title: "No reports available yet.",
-    detail: "Completed runs with durable report output will appear here. Open the runs view to inspect in-progress jobs, logs, and artifacts while you wait.",
+    detail: "Completed runs with durable report output will appear here. Open the runs view to inspect in-progress runs, logs, and artifacts while you wait.",
+  };
+}
+
+export function getWorkspaceRunsEmptyState(input: {
+  query: string;
+  status: string;
+}): { title: string; detail: string } {
+  const normalizedQuery = input.query.trim();
+  if (normalizedQuery || input.status) {
+    const filterSummary = [
+      normalizedQuery ? `search “${normalizedQuery}”` : null,
+      input.status ? `status “${input.status}”` : null,
+    ].filter(Boolean).join(" and ");
+    return {
+      title: "No runs matched this filter.",
+      detail: `Clear or change ${filterSummary} to see other queued, running, completed, or failed jobs.`,
+    };
+  }
+  return {
+    title: "No runs queued yet.",
+    detail: "Add and verify a source, confirm Codex auth is connected, then queue an AI task from the form above.",
+  };
+}
+
+export function getWorkspaceSourcesEmptyState(input: {
+  query: string;
+  type: string;
+}): { title: string; detail: string } {
+  const normalizedQuery = input.query.trim();
+  if (normalizedQuery || input.type) {
+    const filterSummary = [
+      normalizedQuery ? `search “${normalizedQuery}”` : null,
+      input.type ? `type “${formatSourceType(input.type)}”` : null,
+    ].filter(Boolean).join(" and ");
+    return {
+      title: "No sources matched this filter.",
+      detail: `Clear or change ${filterSummary} to inspect the full source inventory.`,
+    };
+  }
+  return {
+    title: "No sources added yet.",
+    detail: "Add a public repository, connected private GitHub repository, or Git archive. A source must verify successfully before it can be used for AI runs.",
+  };
+}
+
+export function getWorkspaceMembersEmptyState(query: string): { title: string; detail: string } {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery) {
+    return {
+      title: "No members matched this filter.",
+      detail: `Try a different name, email, or role search for “${normalizedQuery}”.`,
+    };
+  }
+  return {
+    title: "No collaborators added yet.",
+    detail: "The workspace owner can invite collaborators here. The owner always retains access even when no additional members are listed.",
   };
 }
 
@@ -429,7 +485,7 @@ export function buildPortalPrimaryNav(isAdmin: boolean): PortalNavItem[] {
     {
       key: "settings",
       href: "/portal/settings",
-      label: "Settings",
+      label: "Account settings",
     },
   ];
   if (isAdmin) {
@@ -477,7 +533,7 @@ export function buildWorkspaceNav(workspaceId: string): PortalNavItem[] {
     {
       key: "settings",
       href: `/portal/workspaces/${workspaceId}/settings`,
-      label: "Settings",
+      label: "Workspace settings",
     },
   ];
 }

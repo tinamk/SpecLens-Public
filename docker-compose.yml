@@ -94,7 +94,8 @@ services:
     command: >
       bash -lc "npm run seed:keycloak-users"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       E2E_ENV: local
       KEYCLOAK_ADMIN_URL: http://keycloak:8080
@@ -116,7 +117,8 @@ services:
     command: >
       bash -lc "npm run db:generate && scripts/local/migrate-deploy.sh && npm run seed:local-users && npm run dev:api"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       APP_URL: ${APP_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
       API_URL: ${API_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
@@ -176,7 +178,8 @@ services:
     command: >
       bash -lc "npm run dev:web"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       APP_URL: ${APP_URL:-http://localhost:${CADDY_HTTP_PORT:-18080}}
       API_URL: http://api:4000
@@ -260,7 +263,8 @@ services:
       dockerfile: apps/runner/docker/Dockerfile
     image: speclens/analysis-runner:local
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
       RUNNER_POLL_INTERVAL_MS: 5000
@@ -304,7 +308,8 @@ services:
     command: >
       bash -lc "cd /app && npm run db:generate && npm run ai-worker:start"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       APP_STATE_ENCRYPTION_KEY: ${APP_STATE_ENCRYPTION_KEY:-speclens-local-dev-app-state-secret}
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/speclens

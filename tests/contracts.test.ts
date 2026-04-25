@@ -7,6 +7,7 @@ import {
   analysisReportSchema,
   billingCheckoutInputSchema,
   billingPortalSessionInputSchema,
+  adminRunAgentInputSchema,
   createAgentJobInputSchema,
   createAiRoleInputSchema,
   createRemediationTaskInputSchema,
@@ -79,6 +80,14 @@ test("contracts accept hosted workspace creation and source registration inputs"
     sourceId: "source_primary",
   });
   assert.equal(directAgentJob.sourceId, "source_primary");
+  assert.throws(() => adminRunAgentInputSchema.parse({
+    sourceId: "source_primary",
+  }));
+  const adminAgentRun = adminRunAgentInputSchema.parse({
+    workspaceId: "workspace_primary",
+    sourceId: "source_primary",
+  });
+  assert.equal(adminAgentRun.workspaceId, "workspace_primary");
 
   const remediationTask = createRemediationTaskInputSchema.parse({
     sourceId: "source_primary",

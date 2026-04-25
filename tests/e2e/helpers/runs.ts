@@ -454,6 +454,7 @@ export async function queueAiTask(
     companionSourceLabel?: string;
     taskLabel?: string;
     runtimeMode?: "static" | "browser";
+    codexAuthScope?: "user" | "workspace" | "global" | "first-ready";
   } = {},
 ): Promise<string> {
   const prefix = options.prefix ?? "workspace-runs";
@@ -468,6 +469,21 @@ export async function queueAiTask(
   }
   if (options.runtimeMode) {
     await page.getByTestId(`${prefix}-runtime-mode-select`).selectOption(options.runtimeMode);
+  }
+  if (options.codexAuthScope) {
+    const authSelect = page.getByTestId(`${prefix}-codex-auth-select`);
+    await expect(authSelect).toBeVisible();
+    const scope = options.codexAuthScope === "first-ready"
+      ? await authSelect.locator("option").evaluateAll(options => {
+          const match = options.find(option => {
+            const value = option.getAttribute("value") ?? "";
+            return value.length > 0 && !(option as HTMLOptionElement).disabled;
+          });
+          return match?.getAttribute("value") ?? "";
+        })
+      : options.codexAuthScope;
+    assert.ok(scope, "Expected at least one selectable Codex auth scope.");
+    await authSelect.selectOption(scope);
   }
 
   await page.getByTestId(`${prefix}-submit`).click();
@@ -590,6 +606,9 @@ export async function auditCompletedJobExecution(
     jobId: string;
     expectedTaskLabel?: string;
     expectedSourceLocationPattern?: RegExp;
+    expectedCompanionSourceLocationPattern?: RegExp;
+    expectedRuntimeMode?: "static" | "browser";
+    expectedCodexAuthScope?: "user" | "workspace" | "global";
     minRoleCount?: number;
     minSkillCount?: number;
     requiredToolCapabilities?: AiToolCapability[];
@@ -642,6 +661,19 @@ export async function auditCompletedJobExecution(
     );
     await expect(page.getByTestId("workspace-runs-job-source")).toContainText(options.expectedSourceLocationPattern);
     debugRunAuditStep("source verified");
+  }
+  if (options.expectedCompanionSourceLocationPattern) {
+    assert.match(
+      defaultEnvelope.job.companionSourceLocation ?? "",
+      options.expectedCompanionSourceLocationPattern,
+      `Job companion source location did not match ${options.expectedCompanionSourceLocationPattern}.`,
+    );
+  }
+  if (options.expectedRuntimeMode) {
+    assert.equal(defaultEnvelope.job.runtimeMode, options.expectedRuntimeMode);
+  }
+  if (options.expectedCodexAuthScope) {
+    assert.equal(defaultEnvelope.job.codexAuthScope, options.expectedCodexAuthScope);
   }
 
   const learnableCount = await page.locator('[data-testid^="workspace-runs-job-learnable-"]').count();

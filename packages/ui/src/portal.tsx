@@ -1,6 +1,7 @@
 import type { Route } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BrandLockup } from "./marketing";
 import { ThemeSwitcher } from "./theme-switcher";
 
 export type PortalNavItem = {
@@ -22,7 +23,7 @@ export function PortalLinkGrid({
   children: ReactNode;
   testId?: string;
 }) {
-  return <div className="portal-link-grid" data-testid={testId}>{children}</div>;
+  return <ul className="portal-link-grid" data-testid={testId}>{children}</ul>;
 }
 
 export function PortalLinkCard({
@@ -53,11 +54,13 @@ export function PortalLinkCard({
   const className = ["portal-link-card", toneClassName, activeClassName].filter(Boolean).join(" ");
 
   return (
-    <Link className={className} data-testid={testId} href={href as Route}>
-      {eyebrow ? <span className="portal-link-card__eyebrow">{eyebrow}</span> : null}
-      <strong className="portal-link-card__title">{title}</strong>
-      {description ? <span className="portal-link-card__description">{description}</span> : null}
-    </Link>
+    <li className="portal-link-grid__item">
+      <Link className={className} data-testid={testId} href={href as Route}>
+        {eyebrow ? <span className="portal-link-card__eyebrow">{eyebrow}</span> : null}
+        <strong className="portal-link-card__title">{title}</strong>
+        {description ? <span className="portal-link-card__description">{description}</span> : null}
+      </Link>
+    </li>
   );
 }
 
@@ -98,6 +101,8 @@ export function PortalNoticePanel({
   actions,
   testId,
   descriptionTestId,
+  role,
+  ariaLive,
 }: {
   badgeLabel?: ReactNode;
   badgeClassName?: string;
@@ -106,18 +111,86 @@ export function PortalNoticePanel({
   actions?: ReactNode;
   testId?: string;
   descriptionTestId?: string;
+  role?: "alert" | "status";
+  ariaLive?: "off" | "polite" | "assertive";
 }) {
   return (
-    <section className="portal-panel portal-notice-panel" data-testid={testId}>
+    <section className="portal-panel portal-notice-panel" data-testid={testId} role={role} aria-live={ariaLive}>
       <div className="portal-notice-panel__copy">
         {badgeLabel ? <span className={badgeClassName}>{badgeLabel}</span> : null}
         <div>
           <h2>{title}</h2>
-          <p className="portal-notice-panel__description" data-testid={descriptionTestId}>{description}</p>
+          <div className="portal-notice-panel__description" data-testid={descriptionTestId}>{description}</div>
         </div>
       </div>
       {actions ? <div className="portal-inline-actions portal-notice-panel__actions">{actions}</div> : null}
     </section>
+  );
+}
+
+export function PortalStateView({
+  title,
+  eyebrow,
+  lede,
+  pageTestId,
+  primaryNav,
+  activePrimaryNavKey,
+  secondaryNav,
+  activeSecondaryNavKey,
+  badgeLabel,
+  badgeClassName,
+  noticeTitle,
+  description,
+  descriptionTestId,
+  actions,
+  noticeRole,
+  noticeAriaLive,
+  children,
+}: {
+  title: string;
+  eyebrow: string;
+  lede?: string;
+  pageTestId?: string;
+  primaryNav?: PortalNavItem[];
+  activePrimaryNavKey?: string;
+  secondaryNav?: PortalNavItem[];
+  activeSecondaryNavKey?: string;
+  badgeLabel?: ReactNode;
+  badgeClassName?: string;
+  noticeTitle: ReactNode;
+  description: ReactNode;
+  descriptionTestId?: string;
+  actions?: ReactNode;
+  noticeRole?: "alert" | "status";
+  noticeAriaLive?: "off" | "polite" | "assertive";
+  children?: ReactNode;
+}) {
+  const shellProps = {
+    title,
+    eyebrow,
+    ...(lede === undefined ? {} : { lede }),
+    ...(pageTestId === undefined ? {} : { pageTestId }),
+    ...(primaryNav === undefined ? {} : { primaryNav }),
+    ...(activePrimaryNavKey === undefined ? {} : { activePrimaryNavKey }),
+    ...(secondaryNav === undefined ? {} : { secondaryNav }),
+    ...(activeSecondaryNavKey === undefined ? {} : { activeSecondaryNavKey }),
+  };
+  const noticeProps = {
+    title: noticeTitle,
+    description,
+    ...(descriptionTestId === undefined ? {} : { descriptionTestId }),
+    ...(badgeLabel === undefined ? {} : { badgeLabel }),
+    ...(badgeClassName === undefined ? {} : { badgeClassName }),
+    ...(actions === undefined ? {} : { actions }),
+    role: noticeRole ?? "status",
+    ariaLive: noticeAriaLive ?? "polite",
+  };
+
+  return (
+    <PortalShell {...shellProps}>
+      <PortalNoticePanel {...noticeProps} />
+      {children}
+    </PortalShell>
   );
 }
 
@@ -162,17 +235,13 @@ export function PortalShell({
   children: ReactNode;
 }) {
   return (
-    <main className="portal-shell" data-testid={pageTestId}>
+    <div className="portal-shell">
+      <a className="skip-link" href="#portal-main-content">Skip to portal content</a>
       <header className="portal-shell__chrome">
         <div className="portal-shell__chrome-inner">
           <div className="portal-shell__chrome-top">
             <div className="portal-shell__brand-row">
-              <Link className="portal-shell__brand" href="/">
-                <span className="logo-mark">SL</span>
-                <span>
-                  <span className="brand-name">SpecLens portal</span>
-                </span>
-              </Link>
+              <BrandLockup className="portal-shell__brand" label="SpecLens portal" />
             </div>
             <div className="portal-shell__actions">
               <ThemeSwitcher compact />
@@ -184,6 +253,7 @@ export function PortalShell({
             <nav aria-label="Portal navigation" className="portal-shell__nav">
               {primaryNav.map(item => (
                 <Link
+                  aria-current={item.key === activePrimaryNavKey ? "page" : undefined}
                   className={item.key === activePrimaryNavKey ? "portal-shell__nav-link portal-shell__nav-link--active" : "portal-shell__nav-link"}
                   data-testid={item.testId ?? `portal-nav-${item.key}`}
                   href={item.href as Route}
@@ -196,7 +266,8 @@ export function PortalShell({
           ) : null}
         </div>
       </header>
-      <section className="portal-shell__intro">
+      <main className="portal-shell__main" data-testid={pageTestId} id="portal-main-content" tabIndex={-1}>
+        <section className="portal-shell__intro">
         <div className="portal-shell__intro-card">
           <div className="portal-shell__title-row">
             <div>
@@ -209,6 +280,7 @@ export function PortalShell({
             <nav aria-label="Section navigation" className="portal-shell__subnav">
               {secondaryNav.map(item => (
                   <Link
+                    aria-current={item.key === activeSecondaryNavKey ? "page" : undefined}
                     className={item.key === activeSecondaryNavKey ? "portal-shell__subnav-link portal-shell__subnav-link--active" : "portal-shell__subnav-link"}
                     data-testid={item.testId ?? `portal-subnav-${item.key}`}
                     href={item.href as Route}
@@ -221,7 +293,8 @@ export function PortalShell({
           ) : null}
         </div>
       </section>
-      <div className="portal-shell__content">{children}</div>
-    </main>
+        <div className="portal-shell__content">{children}</div>
+      </main>
+    </div>
   );
 }

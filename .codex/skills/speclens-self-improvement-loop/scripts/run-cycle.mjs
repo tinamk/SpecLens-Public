@@ -38,6 +38,7 @@ const EXECUTION_STEP_EVENT_PREFIX = "__speclens_step__";
 const SESSION_COOKIE_NAME = "speclens_portal_session";
 const CSRF_COOKIE_NAME = "speclens_csrf";
 const ID_TOKEN_COOKIE_NAME = "speclens_portal_id_token";
+const KEYCLOAK_TOKEN_REFRESH_SKEW_MS = 60_000;
 
 function printUsage() {
   console.log(`Usage:
@@ -48,6 +49,7 @@ function printUsage() {
 Analyze options:
   --repo <path>                 Repo to archive. Defaults to the current Git repo.
   --ref <git-ref>               Git ref to archive. Defaults to HEAD.
+  --include-dirty               Overlay tracked and untracked worktree changes onto the archived ref.
   --workspace-name <name>       Workspace name. Defaults to "${DEFAULT_WORKSPACE_NAME}".
   --workspace-description <txt> Workspace description for first-time creation.
   --profile <name>              Agent profile: standard or runtime-fast. Defaults to ${DEFAULT_PROFILE}.
@@ -109,7 +111,8 @@ Remediation options:
 
 Notes:
   - This helper supports local hosted stacks in both local-dev and Keycloak mode.
-  - Analyze uploads a committed Git archive, so the audited source is the chosen Git ref.
+  - Analyze uploads a committed Git archive by default, so the audited source is the chosen Git ref.
+  - Use --include-dirty only when intentionally dogfooding local uncommitted changes.
   - Use --profile runtime-fast for fast sandbox/runtime/browser/Playwright/artifact dogfood loops.
   - Hosted jobs must execute through ai-worker -> Docker sandbox. The default preflight fails if job-dind, ai-worker, or sandbox images are not ready.`);
 }
@@ -522,17 +525,24 @@ class ApiClient {
     this.pathPrefix = pathPrefix;
     this.authHeaders = authHeaders;
     this.refreshAuthHeaders = options.refreshAuthHeaders ?? null;
+    this.authExpiresAtMs = options.authExpiresAtMs ?? null;
+    this.authRefreshSkewMs = options.authRefreshSkewMs ?? KEYCLOAK_TOKEN_REFRESH_SKEW_MS;
     this.activeRefresh = null;
   }
 
   async getAuthHeaders(forceRefresh = false) {
+    const shouldRefreshForExpiry = typeof this.authExpiresAtMs === "number"
+      && Date.now() + this.authRefreshSkewMs >= this.authExpiresAtMs;
+    forceRefresh = forceRefresh || shouldRefreshForExpiry;
     if (!forceRefresh || typeof this.refreshAuthHeaders !== "function") {
       return this.authHeaders;
     }
     if (!this.activeRefresh) {
       this.activeRefresh = Promise.resolve(this.refreshAuthHeaders())
-        .then(headers => {
+        .then(result => {
+          const headers = result?.headers ?? result;
           this.authHeaders = headers;
+          this.authExpiresAtMs = typeof result?.expiresAtMs === "number" ? result.expiresAtMs : null;
           return headers;
         })
         .finally(() => {
@@ -618,6 +628,20 @@ function isKeycloakLoginUrl(url) {
   return url.includes("/protocol/openid-connect/auth") || url.includes(":18081") || url.includes("keycloak");
 }
 
+function decodeJwtExpiresAtMs(token) {
+  const [, payload] = token.split(".");
+  if (!payload) {
+    return null;
+  }
+  try {
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = JSON.parse(Buffer.from(normalized, "base64").toString("utf8"));
+    return typeof decoded.exp === "number" ? decoded.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 async function createKeycloakProxySession(appUrl, args, env) {
   const username = readStringArg(
     args,
@@ -664,6 +688,7 @@ async function createKeycloakProxySession(appUrl, args, env) {
     }
     return {
       idToken,
+      expiresAtMs: decodeJwtExpiresAtMs(idToken),
       auth: {
         scope: "proxy-session",
         status: "ready",
@@ -728,10 +753,15 @@ async function createRuntimeClient(args, mergedEnv, repoRoot) {
         authorization: `Bearer ${keycloakSession.idToken}`,
       },
       {
+        authExpiresAtMs: keycloakSession.expiresAtMs,
+        authRefreshSkewMs: KEYCLOAK_TOKEN_REFRESH_SKEW_MS,
         refreshAuthHeaders: async () => {
           const refreshedSession = await createKeycloakProxySession(appUrl, args, mergedEnv);
           return {
-            authorization: `Bearer ${refreshedSession.idToken}`,
+            headers: {
+              authorization: `Bearer ${refreshedSession.idToken}`,
+            },
+            expiresAtMs: refreshedSession.expiresAtMs,
           };
         },
       },
@@ -876,19 +906,59 @@ async function ensureScopedCodexAuth(client, scope, workspaceId) {
   };
 }
 
-async function createGitArchive(repoRoot, gitRef) {
+async function overlayDirtyWorktree(repoRoot, snapshotRoot, gitRef, tempDir) {
+  const patch = await runCommand("git", ["-C", repoRoot, "diff", "--binary", gitRef, "--"]);
+  const patchPath = path.join(tempDir, "worktree.patch");
+  let dirtyTracked = false;
+  if (patch.stdout.trim().length > 0) {
+    fs.writeFileSync(patchPath, patch.stdout, "utf8");
+    await runCommand("git", ["apply", "--binary", "--whitespace=nowarn", patchPath], { cwd: snapshotRoot });
+    dirtyTracked = true;
+  }
+
+  const untracked = await runCommand("git", ["-C", repoRoot, "ls-files", "--others", "--exclude-standard", "-z"]);
+  const copiedUntracked = [];
+  for (const relativePath of untracked.stdout.split("\0").filter(Boolean)) {
+    const sourcePath = path.join(repoRoot, relativePath);
+    const targetPath = path.join(snapshotRoot, relativePath);
+    const stat = await fsp.stat(sourcePath).catch(() => null);
+    if (!stat) {
+      continue;
+    }
+    await mkdirp(path.dirname(targetPath));
+    if (stat.isDirectory()) {
+      await fsp.cp(sourcePath, targetPath, { recursive: true, force: true });
+    } else if (stat.isFile()) {
+      await fsp.copyFile(sourcePath, targetPath);
+    } else {
+      continue;
+    }
+    copiedUntracked.push(relativePath);
+  }
+
+  return {
+    dirtyTracked,
+    copiedUntracked,
+  };
+}
+
+async function createGitArchive(repoRoot, gitRef, options = {}) {
   const { stdout: resolvedRefStdout } = await runCommand("git", ["-C", repoRoot, "rev-parse", gitRef]);
   const resolvedRef = resolvedRefStdout.trim();
   const repoName = path.basename(repoRoot);
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "speclens-self-improvement-"));
-  const snapshotRoot = path.join(tempDir, `${sanitizePathSegment(repoName)}-${resolvedRef.slice(0, 12)}`);
-  const archiveFilename = `${sanitizePathSegment(repoName)}-${resolvedRef.slice(0, 12)}.tar.gz`;
+  const dirtySuffix = options.includeDirty ? "-dirty" : "";
+  const snapshotRoot = path.join(tempDir, `${sanitizePathSegment(repoName)}-${resolvedRef.slice(0, 12)}${dirtySuffix}`);
+  const archiveFilename = `${sanitizePathSegment(repoName)}-${resolvedRef.slice(0, 12)}${dirtySuffix}.tar.gz`;
   const archivePath = path.join(tempDir, archiveFilename);
   await mkdirp(snapshotRoot);
   await runCommand("sh", [
     "-lc",
     `git -C ${JSON.stringify(repoRoot)} archive --format=tar ${JSON.stringify(gitRef)} | tar -xf - -C ${JSON.stringify(snapshotRoot)}`,
   ]);
+  const dirtyOverlay = options.includeDirty
+    ? await overlayDirtyWorktree(repoRoot, snapshotRoot, gitRef, tempDir)
+    : { dirtyTracked: false, copiedUntracked: [] };
   const commitEnv = {
     ...process.env,
     GIT_AUTHOR_NAME: "SpecLens Self Improvement",
@@ -898,7 +968,12 @@ async function createGitArchive(repoRoot, gitRef) {
   };
   await runCommand("git", ["init", "--quiet"], { cwd: snapshotRoot, env: commitEnv });
   await runCommand("git", ["add", "--all"], { cwd: snapshotRoot, env: commitEnv });
-  await runCommand("git", ["commit", "--quiet", "-m", `snapshot ${resolvedRef}`], { cwd: snapshotRoot, env: commitEnv });
+  await runCommand("git", [
+    "commit",
+    "--quiet",
+    "-m",
+    options.includeDirty ? `snapshot ${resolvedRef} with worktree overlay` : `snapshot ${resolvedRef}`,
+  ], { cwd: snapshotRoot, env: commitEnv });
   await runCommand("tar", ["-czf", archivePath, "-C", tempDir, path.basename(snapshotRoot)]);
   return {
     tempDir,
@@ -907,6 +982,8 @@ async function createGitArchive(repoRoot, gitRef) {
     archiveFilename,
     gitRef,
     resolvedRef,
+    includeDirty: Boolean(options.includeDirty),
+    dirtyOverlay,
   };
 }
 
@@ -981,6 +1058,21 @@ function isTerminalStatus(status) {
   return status === "succeeded" || status === "failed" || status === "cancelled";
 }
 
+function isLifecycleWaitStep(step) {
+  return step?.id === "sandbox:wait";
+}
+
+function getPrimaryActiveStep(steps) {
+  const runningSteps = (steps ?? []).filter(step => step.status === "running");
+  if (runningSteps.length === 0) return null;
+  return runningSteps
+    .filter(step => !isLifecycleWaitStep(step))
+    .sort((left, right) => {
+      const stepTypeRank = step => step.stepType === "executor" ? 0 : step.stepType === "role" ? 1 : 2;
+      return stepTypeRank(left) - stepTypeRank(right) || right.order - left.order;
+    })[0] ?? runningSteps[0] ?? null;
+}
+
 function formatLogLine(log) {
   return `[${log.level}] ${log.scope}: ${log.message}`;
 }
@@ -989,21 +1081,35 @@ async function waitForJob(client, jobId, options) {
   const startedAt = Date.now();
   const seenLogIds = new Set();
   let lastStatus = null;
+  let lastProgressAt = 0;
   while (true) {
     const envelope = await client.get(`/api/jobs/${jobId}`, {
-      query: { verbosity: "verbose" },
+      query: { verbosity: "all" },
     });
+    let printedLogCount = 0;
     for (const log of envelope.job.logs ?? []) {
       if (seenLogIds.has(log.id)) {
         continue;
       }
       seenLogIds.add(log.id);
       console.log(formatLogLine(log));
+      printedLogCount += 1;
     }
     const status = envelope.job.job?.status ?? "unknown";
     if (status !== lastStatus) {
       console.log(`job ${jobId} status=${status}`);
       lastStatus = status;
+    }
+    const now = Date.now();
+    if (printedLogCount === 0 && now - lastProgressAt >= 60_000 && !isTerminalStatus(status)) {
+      const activeStep = getPrimaryActiveStep(envelope.job.executionSteps);
+      const elapsedSeconds = Math.round((now - startedAt) / 1000);
+      const logCount = envelope.job.logs?.length ?? 0;
+      console.log(
+        `job ${jobId} still ${status}; elapsed=${elapsedSeconds}s; logs=${logCount}`
+          + (activeStep ? `; active=${activeStep.roleName ?? activeStep.title ?? activeStep.id}` : ""),
+      );
+      lastProgressAt = now;
     }
     if (isTerminalStatus(status)) {
       return envelope.job;
@@ -1225,6 +1331,8 @@ function buildSelfImprovementAnalysis(evidence) {
     recommendations.push("No hard tooling blocker was detected; use slow role timings for the next speed pass.");
   }
   return {
+    jobId: evidence.envelope.job?.id ?? null,
+    reportId: evidence.report?.id ?? evidence.envelope.report?.id ?? null,
     status: evidence.envelope.job?.status ?? null,
     runDurationMs,
     qualityScore: qualityScorecard?.overallScore ?? null,
@@ -1351,6 +1459,7 @@ async function runAnalyze(args) {
   const workspaceName = readStringArg(args, "workspace-name", DEFAULT_WORKSPACE_NAME);
   const workspaceDescription = readStringArg(args, "workspace-description", DEFAULT_WORKSPACE_DESCRIPTION);
   const gitRef = readStringArg(args, "ref", "HEAD");
+  const includeDirty = readBooleanArg(args, "include-dirty", false);
   const codexScope = readCodexScopeArg(args, "codex-scope", DEFAULT_CODEX_SCOPE);
   const profile = readAnalyzeProfile(args);
   const agentId = readStringArg(args, "agent-id", profile.agentId);
@@ -1368,11 +1477,12 @@ async function runAnalyze(args) {
   console.log(`profile=${profile.name}`);
   console.log(`agent=${agentId}`);
   console.log(`sandbox_preflight=${sandboxPreflight.status}`);
+  console.log(`include_dirty=${includeDirty}`);
 
   const ensuredWorkspace = await ensureWorkspace(client, workspaceName, workspaceDescription);
   const workspace = await ensureProWorkspace(client, ensuredWorkspace, mergedEnv, runtime.apiUrl);
   const auth = await ensureScopedCodexAuth(client, codexScope, workspace.id);
-  const archive = await createGitArchive(repoRoot, gitRef);
+  const archive = await createGitArchive(repoRoot, gitRef, { includeDirty });
   const source = await uploadArchiveSource(client, workspace.id, archive.archivePath, archive.archiveFilename);
   const queuedEnvelope = await queueAnalysis(client, workspace.id, {
     sourceId: source.id,
@@ -1402,6 +1512,8 @@ async function runAnalyze(args) {
       gitRef: archive.gitRef,
       resolvedRef: archive.resolvedRef,
       archiveFilename: archive.archiveFilename,
+      includeDirty: archive.includeDirty,
+      dirtyOverlay: archive.dirtyOverlay,
     },
     source,
     job: queuedEnvelope.job,

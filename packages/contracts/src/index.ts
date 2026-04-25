@@ -785,6 +785,11 @@ export const createAgentJobInputSchema = z.object({
 });
 export type CreateAgentJobInput = z.infer<typeof createAgentJobInputSchema>;
 
+export const adminRunAgentInputSchema = createAgentJobInputSchema.extend({
+  workspaceId: z.string().min(1),
+});
+export type AdminRunAgentInput = z.infer<typeof adminRunAgentInputSchema>;
+
 export const queueAnalysisTaskInputSchema = createAgentJobInputSchema.extend({
   agentId: z.string(),
 });

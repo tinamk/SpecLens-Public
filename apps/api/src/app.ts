@@ -56,6 +56,11 @@ function computeCsrfToken(sessionValue: string): string {
   return buildPortalCsrfToken(sessionValue, resolvePortalAuthEnv());
 }
 
+function hasBearerAuthorizationHeader(value: string | string[] | undefined): boolean {
+  const header = Array.isArray(value) ? value[0] : value;
+  return Boolean(header?.match(/^Bearer\s+\S+/i));
+}
+
 function normalizeOrigin(value: string): string | null {
   try {
     return new URL(value).origin;
@@ -183,7 +188,7 @@ async function createApiApp() {
       done();
       return;
     }
-    const hasBearer = Boolean(request.headers.authorization);
+    const hasBearer = hasBearerAuthorizationHeader(request.headers.authorization);
     if (hasBearer) {
       done();
       return;
@@ -239,7 +244,7 @@ async function createApiApp() {
       }));
     }
     const durationMs = Math.max(0, Date.now() - request.requestStart);
-    const route = request.routeOptions?.url ?? request.raw.url ?? "unknown";
+    const route = request.routeOptions?.url ?? "unmatched";
     recordHttpRequest(request.method, route, reply.statusCode, durationMs);
     done();
   });
@@ -250,8 +255,23 @@ async function createApiApp() {
     await stopQueueBoss();
     await disconnectDatabase();
   });
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const message = error instanceof Error ? error.message : "Unknown server error";
+    const logServerError = (statusCode: number) => {
+      if (statusCode < 500) {
+        return;
+      }
+      console.error(JSON.stringify({
+        level: "error",
+        scope: "api",
+        requestId: request.requestId,
+        method: request.method,
+        url: request.raw.url,
+        statusCode,
+        error: message,
+        stack: error instanceof Error ? error.stack : undefined,
+      }));
+    };
     if (error instanceof ZodError) {
       reply.status(400).send({
         error: "validation_error",
@@ -260,21 +280,17 @@ async function createApiApp() {
       return;
     }
     if (typeof (error as { statusCode?: unknown }).statusCode === "number") {
-      reply.status((error as { statusCode: number }).statusCode).send({ error: message });
+      const statusCode = (error as { statusCode: number }).statusCode;
+      logServerError(statusCode);
+      reply.status(statusCode).send({
+        error: statusCode >= 500 && statusCode !== 503 ? "Internal server error." : message,
+      });
       return;
     }
-    const lowerMessage = message.toLowerCase();
-    if (lowerMessage.includes("not found")) {
-      reply.status(404).send({ error: message });
-      return;
-    }
-    if (lowerMessage.includes("required") || lowerMessage.includes("forbidden") || lowerMessage.includes("entitlement")) {
-      reply.status(403).send({ error: message });
-      return;
-    }
-    reply.status(500).send({ error: message });
+    logServerError(500);
+    reply.status(500).send({ error: "Internal server error." });
   });
-  app.get("/ready", async (_request, reply) => {
+  app.get("/ready", async (request, reply) => {
     try {
       await checkDatabaseHealth();
       await checkQueueHealth();
@@ -295,9 +311,16 @@ async function createApiApp() {
         storage: storageResult,
       });
     } catch (error) {
+      console.warn(JSON.stringify({
+        level: "warn",
+        scope: "api.ready",
+        error: error instanceof Error ? error.message : String(error),
+        requestId: request.requestId,
+      }));
       reply.status(503).send({
         ok: false,
-        error: error instanceof Error ? error.message : "Readiness check failed.",
+        error: "Readiness check failed.",
+        requestId: request.requestId,
       });
     }
   });
@@ -322,26 +345,30 @@ async function createApiApp() {
 }
 
 function startRetentionLoop(config: ReturnType<typeof loadApiConfig>): NodeJS.Timeout | null {
-  const rawDays = Number(process.env.WORKSPACE_RETENTION_DAYS ?? "");
-  if (!Number.isFinite(rawDays) || rawDays <= 0) {
+  const retentionDays = config.workspaceRetentionDays;
+  if (retentionDays === null) {
     return null;
   }
   const run = async () => {
-    const cutoff = new Date(Date.now() - rawDays * 24 * 60 * 60 * 1000);
-    const result = await purgeRetention({
-      objectStorageProvider: config.objectStorageProvider,
-      objectStorageBucket: config.objectStorageBucket,
-      objectStorageEndpoint: config.objectStorageEndpoint,
-      objectStoragePublicEndpoint: config.objectStoragePublicEndpoint,
-      objectStorageRegion: config.objectStorageRegion,
-      objectStorageForcePathStyle: config.objectStorageForcePathStyle,
-      objectStorageAccessKeyId: config.objectStorageAccessKeyId,
-      objectStorageSecretAccessKey: config.objectStorageSecretAccessKey,
-      objectStorageMirror: config.objectStorageMirror,
-      objectStorageMirrorRequired: config.objectStorageMirrorRequired,
-    }, cutoff);
-    if (result.artifacts > 0 || result.logs > 0) {
-      console.log(`[retention] purged ${result.artifacts} artifacts and ${result.logs} logs older than ${cutoff.toISOString()}`);
+    try {
+      const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+      const result = await purgeRetention({
+        objectStorageProvider: config.objectStorageProvider,
+        objectStorageBucket: config.objectStorageBucket,
+        objectStorageEndpoint: config.objectStorageEndpoint,
+        objectStoragePublicEndpoint: config.objectStoragePublicEndpoint,
+        objectStorageRegion: config.objectStorageRegion,
+        objectStorageForcePathStyle: config.objectStorageForcePathStyle,
+        objectStorageAccessKeyId: config.objectStorageAccessKeyId,
+        objectStorageSecretAccessKey: config.objectStorageSecretAccessKey,
+        objectStorageMirror: config.objectStorageMirror,
+        objectStorageMirrorRequired: config.objectStorageMirrorRequired,
+      }, cutoff);
+      if (result.artifacts > 0 || result.logs > 0) {
+        console.log(`[retention] purged ${result.artifacts} artifacts and ${result.logs} logs older than ${cutoff.toISOString()}`);
+      }
+    } catch (error) {
+      console.error("[retention] purge failed:", error);
     }
   };
   void run();

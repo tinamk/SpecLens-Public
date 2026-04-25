@@ -14,6 +14,7 @@ flowchart TD
   Runner[apps/runner]
   AiWorker[apps/ai-worker controller]
   AgentSandbox[agent job sandbox]
+  ResultBundle[(mounted result bundle)]
   Report[(AnalysisReport)]
   Logs[(AnalysisJobLog)]
 
@@ -24,8 +25,9 @@ flowchart TD
   PgBoss --> Runner
   PgBoss --> AiWorker
   AiWorker --> AgentSandbox
+  AgentSandbox --> ResultBundle
+  ResultBundle --> AiWorker
   Runner --> Repo
-  AgentSandbox --> Repo
   Runner --> Logs
   AiWorker --> Logs
   Runner --> Report
@@ -36,8 +38,12 @@ flowchart TD
 
 | Engine | Queue | Worker |
 |---|---|---|
-| `core` | `analysis-jobs` | `apps/runner` |
-| `agent` | `ai-agent-jobs` | `apps/ai-worker` |
+| active hosted AI jobs | `ai-agent-jobs` | `apps/ai-worker` controller plus one-shot sandbox |
+| retained runner-plane compatibility | `analysis-jobs` | `apps/runner` |
+
+The normal hosted product path resolves every audit and remediation job to `executionPath: "unified-agent"`.
+The API dispatch loop therefore publishes active hosted jobs to `ai-agent-jobs`.
+The runner queue and `apps/runner` remain part of the repository because the runner-plane sandbox and image seeding are still validated, but they are not the primary execution owner for normal hosted AI submissions.
 
 ## Lifecycle
 
@@ -68,7 +74,8 @@ Instead it:
 For unified-agent hosted jobs, execution now has controller and sandbox phases:
 
 1. `apps/ai-worker` claims the queued job, resolves the agent plan, stages auth, starts the job sandbox, streams logs, and finalizes durable state.
-2. The one-shot hosted agent sandbox materializes source, runs Codex/native roles, starts runtime processes, runs Playwright/browser checks, writes artifacts, and emits a result bundle.
+2. The one-shot hosted agent sandbox materializes source, runs Codex/native roles, starts runtime processes, runs Playwright/browser checks, writes artifacts, and emits a result bundle under the mounted output root.
+3. The sandbox does not normally read or mutate job state in the database; the controller mirrors the result bundle into logs, reports, and artifact references.
 
 For universal audit bundles, the persisted report also includes:
 

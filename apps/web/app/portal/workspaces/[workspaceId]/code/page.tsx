@@ -83,7 +83,7 @@ export default async function WorkspaceCodePage({
           secondaryNav={buildWorkspaceNav(workspaceId)}
           activeSecondaryNavKey="code"
         >
-          <section className="portal-stat-grid">
+          <section className="portal-stat-grid" aria-label="Workspace code summary">
             <article className="portal-stat" data-testid="workspace-code-stat-sources">
               <span className="portal-stat__label">Sources</span>
               <span className="portal-stat__value">{workspaceConsole.sources.length}</span>
@@ -174,7 +174,7 @@ export default async function WorkspaceCodePage({
         secondaryNav={buildWorkspaceNav(workspaceId)}
         activeSecondaryNavKey="code"
       >
-        <section className="portal-stat-grid">
+        <section className="portal-stat-grid" aria-label="Code review summary">
           <article className="portal-stat" data-testid="workspace-code-stat-refs">
             <span className="portal-stat__label">Refs</span>
             <span className="portal-stat__value">{review.refs.length}</span>
@@ -296,7 +296,28 @@ export default async function WorkspaceCodePage({
                   tone={entry.hasFindings ? "warning" : entry.changed ? "info" : "neutral"}
                 />
               ))}
-              {review.tree.length === 0 ? <p className="subtle-note">No entries found for this ref/path.</p> : null}
+              {review.tree.length === 0 ? (
+                <li className="portal-link-grid__item">
+                  <div className="portal-empty-action">
+                    <p className="subtle-note">No entries found for this ref/path. Clear the path filter or review source verification before retrying.</p>
+                    <div className="portal-inline-actions">
+                      <Link
+                        className="button-secondary"
+                        href={buildCodeHref(workspaceId, {
+                          sourceId: review.source.id,
+                          ref: review.selectedRef,
+                          compare: review.compareRef,
+                          reportId: review.activeReportId,
+                          findingId: review.activeFindingId,
+                        }) as Route}
+                      >
+                        Open ref root
+                      </Link>
+                      <Link className="button-ghost" href={`/portal/workspaces/${workspaceId}/sources` as Route}>Review source</Link>
+                    </div>
+                  </div>
+                </li>
+              ) : null}
             </PortalLinkGrid>
           </article>
 
@@ -336,10 +357,10 @@ export default async function WorkspaceCodePage({
                   <article className="portal-record-card" data-testid={`workspace-code-changeset-${changeset.jobId}`} key={changeset.jobId}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{getChangesetBranchName({
+                        <h3>{getChangesetBranchName({
                           branchName: changeset.branchName,
                           pullInstructions: changeset.pullInstructions,
-                        }) ?? "No branch created"}</strong>
+                        }) ?? "No branch created"}</h3>
                         <p>Run <DataValue value={changeset.jobId} tone="id" /></p>
                       </div>
                       <div className="portal-record-card__meta">
@@ -385,7 +406,7 @@ export default async function WorkspaceCodePage({
                   <article className="portal-record-card" data-testid={`workspace-code-finding-${getFindingDomId(finding.id, index)}`} key={`${finding.id}:${index}`}>
                     <div className="portal-record-card__header">
                       <div className="portal-record-card__title">
-                        <strong>{finding.title}</strong>
+                        <h3>{finding.title}</h3>
                         <p>{finding.message}</p>
                       </div>
                       <div className="portal-record-card__meta">
@@ -425,12 +446,12 @@ export default async function WorkspaceCodePage({
                 <p><strong>Unattributed findings:</strong> {unattributedFindings.length}</p>
                 <div className="portal-record-grid">
                   {unattributedFindings.map((finding, index) => (
-                    <article className="portal-record-card" data-testid={`workspace-code-unattributed-finding-${getFindingDomId(finding.id, index)}`} key={`${finding.id}:${index}`}>
-                      <div className="portal-record-card__header">
-                        <div className="portal-record-card__title">
-                          <strong>{finding.title}</strong>
-                          <p>{finding.message}</p>
-                        </div>
+	                    <article className="portal-record-card" data-testid={`workspace-code-unattributed-finding-${getFindingDomId(finding.id, index)}`} key={`${finding.id}:${index}`}>
+	                      <div className="portal-record-card__header">
+	                        <div className="portal-record-card__title">
+	                          <h3>{finding.title}</h3>
+	                          <p>{finding.message}</p>
+	                        </div>
                         <div className="portal-record-card__meta">
                           <span className={finding.severity === "high" ? "tag tag--danger" : finding.severity === "medium" ? "tag tag--warning" : "tag tag--success"}>
                             {finding.severity}
@@ -501,7 +522,13 @@ export default async function WorkspaceCodePage({
           <PortalNoticePanel
             actions={(
               <>
-                <Link className="button-secondary" href={retryHref as Route}>Retry code review</Link>
+                <Link className="button" href={`/portal/workspaces/${workspaceId}/sources` as Route}>
+                  Review sources
+                </Link>
+                <Link className="button-secondary" href={`/portal/workspaces/${workspaceId}/code` as Route}>
+                  Choose code target
+                </Link>
+                <Link className="button-ghost" href={retryHref as Route}>Retry current target</Link>
                 <Link className="button-ghost" href={`/portal/workspaces/${workspaceId}` as Route}>
                   Back to workspace
                 </Link>
@@ -511,9 +538,9 @@ export default async function WorkspaceCodePage({
             badgeLabel={error.status === 400 || error.status === 404 ? "Unavailable" : "Restricted"}
             description={
               error.status === 400
-                ? error.message
+                ? "The selected source, ref, path, report, finding, or pull-request context could not be opened together. Review source readiness, choose a fresh code target, or retry the current target after the source is verified."
                 : error.status === 404
-                  ? "The requested target is unavailable."
+                  ? "The requested target is unavailable. Review source readiness or choose a fresh code target before retrying."
                   : "You do not have access to this code review surface."
             }
             descriptionTestId="workspace-code-access-denied"
