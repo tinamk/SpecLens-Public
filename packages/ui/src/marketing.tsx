@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Route } from "next";
 import Link from "next/link";
 
 export function BrandLockup({
@@ -7,7 +8,7 @@ export function BrandLockup({
   className = "site-header__brand",
   testId,
 }: {
-  href?: string;
+  href?: Route;
   label?: ReactNode;
   className?: string;
   testId?: string;
