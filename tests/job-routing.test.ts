@@ -8,10 +8,12 @@ import {
   createRemediationJobForUser,
   createSourceForUser,
   createWorkspaceForUser,
+  getCodexTokensForBinding,
   getPrismaClient,
   getJobEnvelopeById,
   getWorkspaceDetailForUser,
   initializeDatabase,
+  setCodexAuthErrorForBinding,
   storeCodexTokens,
   storeUserCodexTokens,
   upsertUserIdentity,
@@ -108,6 +110,34 @@ test("hosted source creation rejects local filesystem paths", async () => {
       /Public Git sources must use an https Git repository URL/i,
     );
 
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test("Codex auth tokens are withheld after an auth record enters error state", async () => {
+  const databaseUrl = await preparePrismaTestDatabase(createTestDatabaseName("jobrouting"));
+  const originalEnv = { ...process.env };
+  process.env.DATABASE_URL = databaseUrl;
+  Object.assign(process.env, { NODE_ENV: "test" });
+  process.env.OBJECT_STORAGE_PROVIDER = "local";
+  process.env.APP_STATE_PATH = path.join(createHomeTempDirSync("speclens-job-routing-codex-error-"), "state.json");
+  process.env.APP_STATE_ENCRYPTION_KEY = "speclens-job-routing-codex-error-secret";
+
+  try {
+    await initializeDatabase();
+    const userId = "user_codex_error";
+    await storeUserCodexTokens(userId, {
+      accessToken: "user.header.payload.signature",
+      refreshToken: "user-refresh-token",
+      idToken: null,
+      accountId: "user-account",
+    });
+    const binding = { scope: "user" as const, recordId: `codex:user:${userId}` };
+
+    assert.equal((await getCodexTokensForBinding(binding))?.accountId, "user-account");
+    await setCodexAuthErrorForBinding(binding, "Codex auth token expired.");
+    assert.equal(await getCodexTokensForBinding(binding), null);
   } finally {
     process.env = originalEnv;
   }

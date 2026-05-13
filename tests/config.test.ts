@@ -51,6 +51,7 @@ test("AI worker config falls back for invalid numeric environment values", async
   process.env.AI_WORKER_ROLE_MAX_CONCURRENCY = "-3";
   process.env.AI_WORKER_SANDBOX_TIMEOUT_MS = "Infinity";
   process.env.AI_WORKER_CODEX_MAX_ATTEMPTS = "NaN";
+  process.env.AI_WORKER_HYBRID_NATIVE_FAST_PATH = "false";
 
   const { loadAiWorkerConfig } = await import("../apps/ai-worker/src/services/config");
   const config = loadAiWorkerConfig();
@@ -59,6 +60,7 @@ test("AI worker config falls back for invalid numeric environment values", async
   assert.equal(config.roleMaxConcurrency, 4);
   assert.equal(config.sandboxTimeoutMs, 3_600_000);
   assert.equal(config.codexMaxAttempts, 3);
+  assert.equal(config.hybridNativeFastPath, false);
 
   process.env = originalEnv;
 });

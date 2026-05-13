@@ -5969,18 +5969,10 @@ async function upsertCodexAuthRecord(
 ): Promise<Prisma.AiAuthGetPayload<Record<string, never>>> {
   const prisma = getPrismaClient();
   const seed = buildCodexAuthRecordSeed(target);
-  const existing = await prisma.aiAuth.findUnique({
+  return prisma.aiAuth.upsert({
     where: { id: seed.id },
-    select: { id: true },
-  });
-  if (existing) {
-    return prisma.aiAuth.update({
-      where: { id: seed.id },
-      data,
-    });
-  }
-  return prisma.aiAuth.create({
-    data: {
+    update: data,
+    create: {
       ...(data as Prisma.AiAuthUncheckedCreateInput),
       ...seed,
     },
@@ -6049,6 +6041,9 @@ async function getCodexTokensForTarget(
 } | null> {
   const record = await getCodexAuthRecordForTarget(target);
   if (record?.disabled) {
+    return null;
+  }
+  if (record && record.status !== "ready") {
     return null;
   }
 
@@ -6406,6 +6401,20 @@ export async function storeCodexTokensForBinding(
     return storeCodexTokens(payload);
   }
   return storeCodexTokensForTarget(target, payload);
+}
+
+export async function setCodexAuthErrorForBinding(
+  binding: PersistedCodexAuthBinding | null,
+  message: unknown,
+): Promise<CodexAuthStatus> {
+  if (!binding) {
+    return setCodexAuthErrorForTarget({ scope: "global" }, message);
+  }
+  const target = parseCodexAuthBinding(binding.recordId);
+  if (!target) {
+    return setCodexAuthErrorForTarget({ scope: "global" }, message);
+  }
+  return setCodexAuthErrorForTarget(target, message);
 }
 
 async function importCodexTokensFromLocalAuthFileForTarget(target: CodexAuthScopeTarget): Promise<CodexAuthStatus> {

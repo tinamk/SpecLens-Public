@@ -65,6 +65,13 @@ interface BrowserInteractionRecord {
   error: string | null;
 }
 
+interface BrowserStorageStateSummary {
+  cookieCount: number;
+  originCount: number;
+  localStorageEntryCount: number;
+  indexedDbOriginCount: number;
+}
+
 export interface BrowserAnalysisResult {
   findings: AnalysisFinding[];
   sections: AnalysisReportSection[];
@@ -416,15 +423,46 @@ function chooseCredentialSecret(secrets: BrowserSecretInput[]): { username: stri
   }
 }
 
+function summarizePlaywrightStorageState(value: unknown): BrowserStorageStateSummary {
+  const record = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as { cookies?: unknown; origins?: unknown }
+    : null;
+  const cookies = Array.isArray(record?.cookies) ? record.cookies : [];
+  const origins = Array.isArray(record?.origins) ? record.origins : [];
+  let localStorageEntryCount = 0;
+  let indexedDbOriginCount = 0;
+
+  for (const origin of origins) {
+    if (typeof origin !== "object" || origin === null || Array.isArray(origin)) {
+      continue;
+    }
+    const originRecord = origin as { localStorage?: unknown; indexedDB?: unknown };
+    if (Array.isArray(originRecord.localStorage)) {
+      localStorageEntryCount += originRecord.localStorage.length;
+    }
+    if (Array.isArray(originRecord.indexedDB) && originRecord.indexedDB.length > 0) {
+      indexedDbOriginCount += 1;
+    }
+  }
+
+  return {
+    cookieCount: cookies.length,
+    originCount: origins.length,
+    localStorageEntryCount,
+    indexedDbOriginCount,
+  };
+}
+
 async function resolvePlaywrightContextOptions(
   context: BrowserAnalysisContext,
-  artifactsDir: string,
 ): Promise<{ storageState?: string }> {
   const sessionState = context.secrets.find(secret => secret.kind === "session-state");
   if (!sessionState) {
     return {};
   }
-  const storageStatePath = path.join(artifactsDir, "playwright-storage-state.json");
+  const storageStateDir = path.join(context.workspace.cacheDir, "browser-auth", context.jobId);
+  ensureDir(storageStateDir);
+  const storageStatePath = path.join(storageStateDir, "playwright-storage-state.json");
   writeTextFile(storageStatePath, sessionState.value);
   return {
     storageState: storageStatePath,
@@ -727,14 +765,13 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
     const browser = await chromium.launch({
       headless: true,
     });
-    const contextOptions = await resolvePlaywrightContextOptions(context, artifactsDir);
+    const contextOptions = await resolvePlaywrightContextOptions(context);
     const browserContext = await browser.newContext({
       viewport: { width: 1440, height: 960 },
       ignoreHTTPSErrors: true,
       ...contextOptions,
     });
     const tracePath = path.join(artifactsDir, "browser-trace.zip");
-    await browserContext.tracing.start({ screenshots: true, snapshots: true });
     const page = await browserContext.newPage();
     const credentials = chooseCredentialSecret(context.secrets);
     const authenticated = await attemptCredentialLogin(page, runtimeContract.baseUrl, credentials);
@@ -743,8 +780,17 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
     } else if (credentials) {
       logs.push(createLog(context.jobId, "auth", "Credential-backed login did not complete; continuing with anonymous coverage.", "warn"));
     }
-    const capturedStorageStatePath = path.join(artifactsDir, "captured-storage-state.json");
-    await browserContext.storageState({ path: capturedStorageStatePath }).catch(() => undefined);
+    const capturedStorageStateSummary = summarizePlaywrightStorageState(
+      await browserContext.storageState().catch(() => null),
+    );
+    const authSummaryPath = path.join(artifactsDir, "browser-auth-summary.json");
+    writeTextFile(authSummaryPath, JSON.stringify({
+      schemaVersion: "speclens.browser-auth-summary.v1",
+      jobId: context.jobId,
+      authenticated,
+      capturedStorageStateSummary,
+    }, null, 2));
+    await browserContext.tracing.start({ screenshots: true, snapshots: true });
 
     const pages: BrowserPageRecord[] = [];
     const interactions: BrowserInteractionRecord[] = [];
@@ -1003,7 +1049,8 @@ export async function analyzeBrowserRoles(context: BrowserAnalysisContext): Prom
           scriptName: runtimeContract.scriptName,
           authenticated,
           tracePath: toRelativeArtifact(context.workspace, tracePath),
-          capturedStorageStatePath: toRelativeArtifact(context.workspace, capturedStorageStatePath),
+          authSummaryPath: toRelativeArtifact(context.workspace, authSummaryPath),
+          capturedStorageStateSummary,
           pages,
         },
       ));

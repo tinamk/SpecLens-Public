@@ -166,6 +166,9 @@ function detectArtifactKind(filePath: string): ArtifactReference["kind"] {
   if (baseName.endsWith("trace.zip")) {
     return "trace";
   }
+  if (baseName === "browser-auth-coverage.json" || baseName === "browser-auth-summary.json") {
+    return "auth-coverage";
+  }
   if (baseName.includes("storage-state") && baseName.endsWith(".json")) {
     return "storage-state";
   }
@@ -210,6 +213,14 @@ function collectFiles(rootDir: string): string[] {
     }
   }
   return results.sort();
+}
+
+function isSensitiveArtifactPath(filePath: string): boolean {
+  const baseName = path.basename(filePath).toLowerCase();
+  return baseName === "playwright-storage-state.json"
+    || baseName === "captured-storage-state.json"
+    || baseName === "input-storage-state.json"
+    || (baseName.includes("storage-state") && baseName.endsWith(".json"));
 }
 
 function collectRouteMap(report: AnalysisReport): Array<{ path: string; purpose: string | null; requiresAuth: boolean | null; source: string | null }> {
@@ -280,6 +291,7 @@ function buildArtifactReferences(workspace: WorkspaceHandle, jobId: string, runD
 
   return artifactFiles
     .filter(filePath => fs.existsSync(filePath))
+    .filter(filePath => !isSensitiveArtifactPath(filePath))
     .map(filePath => ({
       key: relativePosix(workspace.rootDir, filePath),
       bucket: "local-workspace",

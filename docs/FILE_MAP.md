@@ -49,6 +49,7 @@ This map reflects the Iteration 5 hosted SaaS + behavioral parity layout.
 | `docs/issues/behavioral-parity-migration.md` | Active parity migration tracker |
 | `docs/adr/ADR-0005-behavioral-parity-on-hosted-typescript-architecture.md` | Iteration 5 architecture ADR |
 | `docs/thesis/ITERATIONS-001-005-thesis-foundation.md` | Cross-iteration thesis foundation document covering Iterations 1-5 |
+| `docs/thesis/ITERATIONS-001-005-thesis-update-2026-04-28.md` | Updated thesis overview covering post-foundation Iteration 5 hardening and dogfooding additions |
 | `docs/ops/production-readiness.md` | Production readiness checklist and operator expectations |
 | `docs/ops/incident-runbooks.md` | Incident response runbooks for hosted operations |
 | `docs/ops/production-smoke-checklist.md` | Go-live smoke checklist for hosted deployments |

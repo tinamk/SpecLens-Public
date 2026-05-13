@@ -2978,6 +2978,7 @@ test("hosted API exposes artifacts and supports Git repository archive upload fo
   });
   const analysisPayload = analysisResponse.json() as { job: { job: { id: string } } };
   const completedPayload = await waitForJob(app, analysisPayload.job.job.id);
+  assert.equal(completedPayload.job.job.status, "succeeded");
   assert.equal(completedPayload.job.job.executionPath, "unified-agent");
   assert.ok(completedPayload.job.report);
 

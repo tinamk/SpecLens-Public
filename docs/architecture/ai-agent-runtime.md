@@ -63,7 +63,7 @@ Each agent run:
 9. executes each role in order inside the sandbox
 10. validates the `Standardized JSON handoff` emitted by the universal audit agent
 11. executes documented install/start/browser steps from that handoff when they are concrete enough
-12. captures runtime logs, browser screenshots, storage state, traces, and any copied Playwright artifacts inside the sandbox output root
+12. captures runtime logs, browser screenshots, `auth-coverage` redacted auth summaries, traces, and any copied Playwright artifacts inside the sandbox output root
 13. normalizes role output plus execution evidence into sections/findings, execution coverage, remediation packs, artifact audits, and a release gate
 14. writes a structured sandbox result bundle
 15. has the controller persist the final report, changeset, artifacts, diagnostics, and learnables

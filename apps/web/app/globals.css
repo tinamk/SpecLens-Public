@@ -3921,6 +3921,23 @@
     margin: 0;
   }
 
+  .report-browser-evidence {
+    display: grid;
+    gap: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0.9rem;
+    background: var(--surface-muted);
+  }
+
+  .report-browser-evidence .report-coverage-grid > div {
+    background: var(--surface-strong);
+  }
+
+  .report-browser-evidence p {
+    margin: 0;
+  }
+
   .report-data-digest__row {
     display: grid;
     grid-template-columns: minmax(7rem, 0.45fr) minmax(0, 1fr);

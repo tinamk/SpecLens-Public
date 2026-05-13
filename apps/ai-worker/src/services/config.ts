@@ -27,6 +27,7 @@ export interface AiWorkerConfig {
   codexUseOutputSchema: boolean;
   codexStreamLogs: boolean;
   codexBypassSandbox: boolean;
+  hybridNativeFastPath: boolean;
   promptCapturePath: string | null;
 }
 
@@ -69,6 +70,7 @@ export function loadAiWorkerConfig(): AiWorkerConfig {
     codexUseOutputSchema: process.env.AI_WORKER_CODEX_USE_OUTPUT_SCHEMA === "true",
     codexStreamLogs: process.env.AI_WORKER_CODEX_STREAM_LOGS === "true",
     codexBypassSandbox,
+    hybridNativeFastPath: process.env.AI_WORKER_HYBRID_NATIVE_FAST_PATH !== "false",
     promptCapturePath: process.env.AI_WORKER_PROMPT_CAPTURE_PATH?.trim() || null,
   };
 }

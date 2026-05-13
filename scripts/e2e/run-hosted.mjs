@@ -92,7 +92,7 @@ async function waitForHttp(url, timeoutMs = 180000) {
   for (;;) {
     try {
       const response = await fetch(url, { cache: "no-store" });
-      if (response.ok || response.status < 500) {
+      if (response.ok) {
         return;
       }
     } catch {

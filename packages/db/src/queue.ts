@@ -149,12 +149,16 @@ export async function workRunnerJobs(
 ): Promise<PgBoss> {
   const boss = await getQueueBoss();
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
-  await boss.work(getRunnerQueueName(), { batchSize }, async jobs => {
-    await Promise.all(jobs.map(async job => {
-      const payload = runnerJobPayloadSchema.parse(job.data);
-      await handler(payload, String(job.id));
-    }));
-  });
+  // pg-boss waits for a worker callback to finish before fetching again, so
+  // long-running jobs need separate workers for real queue concurrency.
+  for (let workerIndex = 0; workerIndex < batchSize; workerIndex += 1) {
+    await boss.work(getRunnerQueueName(), { batchSize: 1 }, async jobs => {
+      await Promise.all(jobs.map(async job => {
+        const payload = runnerJobPayloadSchema.parse(job.data);
+        await handler(payload, String(job.id));
+      }));
+    });
+  }
   return boss;
 }
 
@@ -164,12 +168,16 @@ export async function workAgentJobs(
 ): Promise<PgBoss> {
   const boss = await getQueueBoss();
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? 1));
-  await boss.work(getAgentQueueName(), { batchSize }, async jobs => {
-    await Promise.all(jobs.map(async job => {
-      const payload = agentJobPayloadSchema.parse(job.data);
-      await handler(payload, String(job.id));
-    }));
-  });
+  // pg-boss waits for a worker callback to finish before fetching again, so
+  // long-running jobs need separate workers for real queue concurrency.
+  for (let workerIndex = 0; workerIndex < batchSize; workerIndex += 1) {
+    await boss.work(getAgentQueueName(), { batchSize: 1 }, async jobs => {
+      await Promise.all(jobs.map(async job => {
+        const payload = agentJobPayloadSchema.parse(job.data);
+        await handler(payload, String(job.id));
+      }));
+    });
+  }
   return boss;
 }
 

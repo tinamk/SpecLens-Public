@@ -255,6 +255,19 @@ type ReportDiagnosticView = {
   tone: "danger" | "info" | "neutral" | "success" | "warning";
 };
 
+type BrowserQaEvidenceView = {
+  authLabel: string;
+  blockedReason: string | null;
+  confidence: string;
+  interactionCount: number;
+  method: string;
+  pageCount: number;
+  protectedRouteCount: number;
+  queuedProtectedRouteCount: number;
+  skippedProtectedRouteCount: number;
+  tagClass: string;
+};
+
 const severityRank: Record<AnalysisFinding["severity"], number> = {
   high: 0,
   medium: 1,
@@ -407,6 +420,99 @@ function summarizeDataValue(value: unknown): ReactNode {
   return typeof value === "string" ? <DataValue value={value} /> : formatPrimitiveValue(value);
 }
 
+function getRecordString(record: Record<string, unknown> | null, key: string): string | null {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function getRecordBoolean(record: Record<string, unknown> | null, key: string): boolean | null {
+  const value = record?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function getRecordCount(record: Record<string, unknown> | null, key: string): number {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+function buildBrowserQaEvidenceView(section: AnalysisReportSection): BrowserQaEvidenceView | null {
+  if (section.title !== "Browser QA execution") {
+    return null;
+  }
+
+  const authCoverage = isRecord(section.data.authCoverage) ? section.data.authCoverage : null;
+  const pageCount = Array.isArray(section.data.pages) ? section.data.pages.length : 0;
+  const interactionCount = Array.isArray(section.data.interactions) ? section.data.interactions.length : 0;
+  const authenticated = getRecordBoolean(authCoverage, "authenticated") ?? getRecordBoolean(section.data, "authenticated") ?? false;
+  const protectedRouteCount = getRecordCount(authCoverage, "protectedRouteCount");
+  const queuedProtectedRouteCount = getRecordCount(authCoverage, "queuedProtectedRouteCount");
+  const skippedProtectedRouteCount = getRecordCount(authCoverage, "skippedProtectedRouteCount");
+  const method = getRecordString(authCoverage, "method") ?? (authenticated ? "browser-state" : "none");
+  const confidence = getRecordString(authCoverage, "confidence") ?? (authenticated ? "medium" : "low");
+  const blockedReason = getRecordString(authCoverage, "blockedReason");
+  const authLabel = authenticated
+    ? "Authenticated"
+    : protectedRouteCount > 0
+      ? "Auth blocked"
+      : "Anonymous";
+
+  return {
+    authLabel,
+    blockedReason,
+    confidence,
+    interactionCount,
+    method,
+    pageCount,
+    protectedRouteCount,
+    queuedProtectedRouteCount,
+    skippedProtectedRouteCount,
+    tagClass: authenticated ? "tag tag--success" : protectedRouteCount > 0 ? "tag tag--warning" : "tag tag--neutral",
+  };
+}
+
+function renderBrowserQaEvidence(section: AnalysisReportSection): ReactNode {
+  const evidence = buildBrowserQaEvidenceView(section);
+  if (!evidence) {
+    return null;
+  }
+
+  const protectedMetric = evidence.protectedRouteCount > 0
+    ? `${evidence.queuedProtectedRouteCount}/${evidence.protectedRouteCount}`
+    : "none";
+
+  return (
+    <div className="report-browser-evidence" data-testid={`report-browser-auth-coverage-${section.id}`}>
+      <div className="report-coverage-grid">
+        <div>
+          <span className="report-summary-card__label">Auth state</span>
+          <strong>{evidence.authLabel}</strong>
+          <span className={evidence.tagClass}>{evidence.method}</span>
+        </div>
+        <div>
+          <span className="report-summary-card__label">Protected targets</span>
+          <strong>{protectedMetric}</strong>
+          <span className={evidence.skippedProtectedRouteCount > 0 ? "tag tag--warning" : "tag tag--success"}>
+            {evidence.skippedProtectedRouteCount} skipped
+          </span>
+        </div>
+        <div>
+          <span className="report-summary-card__label">Pages</span>
+          <strong>{evidence.pageCount}</strong>
+          <span className="tag tag--neutral">{evidence.interactionCount} interactions</span>
+        </div>
+        <div>
+          <span className="report-summary-card__label">Confidence</span>
+          <strong>{formatKeyLabel(evidence.confidence)}</strong>
+          <span className={getTagTone(evidence.confidence === "high" ? "pass" : evidence.confidence === "medium" ? "warn" : "low")}>browser</span>
+        </div>
+      </div>
+      {evidence.blockedReason ? (
+        <p className="subtle-note" data-testid={`report-browser-auth-blocked-${section.id}`}>{evidence.blockedReason}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function renderStructuredData(section: AnalysisReportSection): ReactNode {
   const entries = Object.entries(section.data);
   if (entries.length === 0) {
@@ -415,6 +521,7 @@ function renderStructuredData(section: AnalysisReportSection): ReactNode {
 
   return (
     <>
+      {renderBrowserQaEvidence(section)}
       <dl className="report-data-digest" data-testid={`report-data-digest-${section.id}`}>
         {entries.slice(0, 6).map(([key, value]) => (
           <div className="report-data-digest__row" key={key}>
@@ -500,7 +607,7 @@ function renderExecutionStep(group: ExecutionStepGroup): ReactNode {
 
 function renderCapabilityGap(gap: CapabilityGap): ReactNode {
   return (
-    <article className="report-gap-row" data-testid={`report-capability-gap-${toStableId(gap.title)}`} key={gap.title}>
+    <article className="report-gap-row" data-testid={`report-capability-gap-${toStableId(gap.id)}`} key={gap.id}>
       <div className="report-gap-row__header">
         <strong>{gap.title}</strong>
         <span className={getTagTone(gap.severity)}>{gap.severity}</span>
@@ -2795,7 +2902,7 @@ export default async function WorkspaceReportPage({
                     <PortalLinkGrid testId="report-remediation-code-grid">
                       {report.summary.changeset.changedFiles.map(file => (
                         <PortalLinkCard
-                          testId={`report-open-code-${toStableId(file)}`}
+                          testId={`report-open-remediation-code-${toStableId(file)}`}
                           href={getWorkspaceReportRemediationCodeHref({
                             workspaceId,
                             sourceId: remediationSourceId,
@@ -2869,7 +2976,7 @@ export default async function WorkspaceReportPage({
           </section>
         </details>
 
-        <details className="report-detail-drawer" data-testid="report-findings-drawer" id="report-findings-detail" open={report.findings.length <= 12}>
+        <details className="report-detail-drawer" data-testid="report-findings-drawer" id="report-findings-detail">
           <summary>
             <span>Full finding list</span>
             <span>{report.findings.length} finding{report.findings.length === 1 ? "" : "s"}</span>
@@ -2880,7 +2987,7 @@ export default async function WorkspaceReportPage({
                 badgeLabel="Findings"
                 badgeClassName={getWorkspaceReportFindingsEmptyStateTagClass(gateStatus)}
                 title="Findings"
-                description="The complete finding list is collapsed by default for large reports. Use the triage board first, then open this drawer when you need every record."
+                description="The complete finding list is collapsed by default. Use the triage board first, then open this drawer when you need every record."
               />
             </article>
             {report.findings.length === 0 ? (

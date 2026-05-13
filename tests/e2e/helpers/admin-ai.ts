@@ -96,7 +96,11 @@ async function deleteNamedForm(
       return;
     }
     await expect(form).toBeVisible();
+    const confirmDelete = page.waitForEvent("dialog").then(async dialog => {
+      await dialog.accept();
+    });
     await form.getByTestId(deleteButtonTestId).click();
+    await confirmDelete;
     try {
       await expect(form).toHaveCount(0, { timeout: 5_000 });
       return;

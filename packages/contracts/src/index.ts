@@ -77,6 +77,7 @@ export const artifactKindSchema = z.enum([
   "screenshot",
   "trace",
   "storage-state",
+  "auth-coverage",
   "runtime-log",
   "playwright-report",
   "test-results",

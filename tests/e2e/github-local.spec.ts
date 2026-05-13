@@ -37,7 +37,7 @@ test.describe.serial("GitHub App private repository integration (local)", () => 
       jobSuccessTimeoutMs: 3 * 60 * 1000,
     });
 
-    await expect(page.getByText(githubLocationPattern(flow.acceptedLocations))).toBeVisible();
+    await expect(page.getByText(githubLocationPattern(flow.acceptedLocations)).first()).toBeVisible();
     await expect(page.getByTestId("workspace-runs-job-task")).toContainText(deterministicE2eTaskLabel);
     const envelope = await fetchHostedJobEnvelope(page, flow.jobId, "default");
     expect(["running", "succeeded"]).toContain(envelope.job.status);

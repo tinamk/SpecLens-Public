@@ -372,6 +372,22 @@ test("core can execute browser parity analysis against a bootable fixture app", 
   assert.ok(browserSection);
   assert.equal(browserSection?.status, "ready");
   assert.equal(Array.isArray((browserSection?.data as { pages?: unknown[] }).pages), true);
+  assert.equal(
+    "capturedStorageStatePath" in (browserSection?.data ?? {}),
+    false,
+    "Browser reports must not expose raw captured storage-state artifact paths.",
+  );
+  assert.equal(typeof (browserSection?.data as { authSummaryPath?: unknown }).authSummaryPath, "string");
+  assert.equal(
+    run.report?.artifacts.some(artifact => artifact.kind === "auth-coverage"),
+    true,
+    "Browser artifacts should classify redacted auth coverage distinctly.",
+  );
+  assert.equal(
+    run.report?.artifacts.some(artifact => artifact.key.includes("storage-state")),
+    false,
+    "Browser artifacts must not persist raw Playwright storage-state JSON.",
+  );
   const interactionSection = run.report?.sections.find(section => section.roleId === "interaction-test");
   assert.ok(interactionSection);
   const visualSection = run.report?.sections.find(section => section.roleId === "visual-inspection");

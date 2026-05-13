@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { pathToFileURL } from "node:url";
 import { localTestUsers } from "./test-users";
 
 type KeycloakUser = {
@@ -29,6 +30,8 @@ type SeedUser = {
   subject?: string;
 };
 
+type EnvRecord = Record<string, string | undefined>;
+
 function trimEnv(name: string, fallback: string): string {
   const value = process.env[name];
   return value && value.trim().length > 0 ? value.trim() : fallback;
@@ -43,6 +46,25 @@ function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+export function firstCommaSeparatedValue(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const first = value.split(",")[0]?.trim();
+  return first && first.length > 0 ? first : null;
+}
+
+function splitCommaSeparatedValues(value: string | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value.split(",").map(item => item.trim()).filter(Boolean);
+}
+
+function optionalFirstEnv(env: EnvRecord, name: string): string | null {
+  return firstCommaSeparatedValue(env[name]);
+}
+
 function resolveHostIpBaseUrl(): string | null {
   const hostIp = resolveOptionalEnv("HOST_IP");
   if (!hostIp) {
@@ -52,12 +74,12 @@ function resolveHostIpBaseUrl(): string | null {
   return `http://${hostIp}:${caddyHttpPort}`;
 }
 
-function deriveAdminBaseUrl(): string {
-  const explicit = process.env.KEYCLOAK_ADMIN_URL;
-  if (explicit && explicit.trim().length > 0) {
-    return explicit.trim().replace(/\/+$/, "");
+export function deriveAdminBaseUrl(env: EnvRecord = process.env): string {
+  const explicit = optionalFirstEnv(env, "KEYCLOAK_ADMIN_URL");
+  if (explicit) {
+    return explicit.replace(/\/+$/, "");
   }
-  const issuer = trimEnv("KEYCLOAK_ISSUER_URL", "http://localhost:8081/realms/speclens");
+  const issuer = optionalFirstEnv(env, "KEYCLOAK_ISSUER_URL") ?? "http://localhost:8081/realms/speclens";
   const url = new URL(issuer);
   url.pathname = url.pathname.replace(/\/realms\/[^/]+\/?$/, "");
   url.search = "";
@@ -65,14 +87,21 @@ function deriveAdminBaseUrl(): string {
   return url.toString().replace(/\/+$/, "");
 }
 
-function realmName(): string {
-  const explicit = process.env.KEYCLOAK_REALM;
+export function realmName(env: EnvRecord = process.env): string {
+  const explicit = env.KEYCLOAK_REALM;
   if (explicit && explicit.trim().length > 0) {
     return explicit.trim();
   }
-  const issuer = trimEnv("KEYCLOAK_ISSUER_URL", "http://localhost:8081/realms/speclens");
-  const match = issuer.match(/\/realms\/([^/]+)/);
-  return match?.[1] ?? "speclens";
+  const issuer = optionalFirstEnv(env, "KEYCLOAK_ISSUER_URL") ?? "http://localhost:8081/realms/speclens";
+  try {
+    const segments = new URL(issuer).pathname.split("/").filter(Boolean);
+    const realmIndex = segments.lastIndexOf("realms");
+    const realm = realmIndex >= 0 ? segments[realmIndex + 1] : null;
+    return realm && realm.length > 0 ? decodeURIComponent(realm) : "speclens";
+  } catch {
+    const match = issuer.match(/\/realms\/([^/?#,]+)/);
+    return match?.[1] ?? "speclens";
+  }
 }
 
 function resolveSeedMode(): "local" | "production" {
@@ -92,7 +121,8 @@ function resolveSeedMode(): "local" | "production" {
   if (!candidate) {
     return "local";
   }
-  return /localhost|127\.0\.0\.1/.test(candidate) ? "local" : "production";
+  const firstCandidate = firstCommaSeparatedValue(candidate) ?? candidate;
+  return /localhost|127\.0\.0\.1/.test(firstCandidate) ? "local" : "production";
 }
 
 function resolveScopedE2eEnv(mode: "local" | "production", label: "OWNER" | "MEMBER" | "OUTSIDER" | "ADMIN", suffix: "USERNAME" | "EMAIL" | "PASSWORD" | "DISPLAY_NAME" | "SUBJECT"): string | null {
@@ -102,6 +132,10 @@ function resolveScopedE2eEnv(mode: "local" | "production", label: "OWNER" | "MEM
     return resolveOptionalEnv(localKey);
   }
   return resolveOptionalEnv(sharedKey) ?? resolveOptionalEnv(localKey);
+}
+
+function subjectField(subject: string | null | undefined): Pick<SeedUser, "subject"> | Record<string, never> {
+  return subject ? { subject } : {};
 }
 
 function resolveSeedUsers(): SeedUser[] {
@@ -134,28 +168,28 @@ function resolveSeedUsers(): SeedUser[] {
         email: resolveEmail(ownerUsername, resolveScopedE2eEnv(mode, "OWNER", "EMAIL")),
         displayName: resolveScopedE2eEnv(mode, "OWNER", "DISPLAY_NAME") ?? "Owner User",
         password: ownerPassword,
-        subject: resolveScopedE2eEnv(mode, "OWNER", "SUBJECT") ?? undefined,
+        ...subjectField(resolveScopedE2eEnv(mode, "OWNER", "SUBJECT")),
       },
       {
         username: memberUsername,
         email: resolveEmail(memberUsername, resolveScopedE2eEnv(mode, "MEMBER", "EMAIL")),
         displayName: resolveScopedE2eEnv(mode, "MEMBER", "DISPLAY_NAME") ?? "Member User",
         password: memberPassword,
-        subject: resolveScopedE2eEnv(mode, "MEMBER", "SUBJECT") ?? undefined,
+        ...subjectField(resolveScopedE2eEnv(mode, "MEMBER", "SUBJECT")),
       },
       {
         username: outsiderUsername,
         email: resolveEmail(outsiderUsername, resolveScopedE2eEnv(mode, "OUTSIDER", "EMAIL")),
         displayName: resolveScopedE2eEnv(mode, "OUTSIDER", "DISPLAY_NAME") ?? "Outsider User",
         password: outsiderPassword,
-        subject: resolveScopedE2eEnv(mode, "OUTSIDER", "SUBJECT") ?? undefined,
+        ...subjectField(resolveScopedE2eEnv(mode, "OUTSIDER", "SUBJECT")),
       },
       {
         username: adminUsername,
         email: resolveEmail(adminUsername, resolveScopedE2eEnv(mode, "ADMIN", "EMAIL")),
         displayName: resolveScopedE2eEnv(mode, "ADMIN", "DISPLAY_NAME") ?? "Admin User",
         password: adminPassword,
-        subject: resolveScopedE2eEnv(mode, "ADMIN", "SUBJECT") ?? undefined,
+        ...subjectField(resolveScopedE2eEnv(mode, "ADMIN", "SUBJECT")),
       },
     ];
   }
@@ -165,7 +199,7 @@ function resolveSeedUsers(): SeedUser[] {
     email: user.email,
     displayName: user.displayName,
     password: user.password,
-    subject: user.subject,
+    ...subjectField(user.subject),
   }));
 }
 
@@ -328,12 +362,12 @@ async function ensurePortalClient(baseUrl: string, realm: string, token: string)
     "http://127.0.0.1:3300",
   ];
   const extraBases = [
-    resolveOptionalEnv("APP_URL"),
-    resolveOptionalEnv("PLAYWRIGHT_BASE_URL"),
-    resolveOptionalEnv("E2E_BASE_URL"),
-    resolveOptionalEnv("KEYCLOAK_BASE_URL"),
-    resolveHostIpBaseUrl(),
-  ].filter(Boolean) as string[];
+    ...splitCommaSeparatedValues(resolveOptionalEnv("APP_URL")),
+    ...splitCommaSeparatedValues(resolveOptionalEnv("PLAYWRIGHT_BASE_URL")),
+    ...splitCommaSeparatedValues(resolveOptionalEnv("E2E_BASE_URL")),
+    ...splitCommaSeparatedValues(resolveOptionalEnv("KEYCLOAK_BASE_URL")),
+    ...splitCommaSeparatedValues(resolveHostIpBaseUrl()),
+  ];
   for (const base of extraBases.map(normalizeBaseUrl)) {
     baseOrigins.push(base);
   }
@@ -442,7 +476,14 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch(error => {
-  console.error("[seed-keycloak-users] failed", error);
-  process.exitCode = 1;
-});
+function isDirectRun(): boolean {
+  const entry = process.argv[1];
+  return Boolean(entry && pathToFileURL(entry).href === import.meta.url);
+}
+
+if (isDirectRun()) {
+  void main().catch(error => {
+    console.error("[seed-keycloak-users] failed", error);
+    process.exitCode = 1;
+  });
+}

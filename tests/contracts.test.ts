@@ -23,6 +23,7 @@ import {
   githubInstallQuerySchema,
   githubWebhookInputSchema,
   learnableSchema,
+  artifactKindSchema,
   licenseEntitlementSchema,
   sourceTypeSchema,
   standardizedAgentHandoffSchema,
@@ -116,6 +117,7 @@ test("contracts reject non-hosted source types during hosted source registration
 
 test("contracts expose runtime modes and workspace secrets", () => {
   assert.equal(analysisRuntimeModeSchema.options.includes("browser"), true);
+  assert.equal(artifactKindSchema.options.includes("auth-coverage"), true);
 
   const secret = createWorkspaceSecretInputSchema.parse({
     name: "Demo credentials",

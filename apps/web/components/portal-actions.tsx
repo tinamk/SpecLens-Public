@@ -195,7 +195,7 @@ function buildPlannedExecutionSteps(options: {
   orderedRoleIds.forEach((roleId, index) => {
     const role = roleDefinitions.get(roleId);
     steps.push({
-      id: roleId,
+      id: `role:${roleId}`,
       order: index + (options.includeMaterializeStage ? 1 : 0),
       title: role?.name ?? roleId,
       stepType: "role",

@@ -43,6 +43,20 @@ function resolveStorageCredentials(config: ObjectStorageConfig):
   return undefined;
 }
 
+function safeObjectKeySegment(segment: string): string {
+  return segment.replace(/[^a-zA-Z0-9._=-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 160) || "artifact";
+}
+
+export function buildArtifactObjectKey(prefix: string, artifactKey: string): string {
+  const normalizedPath = artifactKey
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(segment => segment.length > 0 && segment !== "." && segment !== "..")
+    .map(safeObjectKeySegment)
+    .join("/");
+  return `${prefix.replace(/\/+$/g, "")}/${normalizedPath || safeObjectKeySegment(path.basename(artifactKey))}`;
+}
+
 function createS3Client(config: ObjectStorageConfig, publicEndpoint = false): S3Client | null {
   const endpoint = publicEndpoint ? config.objectStoragePublicEndpoint : config.objectStorageEndpoint;
   if (config.objectStorageProvider === "local" || !config.objectStorageBucket || !endpoint || !config.objectStorageRegion) {
@@ -337,7 +351,7 @@ export async function mirrorArtifactsToObjectStorage(
     }
     artifacts.push(await putObjectFromFile(
       config,
-      `reports/${envelope.job.id}/${path.basename(artifact.key)}`,
+      buildArtifactObjectKey(`reports/${envelope.job.id}`, artifact.key),
       absolutePath,
       artifact.mimeType,
       {

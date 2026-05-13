@@ -20,6 +20,7 @@ SpecLens uses milestone-based Design Science iterations.
 ## Cross-Iteration Synthesis
 
 - `docs/thesis/ITERATIONS-001-005-thesis-foundation.md` consolidates all five iterations into one thesis-oriented narrative covering method, artifact evolution, results, discussion themes, and conclusion claims.
+- `docs/thesis/ITERATIONS-001-005-thesis-update-2026-04-28.md` extends the foundation narrative with the Iteration 5 continuation work around hosted parity hardening, provider portability, agent sandboxing, AI role contracts, artifact diagnostics, UX audit, operations, and dogfooding.
 
 ## Conventions
 

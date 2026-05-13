@@ -28,6 +28,7 @@ import {
 } from "@speclens/core";
 import {
   appendAnalysisJobLogs,
+  buildArtifactObjectKey,
   checkDatabaseHealth,
   checkObjectStorageHealth,
   checkQueueHealth,
@@ -45,6 +46,7 @@ import {
   putObjectFromFile,
   replaceSourceLearnables,
   renderCodexAuthFile,
+  setCodexAuthErrorForBinding,
   storeReportChangeset,
   storeRemediationJobChangeset,
   storeCodexTokensForBinding,
@@ -235,6 +237,55 @@ type BrowserQaInteractionRecord = {
   error: string | null;
 };
 
+type BrowserQaAuthMethod = "none" | "credential-pair" | "session-state";
+
+type BrowserCredentialSecret = {
+  provided: boolean;
+  credentials: { username: string; password: string } | null;
+  error: string | null;
+};
+
+type BrowserSessionStateSecret = {
+  provided: boolean;
+  accepted: boolean;
+  containsState: boolean;
+  value: string | null;
+  error: string | null;
+};
+
+type BrowserQaAuthState = {
+  authenticated: boolean;
+  method: BrowserQaAuthMethod;
+  confidence: "high" | "medium" | "low";
+};
+
+type BrowserQaAuthCoverage = {
+  attempted: boolean;
+  authenticated: boolean;
+  method: BrowserQaAuthMethod;
+  confidence: BrowserQaAuthState["confidence"];
+  secretKinds: string[];
+  sessionStateProvided: boolean;
+  sessionStateAccepted: boolean;
+  sessionStateContainsStorage: boolean;
+  sessionStateError: string | null;
+  credentialPairProvided: boolean;
+  credentialPairAccepted: boolean;
+  credentialPairError: string | null;
+  credentialLoginSucceeded: boolean;
+  protectedRouteCount: number;
+  queuedProtectedRouteCount: number;
+  skippedProtectedRouteCount: number;
+  blockedReason: string | null;
+};
+
+type BrowserStorageStateSummary = {
+  cookieCount: number;
+  originCount: number;
+  localStorageEntryCount: number;
+  indexedDbOriginCount: number;
+};
+
 type NativeExecutionResult = {
   output: RoleOutput;
   logs: AnalysisLogEvent[];
@@ -417,7 +468,7 @@ const roleOutputContracts: Record<string, RoleOutputContract> = {
   },
   "artifact-auditor": {
     expectedSectionTitle: "Artifact expectations",
-    purpose: "Define expected report, screenshot, trace, storage, route-map, and remediation artifacts.",
+    purpose: "Define expected report, screenshot, trace, redacted auth-summary, route-map, and remediation artifacts.",
     requiredDataKeys: ["artifactExpectations"],
     recommendedDataKeys: ["expectedKinds", "requiredArtifacts", "sourcePaths"],
   },
@@ -945,6 +996,77 @@ function applyRoleOutputContract(roleId: string, output: RoleOutput): RoleOutput
   });
 }
 
+function buildRoleOutputJsonSchema(): Record<string, unknown> {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "SpecLensRoleOutput",
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "sections", "findings"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      sections: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["title", "status", "summary", "data"],
+          properties: {
+            id: { type: "string" },
+            title: { type: "string", minLength: 1 },
+            status: { type: "string", enum: ["ready", "planned", "skipped"] },
+            summary: { type: "string", minLength: 1 },
+            data: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["severity", "title", "message", "suggestion", "evidence"],
+          properties: {
+            id: { type: "string" },
+            category: {
+              type: "string",
+              enum: findingCategorySchema.options,
+            },
+            severity: { type: "string", enum: ["high", "medium", "low"] },
+            title: { type: "string", minLength: 1 },
+            message: { type: "string", minLength: 1 },
+            suggestion: { type: "string", minLength: 1 },
+            evidence: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sourceIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+            paths: {
+              type: "array",
+              items: { type: "string" },
+            },
+            remediationPackIds: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function writeRoleOutputJsonSchema(outputSchemaPath: string): void {
+  fs.mkdirSync(path.dirname(outputSchemaPath), { recursive: true });
+  fs.writeFileSync(outputSchemaPath, `${JSON.stringify(buildRoleOutputJsonSchema(), null, 2)}\n`, "utf8");
+}
+
 function writeAgentFailureDiagnostics(options: {
   jobId: string;
   tempDir: string;
@@ -991,7 +1113,7 @@ async function uploadLocalArtifactsToObjectStorage(
     }
     uploaded.push(await putObjectFromFile(
       storageConfig(),
-      `${options.keyPrefix}/${path.basename(artifact.key)}`,
+      buildArtifactObjectKey(options.keyPrefix, artifact.key),
       absolutePath,
       artifact.mimeType,
       {
@@ -1387,6 +1509,21 @@ function firstBoolean(...values: unknown[]): boolean | null {
   return null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function firstNonNegativeInteger(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return Math.floor(value);
+    }
+  }
+  return null;
+}
+
 function normalizeStringArray(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return [];
@@ -1666,7 +1803,7 @@ function normalizeExecutionAttempts(values: unknown): Array<{
 }
 
 function normalizeArtifactExpectations(values: unknown): Array<{
-  kind: "artifact" | "report" | "screenshot" | "trace" | "storage-state" | "runtime-log" | "playwright-report" | "test-results" | "route-map" | "component-inventory" | "remediation-pack" | "patch-bundle" | "git-bundle" | "validation-log" | "changeset-manifest" | "pr-summary";
+  kind: "artifact" | "report" | "screenshot" | "trace" | "storage-state" | "auth-coverage" | "runtime-log" | "playwright-report" | "test-results" | "route-map" | "component-inventory" | "remediation-pack" | "patch-bundle" | "git-bundle" | "validation-log" | "changeset-manifest" | "pr-summary";
   label: string;
   required: boolean;
   source: string | null;
@@ -1685,7 +1822,7 @@ function normalizeArtifactExpectations(values: unknown): Array<{
       return [];
     }
     return [{
-      kind: kind === "report" || kind === "screenshot" || kind === "trace" || kind === "storage-state" || kind === "runtime-log"
+      kind: kind === "report" || kind === "screenshot" || kind === "trace" || kind === "storage-state" || kind === "auth-coverage" || kind === "runtime-log"
         || kind === "playwright-report" || kind === "test-results" || kind === "route-map"
         || kind === "component-inventory" || kind === "remediation-pack" || kind === "patch-bundle"
         || kind === "git-bundle" || kind === "validation-log" || kind === "changeset-manifest" || kind === "pr-summary"
@@ -2083,22 +2220,69 @@ function readRoleOutput(outputPath: string, roleId?: string): RoleOutput {
   return normalizeRoleOutput(parseJsonFromOutput(raw), roleId);
 }
 
-function compactPromptValue(value: unknown, depth = 0): unknown {
+type PromptCompactOptions = {
+  stringLimit: number;
+  arrayLimit: number;
+  objectEntryLimit: number;
+  maxDepth: number;
+};
+
+const defaultPromptCompactOptions: PromptCompactOptions = {
+  stringLimit: 240,
+  arrayLimit: 8,
+  objectEntryLimit: 15,
+  maxDepth: 4,
+};
+
+function isSynthesisRole(roleId?: string): boolean {
+  return roleId === "release-gate-scorer"
+    || roleId === "remediation-planner"
+    || roleId === "e2e-remediation-planner"
+    || roleId === "fix-readiness-emitter"
+    || roleId === "standardized-json-output";
+}
+
+function promptCompactOptionsForRole(roleId?: string): PromptCompactOptions {
+  if (isSynthesisRole(roleId)) {
+    return {
+      stringLimit: 280,
+      arrayLimit: 10,
+      objectEntryLimit: 18,
+      maxDepth: 4,
+    };
+  }
+  return {
+    stringLimit: 200,
+    arrayLimit: 5,
+    objectEntryLimit: 10,
+    maxDepth: 3,
+  };
+}
+
+function compactPromptValue(
+  value: unknown,
+  depth = 0,
+  options: PromptCompactOptions = defaultPromptCompactOptions,
+): unknown {
   if (value === null || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
   if (typeof value === "string") {
-    return value.length <= 240 ? value : `${value.slice(0, 237)}...`;
+    return value.length <= options.stringLimit ? value : `${value.slice(0, Math.max(0, options.stringLimit - 3))}...`;
   }
   if (Array.isArray(value)) {
-    return value.slice(0, 8).map(item => compactPromptValue(item, depth + 1));
+    const limitedItems = value.slice(0, options.arrayLimit).map(item => compactPromptValue(item, depth + 1, options));
+    return value.length > limitedItems.length
+      ? [...limitedItems, { __truncatedItems: value.length - limitedItems.length }]
+      : limitedItems;
   }
   if (typeof value === "object") {
-    if (depth >= 4) {
+    if (depth >= options.maxDepth) {
       return "[truncated]";
     }
     const entries = Object.entries(value as Record<string, unknown>);
-    const limitedEntries = entries.slice(0, 15).map(([key, item]) => [key, compactPromptValue(item, depth + 1)]);
+    const limitedEntries = entries.slice(0, options.objectEntryLimit)
+      .map(([key, item]) => [key, compactPromptValue(item, depth + 1, options)]);
     return {
       ...Object.fromEntries(limitedEntries),
       ...(entries.length > limitedEntries.length
@@ -2109,45 +2293,314 @@ function compactPromptValue(value: unknown, depth = 0): unknown {
   return String(value);
 }
 
-function formatPriorRoleOutputsForPrompt(priorOutputs: PriorRoleOutput[]): string {
+function compactBrowserQaSectionDataForPrompt(
+  data: Record<string, unknown>,
+  compactOptions: PromptCompactOptions,
+): Record<string, unknown> {
+  const pages = Array.isArray(data.pages) ? data.pages : [];
+  const interactions = Array.isArray(data.interactions) ? data.interactions : [];
+  const navigationTargets = Array.isArray(data.navigationTargets) ? data.navigationTargets : [];
+  const skippedNavigationTargets = Array.isArray(data.skippedNavigationTargets) ? data.skippedNavigationTargets : [];
+  const failedInteractionCount = interactions.filter(interaction => {
+    const record = asRecord(interaction);
+    return record?.success === false;
+  }).length;
+  const failedInteractions = interactions.flatMap(interaction => {
+    const record = asRecord(interaction);
+    if (!record || record.success !== false) {
+      return [];
+    }
+    return [{
+      pageUrl: firstString(record.pageUrl),
+      label: firstString(record.label),
+      action: firstString(record.action),
+      error: firstString(record.error),
+      beforeScreenshot: firstString(record.beforeScreenshot),
+      afterScreenshot: firstString(record.afterScreenshot),
+    }];
+  });
+
+  return {
+    baseUrl: firstString(data.baseUrl),
+    authenticated: firstBoolean(data.authenticated),
+    authCoverage: compactPromptValue(data.authCoverage, 0, compactOptions),
+    authCoveragePath: firstString(data.authCoveragePath),
+    tracePath: firstString(data.tracePath),
+    inputStorageStateUsed: firstBoolean(data.inputStorageStateUsed),
+    capturedStorageStateSummary: compactPromptValue(data.capturedStorageStateSummary, 0, compactOptions),
+    pageCount: pages.length,
+    pages: pages.slice(0, compactOptions.arrayLimit).flatMap(page => {
+      const record = asRecord(page);
+      if (!record) {
+        return [];
+      }
+      return [{
+        url: firstString(record.url),
+        finalUrl: firstString(record.finalUrl),
+        status: firstNonNegativeInteger(record.status),
+        title: firstString(record.title),
+        h1: firstString(record.h1),
+        screenshot: firstString(record.screenshot),
+      }];
+    }),
+    interactionCount: interactions.length,
+    failedInteractionCount,
+    failedInteractions: failedInteractions.slice(0, Math.min(4, compactOptions.arrayLimit)),
+    navigationTargetCount: navigationTargets.length,
+    skippedNavigationTargets: skippedNavigationTargets
+      .slice(0, compactOptions.arrayLimit)
+      .map(target => compactPromptValue(target, 0, compactOptions)),
+  };
+}
+
+function summarizeGeneratedArtifactsByKind(artifacts: unknown[]): Record<string, number> {
+  return artifacts.reduce<Record<string, number>>((acc, artifact) => {
+    const record = asRecord(artifact);
+    const kind = firstString(record?.kind) ?? "artifact";
+    acc[kind] = (acc[kind] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
+function compactArtifactSectionDataForPrompt(
+  data: Record<string, unknown>,
+  compactOptions: PromptCompactOptions,
+): Record<string, unknown> {
+  const generatedArtifacts = Array.isArray(data.generatedArtifacts) ? data.generatedArtifacts : [];
+  return {
+    expectedKinds: compactPromptValue(data.expectedKinds, 0, compactOptions),
+    presentGeneratedKinds: compactPromptValue(data.presentGeneratedKinds, 0, compactOptions),
+    missingGeneratedKinds: compactPromptValue(data.missingGeneratedKinds, 0, compactOptions),
+    finalizationDeferredKinds: compactPromptValue(data.finalizationDeferredKinds, 0, compactOptions),
+    generatedArtifactCount: generatedArtifacts.length,
+    generatedArtifactsByKind: summarizeGeneratedArtifactsByKind(generatedArtifacts),
+    generatedArtifacts: generatedArtifacts
+      .slice(0, compactOptions.arrayLimit)
+      .map(artifact => compactPromptValue(artifact, 0, compactOptions)),
+    sourcePaths: normalizeStringArray(data.sourcePaths).slice(0, compactOptions.arrayLimit >= 10 ? 24 : 16),
+    artifactExpectations: Array.isArray(data.artifactExpectations)
+      ? data.artifactExpectations
+        .slice(0, compactOptions.arrayLimit)
+        .map(expectation => compactPromptValue(expectation, 0, compactOptions))
+      : [],
+  };
+}
+
+function compactExecutionSectionDataForPrompt(
+  section: RoleOutput["sections"][number],
+  compactOptions: PromptCompactOptions,
+): unknown {
+  const data = section.data;
+  if (section.title === "Browser QA execution") {
+    return compactBrowserQaSectionDataForPrompt(data, compactOptions);
+  }
+  if (section.title === "Artifact expectations") {
+    return compactArtifactSectionDataForPrompt(data, compactOptions);
+  }
+  if (section.title === "Runtime execution") {
+    const target = asRecord(data.target);
+    return {
+      target: target
+        ? {
+            label: firstString(target.label),
+            workingDirectory: firstString(target.workingDirectory),
+            startCommand: firstString(target.startCommand),
+            baseUrl: firstString(target.baseUrl),
+            healthUrls: compactPromptValue(target.healthUrls, 0, compactOptions),
+          }
+        : compactPromptValue(data.target, 0, compactOptions),
+      readyUrl: firstString(data.readyUrl),
+      runtimeLog: firstString(data.runtimeLog),
+    };
+  }
+  if (section.title === "Playwright preflight" || section.title === "Playwright suite execution") {
+    return {
+      detected: firstBoolean(data.detected),
+      runnable: firstBoolean(data.runnable),
+      passed: firstBoolean(data.passed),
+      suiteStatus: firstString(data.suiteStatus),
+      readiness: firstString(data.readiness),
+      command: compactPromptValue(data.command, 0, compactOptions),
+      workingDirectory: firstString(data.workingDirectory),
+      configPath: firstString(data.configPath),
+      logPath: firstString(data.logPath),
+      exitCode: firstNonNegativeInteger(data.exitCode),
+      timedOut: firstBoolean(data.timedOut),
+    };
+  }
+  return compactPromptValue(data, 0, compactOptions);
+}
+
+function maxPriorOutputRolesForPrompt(roleId?: string): number {
+  if (roleId === "release-gate-scorer" || roleId === "standardized-json-output") {
+    return 8;
+  }
+  if (roleId === "remediation-planner" || roleId === "e2e-remediation-planner" || roleId === "fix-readiness-emitter") {
+    return 7;
+  }
+  return 5;
+}
+
+function maxFindingsForPrompt(roleId?: string): number {
+  if (isSynthesisRole(roleId)) {
+    return 12;
+  }
+  return 5;
+}
+
+function selectFindingsForPrompt(findings: RoleOutput["findings"], roleId?: string): RoleOutput["findings"] {
+  const severityRank = { high: 0, medium: 1, low: 2 } as const;
+  return [...findings]
+    .sort((left, right) => severityRank[left.severity] - severityRank[right.severity] || left.title.localeCompare(right.title))
+    .slice(0, maxFindingsForPrompt(roleId));
+}
+
+function maxSectionsForPrompt(roleId?: string): number {
+  return isSynthesisRole(roleId) ? 10 : 6;
+}
+
+function sectionPromptPriority(title: string): number {
+  switch (title) {
+    case "Runtime execution":
+      return 0;
+    case "Browser QA execution":
+      return 1;
+    case "Playwright suite execution":
+      return 2;
+    case "Playwright preflight":
+      return 3;
+    case "Artifact expectations":
+      return 4;
+    case "Release gate recommendation":
+      return 5;
+    case "Remediation plan":
+    case "E2E remediation plan":
+      return 6;
+    case "Fix readiness handoff":
+      return 7;
+    case "Standardized JSON handoff":
+      return 8;
+    default:
+      return 50;
+  }
+}
+
+function selectSectionsForPrompt(sections: RoleOutput["sections"], roleId?: string): RoleOutput["sections"] {
+  const limit = maxSectionsForPrompt(roleId);
+  if (sections.length <= limit) {
+    return sections;
+  }
+  return sections
+    .map((section, index) => ({ section, index, priority: sectionPromptPriority(section.title) }))
+    .sort((left, right) => left.priority - right.priority || left.index - right.index)
+    .slice(0, limit)
+    .sort((left, right) => left.index - right.index)
+    .map(item => item.section);
+}
+
+function compactRoleOutputForPrompt(output: RoleOutput, targetRoleId?: string): Record<string, unknown> {
+  const compactOptions = promptCompactOptionsForRole(targetRoleId);
+  const selectedSections = selectSectionsForPrompt(output.sections, targetRoleId);
+  const selectedFindings = selectFindingsForPrompt(output.findings, targetRoleId);
+
+  return {
+    summary: compactPromptValue(output.summary, 0, compactOptions),
+    sectionCount: output.sections.length,
+    findingCount: output.findings.length,
+    truncatedSections: Math.max(0, output.sections.length - selectedSections.length),
+    truncatedFindings: Math.max(0, output.findings.length - selectedFindings.length),
+    sections: selectedSections.map(section => ({
+      title: section.title,
+      status: section.status,
+      summary: compactPromptValue(section.summary, 0, compactOptions),
+      data: compactExecutionSectionDataForPrompt(section, compactOptions),
+    })),
+    findings: selectedFindings.map(finding => ({
+      severity: finding.severity,
+      title: finding.title,
+      message: compactPromptValue(finding.message, 0, compactOptions),
+      suggestion: compactPromptValue(finding.suggestion, 0, compactOptions),
+      evidence: compactPromptValue(finding.evidence, 0, compactOptions),
+    })),
+  };
+}
+
+function formatPriorRoleOutputsForPrompt(priorOutputs: PriorRoleOutput[], targetRoleId?: string): string {
   if (priorOutputs.length === 0) {
     return "[]";
   }
 
   return JSON.stringify(
-    priorOutputs.slice(-6).map(item => ({
+    priorOutputs.slice(-maxPriorOutputRolesForPrompt(targetRoleId)).map(item => ({
       roleId: item.roleId,
       roleName: item.roleName,
-      summary: item.output.summary,
-      sections: item.output.sections.map(section => ({
-        title: section.title,
-        status: section.status,
-        summary: section.summary,
-        data: compactPromptValue(section.data),
-      })),
-      findings: item.output.findings.map(finding => ({
-        severity: finding.severity,
-        title: finding.title,
-        message: compactPromptValue(finding.message),
-        suggestion: compactPromptValue(finding.suggestion),
-        evidence: compactPromptValue(finding.evidence),
-      })),
+      ...compactRoleOutputForPrompt(item.output, targetRoleId),
     })),
     null,
     2,
   );
 }
 
-function formatLearnablesForPrompt(learnables: Learnable[]): string {
+function learnableCategoriesForRole(roleId?: string): Learnable["category"][] {
+  if (roleId === "runtime-scout") {
+    return ["runtime", "repo-shape", "ops"];
+  }
+  if (roleId === "dependency-risk-reviewer" || roleId === "source-topology-scout" || roleId === "live-surface-resolver") {
+    return ["repo-shape", "ops", "runtime"];
+  }
+  if (
+    roleId === "architecture-reviewer"
+    || roleId === "code-health-reviewer"
+    || roleId === "component-cartographer"
+    || roleId === "design-system-auditor"
+    || roleId === "copy-consistency-auditor"
+    || roleId === "license-governor"
+  ) {
+    return ["repo-shape", "ops", "runtime"];
+  }
+  if (roleId === "auth-cartographer") {
+    return ["auth", "repo-shape", "runtime", "ops"];
+  }
+  if (
+    roleId === "navigation-qa-planner"
+    || roleId === "browser-executor"
+    || roleId === "playwright-operator"
+    || roleId === "visual-qa-critic"
+    || roleId === "ux-friction-reviewer"
+    || roleId === "accessibility-auditor"
+    || roleId === "cross-surface-consistency-reviewer"
+  ) {
+    return ["playwright", "auth", "runtime", "repo-shape", "ops"];
+  }
+  if (isSynthesisRole(roleId)) {
+    return ["ops", "auth", "playwright", "runtime", "repo-shape"];
+  }
+  return ["repo-shape", "runtime", "ops", "auth", "playwright"];
+}
+
+function selectLearnablesForPrompt(learnables: Learnable[], roleId?: string): Learnable[] {
+  const categories = learnableCategoriesForRole(roleId);
+  const categoryRank = new Map(categories.map((category, index) => [category, index]));
+  const limit = isSynthesisRole(roleId) ? 20 : 14;
+  return [...learnables]
+    .sort((left, right) =>
+      (categoryRank.get(left.category) ?? categories.length) - (categoryRank.get(right.category) ?? categories.length)
+      || left.order - right.order
+      || left.statement.localeCompare(right.statement))
+    .slice(0, limit);
+}
+
+function formatLearnablesForPrompt(learnables: Learnable[], targetRoleId?: string): string {
   if (learnables.length === 0) {
     return "[]";
   }
 
+  const compactOptions = promptCompactOptionsForRole(targetRoleId);
   return JSON.stringify(
-    learnables.slice(0, 20).map(learnable => ({
+    selectLearnablesForPrompt(learnables, targetRoleId).map(learnable => ({
       statement: learnable.statement,
       category: learnable.category,
-      evidence: compactPromptValue(learnable.evidence),
+      evidence: compactPromptValue(learnable.evidence, 0, compactOptions),
     })),
     null,
     2,
@@ -2241,8 +2694,8 @@ function buildRolePrompt(options: {
       return `- ${skill.name}${toolLabel}: ${skill.instructions}`;
     }).join("\n");
   const grantedTools = collectToolCapabilities(options.skills);
-  const priorOutputsBlock = formatPriorRoleOutputsForPrompt(options.priorOutputs);
-  const learnablesBlock = formatLearnablesForPrompt(options.learnables);
+  const priorOutputsBlock = formatPriorRoleOutputsForPrompt(options.priorOutputs, options.roleId);
+  const learnablesBlock = formatLearnablesForPrompt(options.learnables, options.roleId);
   const roleOutputContractBlock = formatRoleOutputContractForPrompt(options.roleId);
   const roleGuardrails = formatRoleExecutionGuardrailsForPrompt(options.roleId);
 
@@ -2266,7 +2719,7 @@ function buildRolePrompt(options: {
     options.nativeExecutorOutput
       ? [
           "Deterministic native executor output for this same role (JSON):",
-          JSON.stringify(options.nativeExecutorOutput, null, 2),
+          JSON.stringify(compactRoleOutputForPrompt(options.nativeExecutorOutput, options.roleId), null, 2),
         ].join("\n")
       : null,
     "Active source learnables (JSON):",
@@ -2583,25 +3036,144 @@ function synthesizeLearnablesFromHandoff(output: ReturnType<typeof standardizedA
   return dedupeLearnables(learnables).slice(0, 24);
 }
 
+function capabilityScopeToLearnableCategory(scope: z.infer<typeof capabilityGapSchema>["scope"]): Learnable["category"] {
+  if (scope === "auth") {
+    return "auth";
+  }
+  if (scope === "runtime") {
+    return "runtime";
+  }
+  if (scope === "browser") {
+    return "playwright";
+  }
+  return "ops";
+}
+
+function collectSkippedProtectedNavigationTargets(section: AnalysisReport["sections"][number]): string[] {
+  if (!Array.isArray(section.data.skippedNavigationTargets)) {
+    return [];
+  }
+
+  return section.data.skippedNavigationTargets.flatMap(target => {
+    const record = asRecord(target);
+    if (!record || firstString(record.reason) !== "protected route requires authenticated browser state") {
+      return [];
+    }
+    const url = firstString(record.url);
+    return url ? [url] : [];
+  });
+}
+
+function synthesizeExecutionLearnablesFromReport(report: AnalysisReport): LearnableSeed[] {
+  const learnables: LearnableSeed[] = [];
+
+  const runtimeSection = report.sections.find(section => section.title === "Runtime execution");
+  if (runtimeSection) {
+    const target = asRecord(runtimeSection.data.target);
+    const label = firstString(target?.label) ?? "runtime target";
+    const readyUrl = firstString(runtimeSection.data.readyUrl, target?.baseUrl);
+    const startCommand = firstString(target?.startCommand);
+    const runtimeLog = firstString(runtimeSection.data.runtimeLog);
+    learnables.push({
+      statement: runtimeSection.status === "ready"
+        ? `Hosted runtime execution succeeded for ${label}${readyUrl ? ` at ${readyUrl}` : ""}.`
+        : `Caution: hosted runtime execution did not become ready for ${label}: ${runtimeSection.summary}`,
+      category: "runtime",
+      evidence: normalizeStringArray([startCommand, readyUrl, runtimeLog]),
+    });
+  }
+
+  const browserSection = report.sections.find(section => section.title === "Browser QA execution");
+  if (browserSection) {
+    const authCoverage = asRecord(browserSection.data.authCoverage);
+    const authenticated = firstBoolean(authCoverage?.authenticated, browserSection.data.authenticated) === true;
+    const method = firstString(authCoverage?.method) ?? (authenticated ? "browser-state" : "none");
+    const protectedRouteCount = firstNonNegativeInteger(authCoverage?.protectedRouteCount) ?? 0;
+    const queuedProtectedRouteCount = firstNonNegativeInteger(authCoverage?.queuedProtectedRouteCount) ?? 0;
+    const skippedProtectedRouteCount = firstNonNegativeInteger(authCoverage?.skippedProtectedRouteCount) ?? 0;
+    const blockedReason = firstString(authCoverage?.blockedReason);
+    const tracePath = firstString(browserSection.data.tracePath);
+    const pageCount = Array.isArray(browserSection.data.pages) ? browserSection.data.pages.length : 0;
+    const interactionCount = Array.isArray(browserSection.data.interactions) ? browserSection.data.interactions.length : 0;
+    const skippedProtectedTargets = collectSkippedProtectedNavigationTargets(browserSection);
+
+    if (pageCount > 0 || interactionCount > 0) {
+      learnables.push({
+        statement: `Direct browser QA navigated ${pageCount} page(s) with ${interactionCount} interaction attempt(s).`,
+        category: "playwright",
+        evidence: normalizeStringArray([tracePath]),
+      });
+    }
+
+    if (authenticated) {
+      const protectedSummary = protectedRouteCount > 0
+        ? ` ${queuedProtectedRouteCount}/${protectedRouteCount} protected target(s) were eligible.`
+        : "";
+      learnables.push({
+        statement: `Browser QA used ${method} authenticated browser state.${protectedSummary}`,
+        category: "auth",
+        evidence: normalizeStringArray([tracePath]),
+      });
+    } else if (protectedRouteCount > 0 && skippedProtectedRouteCount > 0) {
+      learnables.push({
+        statement: `Caution: Browser QA skipped ${skippedProtectedRouteCount}/${protectedRouteCount} protected target(s): ${blockedReason ?? "authenticated browser state was unavailable."}`,
+        category: "auth",
+        evidence: normalizeStringArray([tracePath, ...skippedProtectedTargets]),
+      });
+    }
+  }
+
+  const playwrightSection = report.sections.find(section => section.title === "Playwright suite execution");
+  if (playwrightSection) {
+    const command = asRecord(playwrightSection.data.command);
+    const commandText = firstString(command?.command);
+    const logPath = firstString(playwrightSection.data.logPath);
+    learnables.push({
+      statement: playwrightSection.status === "ready"
+        ? `Repository-native Playwright verification completed successfully${commandText ? ` with ${commandText}` : ""}.`
+        : `Caution: repository-native Playwright verification did not pass: ${playwrightSection.summary}`,
+      category: "playwright",
+      evidence: normalizeStringArray([commandText, logPath]),
+    });
+  }
+
+  for (const gap of report.summary.capabilityGaps.slice(0, 5)) {
+    learnables.push({
+      statement: `Current audit capability gap (${gap.scope}): ${gap.title} - ${gap.summary}`,
+      category: capabilityScopeToLearnableCategory(gap.scope),
+      evidence: gap.evidence,
+    });
+  }
+
+  return dedupeLearnables(learnables);
+}
+
 function synthesizeLearnablesFromReport(report: AnalysisReport): LearnableSeed[] {
   const handoffSection = report.sections.find(section => section.title === "Standardized JSON handoff");
+  const executionLearnables = synthesizeExecutionLearnablesFromReport(report);
   if (handoffSection?.data?.standardizedOutput) {
-    return synthesizeLearnablesFromHandoff(
-      standardizedAgentHandoffSchema.parse(handoffSection.data.standardizedOutput),
-    );
+    return dedupeLearnables([
+      ...executionLearnables,
+      ...synthesizeLearnablesFromHandoff(
+        standardizedAgentHandoffSchema.parse(handoffSection.data.standardizedOutput),
+      ),
+    ]).slice(0, 24);
   }
 
   return dedupeLearnables(
-    report.sections
-      .filter(section => section.status === "ready" && section.summary.trim().length > 0)
-      .slice(0, 12)
-      .map((section, index) => ({
-        statement: `${section.title}: ${section.summary}`,
-        category: index === 0 ? "repo-shape" : "ops",
-        evidence: [],
-        order: index,
-      })),
-  );
+    [
+      ...executionLearnables,
+      ...report.sections
+        .filter(section => section.status === "ready" && section.summary.trim().length > 0)
+        .slice(0, 12)
+        .map((section, index): LearnableSeed => ({
+          statement: `${section.title}: ${section.summary}`,
+          category: index === 0 ? "repo-shape" : "ops",
+          evidence: [],
+          order: index,
+        })),
+    ],
+  ).slice(0, 24);
 }
 
 function resolveAuditBundleId(agentId: string): z.infer<typeof auditBundleIdSchema> {
@@ -2872,6 +3444,7 @@ function hasGeneratedBrowserArtifactEvidence(artifactAnalysis: z.infer<typeof ar
     "playwright-report",
     "screenshot",
     "storage-state",
+    "auth-coverage",
     "test-results",
     "trace",
   ]);
@@ -2916,6 +3489,22 @@ function isSupersededBrowserCoverageGap(
   }
 
   if (
+    (browserQaSucceeded || browserArtifactEvidence)
+    && (
+      normalized.includes("in this role handoff step")
+      || normalized.includes("in this role pass")
+      || normalized.includes("this role step")
+    )
+    && (
+      normalized.includes("no playwright")
+      || normalized.includes("no browser")
+      || normalized.includes("no newly generated browser artifacts")
+    )
+  ) {
+    return true;
+  }
+
+  if (
     browserQaSucceeded
     && (
       normalized.includes("no browser execution")
@@ -2931,14 +3520,62 @@ function isSupersededBrowserCoverageGap(
   return false;
 }
 
+function buildBrowserAuthCapabilityGap(report: AnalysisReport): Omit<z.infer<typeof capabilityGapSchema>, "id"> | null {
+  const section = report.sections.find(candidate => candidate.title === "Browser QA execution");
+  if (!section) {
+    return null;
+  }
+
+  const authCoverage = asRecord(section.data.authCoverage);
+  if (!authCoverage) {
+    return null;
+  }
+
+  const authenticated = firstBoolean(authCoverage.authenticated, section.data.authenticated) === true;
+  const protectedRouteCount = firstNonNegativeInteger(authCoverage.protectedRouteCount) ?? 0;
+  const skippedProtectedRouteCount = firstNonNegativeInteger(authCoverage.skippedProtectedRouteCount) ?? 0;
+  if (authenticated || protectedRouteCount === 0 || skippedProtectedRouteCount === 0) {
+    return null;
+  }
+
+  const method = firstString(authCoverage.method) ?? "none";
+  const blockedReason = firstString(authCoverage.blockedReason)
+    ?? `${skippedProtectedRouteCount} protected browser target(s) were skipped because authenticated browser state was unavailable.`;
+  const skippedUrls = collectSkippedProtectedNavigationTargets(section);
+  const allProtectedRoutesSkipped = skippedProtectedRouteCount >= protectedRouteCount;
+
+  return {
+    scope: "auth",
+    severity: allProtectedRoutesSkipped ? "high" : "medium",
+    title: allProtectedRoutesSkipped ? "Authenticated browser coverage blocked" : "Authenticated browser coverage partial",
+    summary: blockedReason,
+    missingCapabilities: method === "none"
+      ? ["workspace-secret", "authenticated-browser-state"]
+      : ["usable-authenticated-browser-state"],
+    affectedSurfaces: skippedUrls,
+    suggestedActions: [
+      "Attach a valid credential-pair or session-state workspace secret to the browser run and rerun the analysis.",
+      "Prefer a Playwright storage-state secret that contains cookies, local storage, or IndexedDB state for protected portal routes.",
+      "Keep protected routes in the standardized handoff so the release gate can verify authenticated coverage.",
+    ],
+    evidence: normalizeStringArray([
+      blockedReason,
+      `auth method: ${method}`,
+      `protected routes skipped: ${skippedProtectedRouteCount}/${protectedRouteCount}`,
+      ...skippedUrls,
+    ]),
+  };
+}
+
 function buildCapabilityGaps(
   handoff: StandardizedHandoff | null,
   report: AnalysisReport,
   artifactAnalysis: z.infer<typeof artifactAnalysisSchema>,
 ): z.infer<typeof capabilityGapSchema>[] {
   const gaps: z.infer<typeof capabilityGapSchema>[] = [];
+  const capabilitySeverityRank = { high: 0, medium: 1, low: 2 } as const;
   const pushGap = (gap: Omit<z.infer<typeof capabilityGapSchema>, "id">) => {
-    if (gaps.some(existing => existing.title === gap.title && existing.scope === gap.scope)) {
+    if (gaps.some(existing => existing.title === gap.title && existing.scope === gap.scope && existing.summary === gap.summary)) {
       return;
     }
     gaps.push(capabilityGapSchema.parse({
@@ -2946,6 +3583,11 @@ function buildCapabilityGaps(
       ...gap,
     }));
   };
+
+  const browserAuthGap = buildBrowserAuthCapabilityGap(report);
+  if (browserAuthGap) {
+    pushGap(browserAuthGap);
+  }
 
   for (const blocker of handoff?.blockers ?? []) {
     pushGap({
@@ -3058,7 +3700,10 @@ function buildCapabilityGaps(
     });
   }
 
-  return gaps;
+  return gaps.sort((left, right) =>
+    capabilitySeverityRank[left.severity] - capabilitySeverityRank[right.severity]
+    || left.scope.localeCompare(right.scope)
+    || left.title.localeCompare(right.title));
 }
 
 function buildQualityScorecard(
@@ -3433,6 +4078,7 @@ async function runCodexExec(options: {
     args.push("--sandbox", options.sandboxMode);
   }
   if (options.outputSchemaPath) {
+    writeRoleOutputJsonSchema(options.outputSchemaPath);
     args.push("--output-schema", options.outputSchemaPath);
   }
   args.push("--output-last-message", options.outputPath, options.prompt);
@@ -3536,6 +4182,29 @@ function isRetryableCodexFailure(result: CodexRunResult): boolean {
     "econnreset",
     "econnrefused",
   ].some(fragment => combined.includes(fragment));
+}
+
+function isCodexAuthFailure(result: CodexRunResult): boolean {
+  const combined = `${result.stderr}\n${result.stdout}`.toLowerCase();
+  return [
+    "token_expired",
+    "provided authentication token is expired",
+    "failed to refresh token",
+    "access token could not be refreshed",
+    "refresh token has already been used",
+    "please sign in again",
+    "http error: 401 unauthorized",
+  ].some(fragment => combined.includes(fragment));
+}
+
+async function markCodexAuthFailure(execution: JobExecutionRecord, detail: string): Promise<void> {
+  await setCodexAuthErrorForBinding(
+    execution.metadata.codexAuth ?? {
+      scope: "global",
+      recordId: "codex:global",
+    },
+    detail || "Codex auth token expired or could not be refreshed. Reconnect Codex auth before queueing more runs.",
+  );
 }
 
 async function stageCodexAuth(tempDir: string, execution: JobExecutionRecord): Promise<string | null> {
@@ -4023,27 +4692,294 @@ async function gotoBrowserPageWithRetry(
   throw lastError instanceof Error ? lastError : new Error(`Failed to navigate to ${url}.`);
 }
 
-function chooseCredentialSecret(secrets: JobExecutionRecord["secrets"]): { username: string; password: string } | null {
+function listWorkspaceSecretKinds(secrets: JobExecutionRecord["secrets"]): string[] {
+  return [...new Set(secrets.map(secret => secret.kind))].sort();
+}
+
+function resolveCredentialSecret(secrets: JobExecutionRecord["secrets"]): BrowserCredentialSecret {
   const record = secrets.find(secret => secret.kind === "credential-pair");
   if (!record) {
-    return null;
+    return {
+      provided: false,
+      credentials: null,
+      error: null,
+    };
   }
   try {
     const value = JSON.parse(record.value) as { username?: string; password?: string };
     if (!value.username || !value.password) {
-      return null;
+      return {
+        provided: true,
+        credentials: null,
+        error: "Credential-pair workspace secret is missing a username or password.",
+      };
     }
     return {
-      username: value.username,
-      password: value.password,
+      provided: true,
+      credentials: {
+        username: value.username,
+        password: value.password,
+      },
+      error: null,
     };
   } catch {
-    return null;
+    return {
+      provided: true,
+      credentials: null,
+      error: "Credential-pair workspace secret is not valid JSON.",
+    };
   }
 }
 
-function chooseSessionStateSecret(secrets: JobExecutionRecord["secrets"]): string | null {
-  return secrets.find(secret => secret.kind === "session-state")?.value ?? null;
+function resolveSessionStateSecret(secrets: JobExecutionRecord["secrets"]): BrowserSessionStateSecret {
+  const record = secrets.find(secret => secret.kind === "session-state");
+  if (!record) {
+    return {
+      provided: false,
+      accepted: false,
+      containsState: false,
+      value: null,
+      error: null,
+    };
+  }
+
+  const value = record.value.trim();
+  if (!value) {
+    return {
+      provided: true,
+      accepted: false,
+      containsState: false,
+      value: null,
+      error: "Session-state workspace secret is empty.",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(value) as { cookies?: unknown; origins?: unknown };
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {
+        provided: true,
+        accepted: false,
+        containsState: false,
+        value: null,
+        error: "Session-state workspace secret must be a Playwright storage-state object.",
+      };
+    }
+    if (!Array.isArray(parsed.cookies) || !Array.isArray(parsed.origins)) {
+      return {
+        provided: true,
+        accepted: false,
+        containsState: false,
+        value: null,
+        error: "Session-state workspace secret must include Playwright cookies and origins arrays.",
+      };
+    }
+    const containsState = parsed.cookies.length > 0 || parsed.origins.some(origin => {
+      if (typeof origin !== "object" || origin === null || Array.isArray(origin)) {
+        return false;
+      }
+      const candidate = origin as { localStorage?: unknown; indexedDB?: unknown };
+      return (Array.isArray(candidate.localStorage) && candidate.localStorage.length > 0)
+        || (Array.isArray(candidate.indexedDB) && candidate.indexedDB.length > 0);
+    });
+    return {
+      provided: true,
+      accepted: true,
+      containsState,
+      value,
+      error: null,
+    };
+  } catch {
+    return {
+      provided: true,
+      accepted: false,
+      containsState: false,
+      value: null,
+      error: "Session-state workspace secret is not valid JSON.",
+    };
+  }
+}
+
+function resolveBrowserAuthState(options: {
+  sessionState: BrowserSessionStateSecret;
+  credentialSecret: BrowserCredentialSecret;
+  credentialLoginSucceeded: boolean;
+}): BrowserQaAuthState {
+  const sessionStateAuthenticated = options.sessionState.accepted && options.sessionState.containsState;
+  const authenticated = sessionStateAuthenticated || options.credentialLoginSucceeded;
+  if (options.sessionState.accepted) {
+    return {
+      authenticated,
+      method: "session-state",
+      confidence: options.credentialLoginSucceeded ? "high" : sessionStateAuthenticated ? "medium" : "low",
+    };
+  }
+  if (options.credentialSecret.credentials) {
+    return {
+      authenticated,
+      method: "credential-pair",
+      confidence: options.credentialLoginSucceeded ? "high" : "low",
+    };
+  }
+  return {
+    authenticated,
+    method: "none",
+    confidence: "low",
+  };
+}
+
+function summarizePlaywrightStorageState(value: unknown): BrowserStorageStateSummary {
+  const record = asRecord(value);
+  const cookies = Array.isArray(record?.cookies) ? record.cookies : [];
+  const origins = Array.isArray(record?.origins) ? record.origins : [];
+  let localStorageEntryCount = 0;
+  let indexedDbOriginCount = 0;
+
+  for (const origin of origins) {
+    const originRecord = asRecord(origin);
+    if (!originRecord) {
+      continue;
+    }
+    const localStorage = originRecord.localStorage;
+    if (Array.isArray(localStorage)) {
+      localStorageEntryCount += localStorage.length;
+    }
+    const indexedDB = originRecord.indexedDB;
+    if (Array.isArray(indexedDB) && indexedDB.length > 0) {
+      indexedDbOriginCount += 1;
+    }
+  }
+
+  return {
+    cookieCount: cookies.length,
+    originCount: origins.length,
+    localStorageEntryCount,
+    indexedDbOriginCount,
+  };
+}
+
+function collectProtectedBrowserRouteCandidates(
+  handoff: StandardizedHandoff,
+  baseUrl: string,
+): { rawCount: number; normalizedUrls: Set<string> } {
+  const rawCandidates = [
+    ...handoff.auth.frontend.protectedRoutes,
+    ...handoff.playwright.navigationTargets
+      .filter(target => target.requiresAuth)
+      .map(target => target.path),
+  ].map(candidate => candidate.trim()).filter(Boolean);
+  const normalizedUrls = new Set<string>();
+  for (const candidate of rawCandidates) {
+    const normalized = normalizeBrowserQaCandidate(candidate, baseUrl);
+    if (normalized) {
+      normalizedUrls.add(normalized);
+    }
+  }
+  return {
+    rawCount: new Set(rawCandidates).size,
+    normalizedUrls,
+  };
+}
+
+function isProtectedBrowserQaUrl(url: string, protectedPrefixes: string[]): boolean {
+  try {
+    const pathname = decodeURIComponent(new URL(url).pathname);
+    return protectedPrefixes.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  } catch {
+    return false;
+  }
+}
+
+function getBrowserAuthBlockedReason(options: {
+  authState: BrowserQaAuthState;
+  sessionState: BrowserSessionStateSecret;
+  credentialSecret: BrowserCredentialSecret;
+  credentialLoginSucceeded: boolean;
+  protectedRouteCount: number;
+  skippedProtectedRouteCount: number;
+}): string | null {
+  if (
+    options.protectedRouteCount === 0
+    || options.skippedProtectedRouteCount === 0
+    || options.authState.authenticated
+  ) {
+    return null;
+  }
+
+  if (!options.sessionState.provided && !options.credentialSecret.provided) {
+    return "No credential-pair or session-state workspace secret was provided, so protected browser routes were skipped.";
+  }
+
+  const reasons: string[] = [];
+  if (options.sessionState.provided && !options.sessionState.accepted) {
+    reasons.push(options.sessionState.error ?? "Session-state workspace secret could not be used.");
+  }
+  if (options.sessionState.accepted && !options.sessionState.containsState) {
+    reasons.push("Session-state workspace secret did not contain cookies, local storage, or IndexedDB state.");
+  }
+  if (options.credentialSecret.provided && !options.credentialSecret.credentials) {
+    reasons.push(options.credentialSecret.error ?? "Credential-pair workspace secret could not be used.");
+  }
+  if (options.credentialSecret.credentials && !options.credentialLoginSucceeded) {
+    reasons.push("Credential login did not produce authenticated browser state.");
+  }
+
+  return `${reasons.length > 0 ? `${reasons.join(" ")} ` : ""}Protected browser routes were skipped.`;
+}
+
+function buildBrowserAuthCoverage(options: {
+  secrets: JobExecutionRecord["secrets"];
+  handoff: StandardizedHandoff;
+  baseUrl: string;
+  navigationPlan: { queued: string[]; skipped: Array<{ url: string; reason: string }> };
+  protectedPrefixes: string[];
+  sessionState: BrowserSessionStateSecret;
+  credentialSecret: BrowserCredentialSecret;
+  credentialLoginSucceeded: boolean;
+  authState: BrowserQaAuthState;
+}): BrowserQaAuthCoverage {
+  const protectedCandidates = collectProtectedBrowserRouteCandidates(options.handoff, options.baseUrl);
+  const skippedProtectedRouteCount = options.navigationPlan.skipped.filter(target =>
+    target.reason === "protected route requires authenticated browser state").length;
+  const queuedProtectedRouteCount = options.navigationPlan.queued.filter(url =>
+    protectedCandidates.normalizedUrls.has(url) || isProtectedBrowserQaUrl(url, options.protectedPrefixes)).length;
+
+  return {
+    attempted: options.sessionState.provided || options.credentialSecret.provided,
+    authenticated: options.authState.authenticated,
+    method: options.authState.method,
+    confidence: options.authState.confidence,
+    secretKinds: listWorkspaceSecretKinds(options.secrets),
+    sessionStateProvided: options.sessionState.provided,
+    sessionStateAccepted: options.sessionState.accepted,
+    sessionStateContainsStorage: options.sessionState.containsState,
+    sessionStateError: options.sessionState.error,
+    credentialPairProvided: options.credentialSecret.provided,
+    credentialPairAccepted: options.credentialSecret.credentials !== null,
+    credentialPairError: options.credentialSecret.error,
+    credentialLoginSucceeded: options.credentialLoginSucceeded,
+    protectedRouteCount: protectedCandidates.rawCount,
+    queuedProtectedRouteCount,
+    skippedProtectedRouteCount,
+    blockedReason: getBrowserAuthBlockedReason({
+      authState: options.authState,
+      sessionState: options.sessionState,
+      credentialSecret: options.credentialSecret,
+      credentialLoginSucceeded: options.credentialLoginSucceeded,
+      protectedRouteCount: protectedCandidates.rawCount,
+      skippedProtectedRouteCount,
+    }),
+  };
+}
+
+function summarizeBrowserAuthCoverage(authCoverage: BrowserQaAuthCoverage): string {
+  if (authCoverage.protectedRouteCount === 0) {
+    return "No protected browser targets were declared.";
+  }
+  if (authCoverage.authenticated) {
+    return `${authCoverage.queuedProtectedRouteCount} protected target(s) were eligible with ${authCoverage.method} auth material.`;
+  }
+  return authCoverage.blockedReason ?? `${authCoverage.skippedProtectedRouteCount} protected target(s) were skipped because no authenticated browser state was available.`;
 }
 
 function buildExecutionEnv(baseUrl: string | null): Record<string, string> {
@@ -5132,10 +6068,12 @@ async function executeStandardizedHandoff(options: {
     const playwrightModule = await import("@playwright/test");
     const { chromium } = playwrightModule;
     browser = await chromium.launch({ headless: true });
-    const sessionStateValue = chooseSessionStateSecret(options.secrets);
-    const inputStorageStatePath = sessionStateValue ? path.join(artifactsDir, "input-storage-state.json") : null;
-    if (inputStorageStatePath && sessionStateValue) {
-      fs.writeFileSync(inputStorageStatePath, sessionStateValue, "utf8");
+    const sessionState = resolveSessionStateSecret(options.secrets);
+    const privateAuthDir = path.join(options.tempDir, "private", "browser-auth", options.jobId);
+    fs.mkdirSync(privateAuthDir, { recursive: true, mode: 0o700 });
+    const inputStorageStatePath = sessionState.value ? path.join(privateAuthDir, "input-storage-state.json") : null;
+    if (inputStorageStatePath && sessionState.value) {
+      fs.writeFileSync(inputStorageStatePath, sessionState.value, "utf8");
     }
     browserContext = await browser.newContext({
       viewport: { width: 1440, height: 960 },
@@ -5143,22 +6081,48 @@ async function executeStandardizedHandoff(options: {
       ...(inputStorageStatePath ? { storageState: inputStorageStatePath } : {}),
     });
     const tracePath = path.join(artifactsDir, "browser-trace.zip");
-    await browserContext.tracing.start({ screenshots: true, snapshots: true });
     const page = await browserContext.newPage();
-    const credentials = chooseCredentialSecret(options.secrets);
-    const authenticated = await attemptCredentialLogin({
+    const credentialSecret = resolveCredentialSecret(options.secrets);
+    const credentialLoginSucceeded = await attemptCredentialLogin({
       page,
       baseUrl,
       loginRoutes: options.handoff.auth.frontend.loginRoutes,
-      credentials,
+      credentials: credentialSecret.credentials,
     });
-    const capturedStorageStatePath = path.join(artifactsDir, "captured-storage-state.json");
-    await browserContext.storageState({ path: capturedStorageStatePath }).catch(() => undefined);
+    const authState = resolveBrowserAuthState({
+      sessionState,
+      credentialSecret,
+      credentialLoginSucceeded,
+    });
+    const authenticated = authState.authenticated;
+    const capturedStorageStateSummary = summarizePlaywrightStorageState(
+      await browserContext.storageState().catch(() => null),
+    );
 
     const pages: BrowserQaPageRecord[] = [];
     const interactions: BrowserQaInteractionRecord[] = [];
     const protectedPrefixes = buildProtectedRoutePrefixes(options.handoff.auth.frontend.protectedRoutes);
     const navigationPlan = buildNavigationPlan(options.handoff, baseUrl, { authenticated });
+    const authCoverage = buildBrowserAuthCoverage({
+      secrets: options.secrets,
+      handoff: options.handoff,
+      baseUrl,
+      navigationPlan,
+      protectedPrefixes,
+      sessionState,
+      credentialSecret,
+      credentialLoginSucceeded,
+      authState,
+    });
+    const authCoveragePath = path.join(artifactsDir, "browser-auth-coverage.json");
+    fs.writeFileSync(authCoveragePath, `${JSON.stringify({
+      schemaVersion: "speclens.browser-auth-coverage.v1",
+      jobId: options.jobId,
+      authenticated,
+      authCoverage,
+      capturedStorageStateSummary,
+    }, null, 2)}\n`, "utf8");
+    await browserContext.tracing.start({ screenshots: true, snapshots: true });
     const queued = [...navigationPlan.queued];
     const visited = new Set<string>();
 
@@ -5376,13 +6340,15 @@ async function executeStandardizedHandoff(options: {
     sections.push({
       title: "Browser QA execution",
       status: "ready",
-      summary: `${pages.length} page(s) were navigated with ${interactions.length} interaction attempt(s) and ${findings.length} surfaced execution issue(s).`,
+      summary: `${pages.length} page(s) were navigated with ${interactions.length} interaction attempt(s) and ${findings.length} surfaced execution issue(s). ${summarizeBrowserAuthCoverage(authCoverage)}`,
       data: {
         baseUrl,
         authenticated,
+        authCoverage,
+        authCoveragePath: relativeArtifactPath(options.tempDir, authCoveragePath),
+        capturedStorageStateSummary,
+        inputStorageStateUsed: Boolean(inputStorageStatePath),
         tracePath: relativeArtifactPath(options.tempDir, tracePath),
-        inputStorageStatePath: relativeArtifactPath(options.tempDir, inputStorageStatePath),
-        capturedStorageStatePath: relativeArtifactPath(options.tempDir, capturedStorageStatePath),
         pages,
         interactions,
         navigationTargets: navigationPlan.queued,
@@ -5582,10 +6548,10 @@ async function augmentWithPlaywrightPreflight(options: {
           summary: "Playwright preflight timed out before the worker could verify the execution path.",
           data: {
             detected: true,
-            runnable: true,
-            passed: true,
-            suiteStatus: "passed",
-            readiness: "ready",
+            runnable: false,
+            passed: false,
+            suiteStatus: "blocked",
+            readiness: "blocked",
             label: preflightPlan.label,
             command: preflightPlan.command,
             workingDirectory: relativeWorkingDirectory,
@@ -6248,6 +7214,14 @@ function findGeneratedArtifactFiles(rootDir: string): string[] {
   return [...new Set(discovered)].sort();
 }
 
+function isSensitiveGeneratedArtifactFile(filePath: string): boolean {
+  const basename = path.basename(filePath).toLowerCase();
+  return basename === "input-storage-state.json"
+    || basename === "captured-storage-state.json"
+    || basename === "playwright-storage-state.json"
+    || (basename.includes("storage-state") && basename.endsWith(".json"));
+}
+
 function classifyGeneratedArtifact(filePath: string): ArtifactReference["kind"] {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
   const basename = path.basename(normalized);
@@ -6256,6 +7230,9 @@ function classifyGeneratedArtifact(filePath: string): ArtifactReference["kind"] 
   }
   if (basename === "browser-trace.zip" || normalized.endsWith(".trace.zip")) {
     return "trace";
+  }
+  if (basename === "browser-auth-coverage.json" || basename === "browser-auth-summary.json") {
+    return "auth-coverage";
   }
   if (basename.endsWith("storage-state.json")) {
     return "storage-state";
@@ -6280,11 +7257,13 @@ function buildGeneratedArtifactSnapshot(rootDir: string): Array<{
   path: string;
   sizeBytes: number;
 }> {
-  return findGeneratedArtifactFiles(rootDir).map(filePath => ({
-    kind: classifyGeneratedArtifact(filePath),
-    path: relativeArtifactPath(rootDir, filePath) ?? path.relative(rootDir, filePath).replace(/\\/g, "/"),
-    sizeBytes: fs.statSync(filePath).size,
-  }));
+  return findGeneratedArtifactFiles(rootDir)
+    .filter(filePath => !isSensitiveGeneratedArtifactFile(filePath))
+    .map(filePath => ({
+      kind: classifyGeneratedArtifact(filePath),
+      path: relativeArtifactPath(rootDir, filePath) ?? path.relative(rootDir, filePath).replace(/\\/g, "/"),
+      sizeBytes: fs.statSync(filePath).size,
+    }));
 }
 
 function buildDeterministicArtifactAuditorOutput(options: {
@@ -6308,14 +7287,14 @@ function buildDeterministicArtifactAuditorOutput(options: {
     { kind: "report", required: true, label: "Controller-finalized JSON, Markdown, and HTML report exports.", source: "controller-finalization" },
     { kind: "route-map", required: true, label: "Generated route map or spec-pack route inventory.", source: "controller-finalization" },
     { kind: "remediation-pack", required: true, label: "Generated remediation package manifest for downstream fix jobs.", source: "controller-finalization" },
-    { kind: "runtime-log", required: true, label: "Runtime boot and health-check log from sandbox execution.", source: "sandbox-runtime" },
-    ...(options.runtimeMode === "browser"
-      ? [
-          { kind: "screenshot", required: true, label: "Representative screenshots captured by direct browser QA.", source: "browser-executor" },
-          { kind: "trace", required: true, label: "Trace archive captured by direct browser QA.", source: "browser-executor" },
-          { kind: "storage-state", required: true, label: "Captured browser storage state after auth and navigation attempts.", source: "browser-executor" },
-        ]
-      : []),
+          { kind: "runtime-log", required: true, label: "Runtime boot and health-check log from sandbox execution.", source: "sandbox-runtime" },
+          ...(options.runtimeMode === "browser"
+            ? [
+                { kind: "screenshot", required: true, label: "Representative screenshots captured by direct browser QA.", source: "browser-executor" },
+                { kind: "trace", required: true, label: "Trace archive captured by direct browser QA.", source: "browser-executor" },
+                { kind: "auth-coverage", required: true, label: "Redacted browser auth coverage summary without raw cookies or storage.", source: "browser-executor" },
+              ]
+            : []),
     ...(playwrightDetected
       ? [
           { kind: "validation-log", required: true, label: "Playwright preflight or suite command log.", source: "playwright-operator" },
@@ -6348,7 +7327,7 @@ function buildDeterministicArtifactAuditorOutput(options: {
     generatedArtifacts.map(artifact => artifact.path),
     normalizeStringArray([runtimeExecutionData.runtimeLog]),
     normalizeStringArray([browserData.tracePath]),
-    normalizeStringArray([browserData.capturedStorageStatePath]),
+    normalizeStringArray([browserData.authCoveragePath]),
     normalizeStringArray(browserData.pages),
     normalizeStringArray([playwrightPreflightData.logPath]),
   ).slice(0, 80);
@@ -6627,7 +7606,7 @@ function buildDeterministicStandardizedHandoff(options: {
         ? [
             { kind: "screenshot", required: true, label: "Representative browser screenshots for navigated pages." },
             { kind: "trace", required: true, label: "Playwright trace for direct browser QA." },
-            { kind: "storage-state", required: true, label: "Captured browser storage state after QA login attempts." },
+            { kind: "auth-coverage", required: true, label: "Redacted browser auth coverage summary without raw cookies or storage." },
           ]
         : []),
       ...(preflightPlan
@@ -6996,6 +7975,45 @@ async function executeNativeRole(options: {
   }
 }
 
+const hybridNativeFastPathExecutorIds = new Set<NativeExecutorId>([
+  "native-repo-inventory",
+  "native-license-policy",
+  "native-component-inventory",
+  "native-ui-label-scan",
+]);
+
+function isHybridNativeFastPathExecutorId(value: string | null): value is NativeExecutorId {
+  return Boolean(value && hybridNativeFastPathExecutorIds.has(value as NativeExecutorId));
+}
+
+function roleOutputSatisfiesContract(roleId: string, output: RoleOutput): boolean {
+  const contract = getRoleOutputContract(roleId);
+  if (!contract) {
+    return output.sections.some(section => section.status === "ready");
+  }
+  const contractSection = findRoleContractSection(output.sections, contract);
+  if (!contractSection || contractSection.status !== "ready") {
+    return false;
+  }
+  return contract.requiredDataKeys.every(key =>
+    hasMeaningfulContractValue(getNestedDataValue(contractSection.data, key)));
+}
+
+function shouldUseHybridNativeFastPath(options: {
+  role: {
+    id: string;
+    executorKind: AiRoleExecutorKind;
+    nativeExecutorId: string | null;
+  };
+  nativeOutput: RoleOutput;
+  enabled: boolean;
+}): boolean {
+  return options.enabled
+    && options.role.executorKind === "hybrid"
+    && isHybridNativeFastPathExecutorId(options.role.nativeExecutorId)
+    && roleOutputSatisfiesContract(options.role.id, options.nativeOutput);
+}
+
 async function executeRole(options: {
   jobId: string;
   role: {
@@ -7164,6 +8182,43 @@ async function executeRole(options: {
     }
   }
 
+  if (options.role.executorKind === "hybrid" && nativeOutput) {
+    const contractNativeOutput = applyRoleOutputContract(options.role.id, nativeOutput);
+    if (shouldUseHybridNativeFastPath({
+      role: options.role,
+      nativeOutput: contractNativeOutput,
+      enabled: config.hybridNativeFastPath,
+    })) {
+      await appendLog(
+        options.jobId,
+        options.logs,
+        "agent",
+        `Role ${options.role.name} used deterministic native output and skipped Codex synthesis.`,
+        "info",
+        undefined,
+        defaultVisibility,
+      );
+      await appendExecutionStepLog(options.jobId, options.logs, {
+        id: roleStepId,
+        order: roleOrder,
+        title: options.role.name,
+        stepType: "role",
+        agentId: options.agentId,
+        agentName: options.agentName,
+        roleId: options.role.id,
+        roleName: options.role.name,
+        executorKind: options.role.executorKind,
+        nativeExecutorId: options.role.nativeExecutorId,
+        status: "succeeded",
+        detail: `${contractNativeOutput.sections.length} section(s), ${contractNativeOutput.findings.length} finding(s) from deterministic native fast path`,
+        startedAt: roleStartedAt,
+        finishedAt: new Date().toISOString(),
+        durationMs: Math.max(0, new Date().getTime() - new Date(roleStartedAt).getTime()),
+      }, defaultVisibility);
+      return contractNativeOutput;
+    }
+  }
+
   if (options.role.executorKind === "native") {
     const nativeOnlyBaseOutput = nativeOutput ?? roleOutputSchema.parse({ summary: "", sections: [], findings: [] });
     const nativeOnlyOutput = options.role.id === "standardized-json-output"
@@ -7224,6 +8279,7 @@ async function executeRole(options: {
     return contractNativeOutput;
   }
 
+  const roleContext = selectRoleContext(options.role.dependsOnRoleIds, options.priorOutputs);
   const prompt = buildRolePrompt({
     agentName: options.agentName,
     roleName: options.role.name,
@@ -7239,7 +8295,7 @@ async function executeRole(options: {
       : null,
     rolePrompt: options.role.prompt,
     skills: options.role.skills,
-    priorOutputs: selectRoleContext(options.role.dependsOnRoleIds, options.priorOutputs),
+    priorOutputs: roleContext,
     learnables: options.learnables,
     nativeExecutorOutput: nativeOutput,
   });
@@ -7249,6 +8305,15 @@ async function executeRole(options: {
     prompt,
   });
 
+  await appendLog(
+    options.jobId,
+    options.logs,
+    "agent",
+    `Role ${options.role.name} prompt prepared with ${roleContext.length} dependency output(s), ${options.learnables.length} source learnable(s), ${prompt.length} character(s).`,
+    "info",
+    undefined,
+    "verbose",
+  );
   await appendLog(options.jobId, options.logs, "agent", `Running role ${options.role.name}.`, "info", undefined, defaultVisibility);
   await appendLog(
     options.jobId,
@@ -7382,6 +8447,12 @@ async function executeRole(options: {
   }
   if (run.exitCode !== 0) {
     const detail = sanitizeCodexDiagnosticText(run.stderr) || sanitizeCodexDiagnosticText(run.stdout);
+    if (isCodexAuthFailure(run)) {
+      await markCodexAuthFailure(
+        options.execution,
+        `Codex auth token expired or could not be refreshed. Reconnect Codex auth before queueing more runs.${detail ? ` ${truncateLogMessage(detail, 360)}` : ""}`,
+      );
+    }
     await appendExecutionStepLog(options.jobId, options.logs, {
       id: roleStepId,
       order: roleOrder,
@@ -8854,6 +9925,7 @@ function forwardSandboxEnvironment(dockerArgs: string[], config: ReturnType<type
     "AI_WORKER_CODEX_MAX_ATTEMPTS",
     "AI_WORKER_CODEX_RETRY_DELAY_MS",
     "AI_WORKER_CODEX_USE_OUTPUT_SCHEMA",
+    "AI_WORKER_HYBRID_NATIVE_FAST_PATH",
     "AI_WORKER_PROMPT_CAPTURE_PATH",
     "OBJECT_STORAGE_PROVIDER",
     "OBJECT_STORAGE_BUCKET",
@@ -9438,6 +10510,227 @@ export function buildArtifactAnalysisForTest(
   return buildArtifactAnalysis(handoff, artifacts);
 }
 
+export function buildGeneratedArtifactSnapshotForTest(rootDir: string): Array<{
+  kind: ArtifactReference["kind"];
+  path: string;
+  sizeBytes: number;
+}> {
+  return buildGeneratedArtifactSnapshot(rootDir);
+}
+
+export function buildCapabilityGapsForTest(options: {
+  coverageGaps: string[];
+  sections?: AnalysisReport["sections"];
+}): z.infer<typeof capabilityGapSchema>[] {
+  const handoff = standardizedAgentHandoffSchema.parse({
+    schemaVersion: "speclens.agent-handoff.v1",
+    generatedBy: {
+      agentId: "agent-test",
+      agentName: "Test agent",
+      roleId: "standardized-json-output",
+      roleName: "Standardized JSON output",
+    },
+    runtime: {
+      targets: [{
+        label: "test-app",
+        kind: "web",
+        workingDirectory: ".",
+        startCommand: "npm run start",
+        baseUrl: "http://127.0.0.1:3000",
+        healthUrls: ["http://127.0.0.1:3000"],
+        framework: "node",
+      }],
+    },
+    auth: {
+      frontend: {},
+      api: {},
+    },
+    playwright: {
+      detected: true,
+      present: true,
+      runnable: true,
+      passed: true,
+      suiteStatus: "passed",
+      readiness: "ready",
+      coverageGaps: options.coverageGaps,
+    },
+  });
+  const report = analysisReportSchema.parse({
+    id: "report-test",
+    workspaceId: "workspace-test",
+    jobId: "job-test",
+    status: "ready",
+    runtimeMode: "browser",
+    title: "Test report",
+    summary: {
+      totalFindings: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      executionCoverage: { attempted: [], skipped: [] },
+    },
+    findings: [],
+    sections: options.sections ?? [],
+    artifacts: [],
+    createdAt: new Date(0).toISOString(),
+  });
+  const artifactAnalysis = buildArtifactAnalysis(handoff, report.artifacts);
+  return buildCapabilityGaps(handoff, report, artifactAnalysis);
+}
+
+export function synthesizeLearnablesFromReportForTest(options: {
+  sections: AnalysisReport["sections"];
+  capabilityGaps?: z.infer<typeof capabilityGapSchema>[];
+}): LearnableSeed[] {
+  const report = analysisReportSchema.parse({
+    id: "report-test",
+    workspaceId: "workspace-test",
+    jobId: "job-test",
+    status: "ready",
+    runtimeMode: "browser",
+    title: "Test report",
+    summary: {
+      totalFindings: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      executionCoverage: { attempted: [], skipped: [] },
+      capabilityGaps: options.capabilityGaps ?? [],
+    },
+    findings: [],
+    sections: options.sections,
+    artifacts: [],
+    createdAt: new Date(0).toISOString(),
+  });
+  return synthesizeLearnablesFromReport(report);
+}
+
+export function formatPriorRoleOutputsForPromptForTest(priorOutputs: PriorRoleOutput[], targetRoleId?: string): string {
+  return formatPriorRoleOutputsForPrompt(priorOutputs, targetRoleId);
+}
+
+export function formatLearnablesForPromptForTest(learnables: Learnable[], targetRoleId?: string): string {
+  return formatLearnablesForPrompt(learnables, targetRoleId);
+}
+
+export function buildRoleOutputJsonSchemaForTest(): Record<string, unknown> {
+  return buildRoleOutputJsonSchema();
+}
+
+export function isCodexAuthFailureForTest(result: CodexRunResult): boolean {
+  return isCodexAuthFailure(result);
+}
+
+export function shouldUseHybridNativeFastPathForTest(options: {
+  roleId: string;
+  nativeExecutorId: string | null;
+  output: RoleOutput;
+  enabled?: boolean;
+}): boolean {
+  return shouldUseHybridNativeFastPath({
+    role: {
+      id: options.roleId,
+      executorKind: "hybrid",
+      nativeExecutorId: options.nativeExecutorId,
+    },
+    nativeOutput: applyRoleOutputContract(options.roleId, options.output),
+    enabled: options.enabled ?? true,
+  });
+}
+
+export function resolveBrowserAuthCoverageForTest(options: {
+  secrets?: Array<{
+    id?: string;
+    kind: "credential-pair" | "session-state" | "api-token";
+    value: string;
+    name?: string;
+  }>;
+  credentialLoginSucceeded?: boolean;
+  protectedRoutes?: string[];
+  navigationTargets?: Array<{ path: string; requiresAuth?: boolean }>;
+  baseUrl?: string;
+}): {
+  authenticated: boolean;
+  authCoverage: BrowserQaAuthCoverage;
+  navigationTargets: string[];
+  skippedNavigationTargets: Array<{ url: string; reason: string }>;
+} {
+  const baseUrl = options.baseUrl ?? "http://127.0.0.1:3000";
+  const handoff = standardizedAgentHandoffSchema.parse({
+    schemaVersion: "speclens.agent-handoff.v1",
+    generatedBy: {
+      agentId: "agent-test",
+      agentName: "Test agent",
+      roleId: "standardized-json-output",
+      roleName: "Standardized JSON output",
+    },
+    runtime: {
+      targets: [{
+        label: "test-app",
+        kind: "web",
+        workingDirectory: ".",
+        startCommand: "npm run start",
+        baseUrl,
+        healthUrls: [baseUrl],
+        framework: "node",
+      }],
+    },
+    auth: {
+      frontend: {
+        protectedRoutes: options.protectedRoutes ?? [],
+      },
+      api: {},
+    },
+    playwright: {
+      detected: true,
+      present: true,
+      runnable: true,
+      passed: true,
+      suiteStatus: "passed",
+      readiness: "ready",
+      navigationTargets: (options.navigationTargets ?? []).map(target => ({
+        path: target.path,
+        requiresAuth: target.requiresAuth ?? false,
+      })),
+    },
+  });
+  const secrets = (options.secrets ?? []).map((secret, index) => {
+    const resolved = {
+      id: secret.id ?? `secret_${index + 1}`,
+      kind: secret.kind,
+      value: secret.value,
+    };
+    return secret.name ? { ...resolved, name: secret.name } : resolved;
+  }) satisfies JobExecutionRecord["secrets"];
+  const sessionState = resolveSessionStateSecret(secrets);
+  const credentialSecret = resolveCredentialSecret(secrets);
+  const authState = resolveBrowserAuthState({
+    sessionState,
+    credentialSecret,
+    credentialLoginSucceeded: options.credentialLoginSucceeded ?? false,
+  });
+  const navigationPlan = buildNavigationPlan(handoff, baseUrl, { authenticated: authState.authenticated });
+  const protectedPrefixes = buildProtectedRoutePrefixes(handoff.auth.frontend.protectedRoutes);
+  const authCoverage = buildBrowserAuthCoverage({
+    secrets,
+    handoff,
+    baseUrl,
+    navigationPlan,
+    protectedPrefixes,
+    sessionState,
+    credentialSecret,
+    credentialLoginSucceeded: options.credentialLoginSucceeded ?? false,
+    authState,
+  });
+
+  return {
+    authenticated: authState.authenticated,
+    authCoverage,
+    navigationTargets: navigationPlan.queued,
+    skippedNavigationTargets: navigationPlan.skipped,
+  };
+}
+
 export function extractFindingPathsForTest(evidence: string[], explicitPaths: string[] = []): string[] {
   return extractFindingPaths(evidence, explicitPaths);
 }
@@ -9449,6 +10742,12 @@ export function buildFindingEvidenceRefsForTest(evidence: string[], explicitPath
 
 export function normalizeRoleOutputForTest(raw: unknown, roleId?: string): RoleOutput {
   return normalizeRoleOutput(raw, roleId);
+}
+
+export async function augmentWithPlaywrightPreflightForTest(options: Parameters<typeof augmentWithPlaywrightPreflight>[0]): Promise<RoleOutput> {
+  return await withExecutionRuntime({
+    appendLogs: async () => undefined,
+  }, async () => await augmentWithPlaywrightPreflight(options));
 }
 
 function getHealthRequestPath(requestUrl: string | undefined): string {
@@ -9548,13 +10847,23 @@ export function stopEmbeddedAgentWorker(): void {
 }
 
 export default {
+  augmentWithPlaywrightPreflightForTest,
   buildArtifactAnalysisForTest,
+  buildCapabilityGapsForTest,
+  buildGeneratedArtifactSnapshotForTest,
+  buildRoleOutputJsonSchemaForTest,
   buildFindingEvidenceRefsForTest,
   detectPlaywrightPreflightForTest,
   extractFindingPathsForTest,
+  formatLearnablesForPromptForTest,
+  formatPriorRoleOutputsForPromptForTest,
+  isCodexAuthFailureForTest,
   normalizeRoleOutputForTest,
+  resolveBrowserAuthCoverageForTest,
   runAgentJobForTest,
+  shouldUseHybridNativeFastPathForTest,
   startAgentLoop,
   startEmbeddedAgentWorker,
   stopEmbeddedAgentWorker,
+  synthesizeLearnablesFromReportForTest,
 };

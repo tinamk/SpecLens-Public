@@ -96,7 +96,9 @@ test.describe.serial("report remediation local", () => {
     await expect(page.getByTestId("report-remediation-changeset")).toBeVisible();
     await expect(page.getByTestId("report-open-remediation-job")).toHaveAttribute("href", new RegExp(`${remediationJobId}$`));
     await expect(page.locator('[data-testid^="report-remediation-artifact-"]')).not.toHaveCount(0);
-    const remediationCodeLink = page.locator('[data-testid^="report-open-code-"]').first();
+    const remediationPanel = page.getByTestId("report-remediation-panel");
+    await remediationPanel.scrollIntoViewIfNeeded();
+    const remediationCodeLink = remediationPanel.locator('[data-testid^="report-open-remediation-code-"]').first();
     await expect(remediationCodeLink).toHaveAttribute("href", /[?&]ref=/);
     await expect(remediationCodeLink).toHaveAttribute("href", /[?&]compare=/);
     await remediationCodeLink.click();

@@ -176,6 +176,11 @@ test.describe.serial("workspace core flows", () => {
     await page.getByTestId("workspace-runs-job-open-report").click();
     await expect(page).toHaveURL(new RegExp(`/portal/workspaces/${workspaceId}/reports/`));
     await expectReportSurface(page, { report: executionAudit.report, canMutate: true });
+    const findingsDrawer = page.getByTestId("report-findings-drawer");
+    await expect(findingsDrawer).toBeVisible();
+    if (!(await findingsDrawer.evaluate(node => (node as HTMLDetailsElement).open))) {
+      await findingsDrawer.locator("summary").click();
+    }
     const scopedCodeLinks = page.locator('[data-testid^="report-open-code-finding-"]');
     await expect(scopedCodeLinks.first()).toBeVisible();
     const sourceIdsInCodeLinks = await scopedCodeLinks.evaluateAll(links => links
