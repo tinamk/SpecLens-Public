@@ -37,4 +37,6 @@ export async function expectPrimaryPublicNav(page: Page): Promise<void> {
   await expect(page.getByTestId("public-nav-commercial")).toBeVisible();
   await expect(page.getByTestId("public-nav-terms")).toBeVisible();
   await expect(page.getByTestId("public-nav-privacy")).toBeVisible();
+  await expect(page.getByTestId("public-cta-login")).toHaveText("Log in");
+  await expect(page.getByTestId("public-cta-login")).toBeVisible();
 }

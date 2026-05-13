@@ -5045,6 +5045,7 @@
   }
 
   .site-header__actions > .button,
+  .site-header__actions > .button-secondary,
   .site-header__actions > .button-ghost {
     display: none;
   }
@@ -5077,6 +5078,29 @@
   .site-header__drawer a:hover {
     background: var(--accent-soft);
     color: var(--text);
+  }
+
+  .site-header__drawer a.button {
+    color: #fff;
+    background: var(--accent);
+    border-color: transparent;
+  }
+
+  .site-header__drawer a.button:hover {
+    color: #fff;
+    background: var(--accent-strong);
+  }
+
+  .site-header__drawer a.button-secondary {
+    color: var(--text);
+    background: var(--surface);
+    border-color: var(--line-strong);
+  }
+
+  .site-header__drawer a.button-secondary:hover {
+    color: var(--text);
+    background: var(--surface-strong);
+    border-color: var(--text-2);
   }
 
   .site-header__drawer-divider {

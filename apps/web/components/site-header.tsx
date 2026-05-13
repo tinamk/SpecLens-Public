@@ -44,7 +44,7 @@ export function SiteHeader() {
 
         <div className="site-header__actions">
           <ThemeSwitcher compact />
-          <Link className="button-ghost" data-testid="public-cta-login" href="/login">Open hosted portal</Link>
+          <Link className="button-secondary" data-testid="public-cta-login" href="/login">Log in</Link>
           <Link className="button" data-testid="public-cta-start-pro" href="/pricing">See hosted plans</Link>
           <button
             aria-controls="public-mobile-nav"
@@ -79,7 +79,7 @@ export function SiteHeader() {
           </Link>
         ))}
         <span className="site-header__drawer-divider" />
-        <Link className="button-ghost" data-testid="public-cta-login-mobile" href="/login">Open hosted portal</Link>
+        <Link className="button-secondary" data-testid="public-cta-login-mobile" href="/login">Log in</Link>
         <Link className="button" data-testid="public-cta-start-pro-mobile" href="/pricing">See hosted plans</Link>
       </nav>
     </header>
