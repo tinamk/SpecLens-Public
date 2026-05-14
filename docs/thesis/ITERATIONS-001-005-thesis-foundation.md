@@ -79,7 +79,7 @@ Taken together, the five iterations show a coherent design-science trajectory:
 
 Iteration 1 is best understood as the original proof-of-concept stage. The artifact was designed around the client case and proved that SpecLens could function as a spec-driven analysis pipeline that generated reports, collected screenshot evidence, and archived runs. This was the baseline that demonstrated feasibility.
 
-The strength of this baseline was concreteness. The artifact was not theoretical. It already contained CLI-style primitives for spec linting, task extraction, run archiving, and dashboard generation. Archived client reports under `reports/client/` were retained as explicit demonstration evidence. In a thesis, this matters because Iteration 1 gives the project an empirical starting point rather than a purely conceptual one.
+The strength of this baseline was concreteness. The artifact was not theoretical. It already contained CLI-style primitives for spec linting, task extraction, run archiving, and dashboard generation. client report artifacts were produced as explicit demonstration evidence during the first iteration, while the generated company report files are not retained in the active source tree. In a thesis, this matters because Iteration 1 gives the project an empirical starting point rather than a purely conceptual one.
 
 At the same time, the baseline was heavily shaped by the client context. The main analysis flow assumed:
 
@@ -103,7 +103,7 @@ From a thesis perspective, Iteration 1 demonstrates the earliest artifact identi
 
 ### Demonstration And Evidence
 
-The main evidence model in Iteration 1 was archived run output. The repo still treats `reports/client/` as historical evidence from this baseline. This means Iteration 1 is not merely described; it is preserved as artifact output.
+The main evidence model in Iteration 1 was archived run output. The repo still treats the client specs, docs, and implementation path as historical evidence from this baseline, without retaining generated company report artifacts in source. This means Iteration 1 is not merely described; it remains part of the project trace.
 
 That archival strategy is important for the thesis narrative. It shows that the project did not discard earlier evidence when it changed direction. Instead, Iteration 1 remained part of the research trace.
 

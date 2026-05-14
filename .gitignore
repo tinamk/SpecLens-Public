@@ -46,6 +46,7 @@ deploy/digitalocean/.env.single-node
 
 # Generated outputs
 packages/db/generated
+/archive/legacy-local-first/reports/client/
 
 
 
