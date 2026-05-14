@@ -39,6 +39,7 @@ playwright-report
 .env.local
 .env.*.local
 deploy/digitalocean/.env.single-node
+deploy/digitalocean/env.single-node
 .speclens/
 .hermes/pr-autopilot/
 *.secrets
@@ -46,7 +47,8 @@ deploy/digitalocean/.env.single-node
 
 # Generated outputs
 packages/db/generated
-/archive/legacy-local-first/reports/client/
+/reports/
+/archive/legacy-local-first/reports/
 
 
 
